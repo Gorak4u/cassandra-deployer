@@ -185,7 +185,7 @@ export const puppetCode = {
       '      yumrepo { \'cassandra\':',
       '        descr    => "Apache Cassandra ${cassandra::cassandra_version} for EL${os_release_major}",',
       '        baseurl  => $cassandra::repo_baseurl,',
-      '        gpgcheck => 0,',
+      '        gpgcheck => 1,',
       '        enabled  => 1,',
       '        gpgkey   => $cassandra::repo_gpgkey,',
       '        repo_gpgcheck => 0,',
@@ -723,7 +723,5 @@ export const puppetCode = {
     'jamm-0.3.2.jar': '', // Placeholder for binary file
   },
 };
-
-    
 
     
