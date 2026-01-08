@@ -1,653 +1,509 @@
 
 export const puppetCode = {
-  root: {
-    'metadata.json': [
-      '{',
-      '  "name": "ggonda-profile_ggonda_cassandr",',
-      '  "version": "1.0.0",',
-      '  "author": "ggonda",',
-      '  "summary": "Production-ready Puppet profile to manage Apache Cassandra at scale.",',
-      '  "license": "Apache-2.0",',
-      '  "source": "https://github.com/ggonda/profile_ggonda_cassandra",',
-      '  "project_page": "https://github.com/ggonda/profile_ggonda_cassandra",',
-      '  "issues_url": "https://github.com/ggonda/profile_ggonda_cassandra/issues",',
-      '  "dependencies": [',
-      '  ],',
-      '  "operatingsystem_support": [',
-      '    {',
-      '      "operatingsystem": "RedHat",',
-      '      "operatingsystemrelease": [ "7", "8", "9" ]',
-      '    },',
-      '    {',
-      '      "operatingsystem": "CentOS",',
-      '      "operatingsystemrelease": [ "7", "8", "9" ]',
-      '    },',
-      '    {',
-      '      "operatingsystem": "Debian",',
-      '      "operatingsystemrelease": [ "9", "10", "11" ]',
-      '    },',
-      '    {',
-      '      "operatingsystem": "Ubuntu",',
-      '      "operatingsystemrelease": [ "18.04", "20.04", "22.04" ]',
-      '    }',
-      '  ],',
-      '  "requirements": [',
-      '    {',
-      '      "name": "puppet",',
-      '      "version_requirement": ">= 6.0.0 < 8.0.0"',
-      '    }',
-      '  ]',
-      '}',
-    ].join('\n'),
+  cassandra_pfpt: {
+    'metadata.json': `
+{
+  "name": "ggonda-cassandra_pfpt",
+  "version": "1.0.0",
+  "author": "ggonda",
+  "summary": "Puppet component module to manage Apache Cassandra.",
+  "license": "Apache-2.0",
+  "source": "",
+  "project_page": "",
+  "issues_url": "",
+  "dependencies": [],
+  "operatingsystem_support": [
+    { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
+    { "operatingsystem": "CentOS", "operatingsystemrelease": [ "7", "8", "9" ] },
+    { "operatingsystem": "Debian", "operatingsystemrelease": [ "9", "10", "11" ] },
+    { "operatingsystem": "Ubuntu", "operatingsystemrelease": [ "18.04", "20.04", "22.04" ] }
+  ],
+  "requirements": [
+    { "name": "puppet", "version_requirement": ">= 6.0.0 < 8.0.0" }
+  ]
+}
+      `.trim(),
+    manifests: {
+      'init.pp': `
+# @summary Main component class for managing Cassandra.
+# This class orchestrates the installation, configuration, and service management.
+class cassandra_pfpt (
+  # Package and Service Parameters
+  String $cassandra_version                 = '4.1.10-1',
+  String $java_version                      = '11',
+  String $java_package_version              = '',
+  Boolean $manage_repo                       = true,
+  String $user                               = 'cassandra',
+  String $group                              = 'cassandra',
+  String $repo_baseurl                       = "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/",
+  String $repo_gpgkey                        = 'https://downloads.apache.org/cassandra/KEYS',
+  Array[String] $package_dependencies       = ['cyrus-sasl-plain', 'jemalloc'],
+
+  # Configuration Parameters
+  String $cluster_name                      = 'Production Cluster',
+  String $seeds                             = $facts['networking']['ip'],
+  String $listen_address                    = $facts['networking']['ip'],
+  String $datacenter                        = 'dc1',
+  String $rack                              = 'rack1',
+  String $data_dir                          = '/var/lib/cassandra/data',
+  String $commitlog_dir                     = '/var/lib/cassandra/commitlog',
+  String $hints_directory                   = '/var/lib/cassandra/hints',
+  String $max_heap_size                     = '4G',
+  String $gc_type                           = 'G1GC',
+  String $cassandra_password                = 'cassandra',
+  String $replace_address                   = '',
+
+  # OS Tuning Parameters
+  Boolean $disable_swap                     = true,
+  Hash $sysctl_settings                     = {},
+  Hash $limits_settings                     = { 'nofile' => 100000, 'nproc' => 32768 },
+
+  # Script and File Parameters
+  String $manage_bin_dir                    = '/usr/local/bin',
+  String $jamm_source                       = 'puppet:///modules/cassandra_pfpt/files/jamm-0.3.2.jar',
+  String $jamm_target                       = '/usr/share/cassandra/lib/jamm-0.3.2.jar',
+
+  # Service Management
+  Boolean $enable_range_repair              = false
+) {
+
+  contain cassandra_pfpt::java
+  contain cassandra_pfpt::install
+  contain cassandra_pfpt::config
+  contain cassandra_pfpt::service
+
+  Class['cassandra_pfpt::java']
+  -> Class['cassandra_pfpt::install']
+  -> Class['cassandra_pfpt::config']
+  ~> Class['cassandra_pfpt::service']
+}
+        `.trim(),
+      'java.pp': `
+# @summary Manages Java installation for Cassandra.
+class cassandra_pfpt::java inherits cassandra_pfpt {
+  $java_package_name = $facts['os']['family'] ? {
+    'RedHat' => "java-\${java_version}-openjdk-headless",
+    'Debian' => "openjdk-\${java_version}-jre-headless",
+    default  => fail("Unsupported OS family for Java installation: \${facts['os']['family']}"),
+  }
+
+  $java_ensure_version = if $java_package_version and $java_package_version != '' {
+    $java_package_version
+  } else {
+    'present'
+  }
+
+  package { $java_package_name:
+    ensure  => $java_ensure_version,
+  }
+}
+        `.trim(),
+      'install.pp': `
+# @summary Handles package installation for Cassandra and dependencies.
+class cassandra_pfpt::install inherits cassandra_pfpt {
+
+  user { $user:
+    ensure     => 'present',
+    system     => true,
+  }
+
+  group { $group:
+    ensure => 'present',
+    system => true,
+  }
+
+  if $manage_repo {
+    if $facts['os']['family'] == 'RedHat' {
+      yumrepo { 'cassandra':
+        descr    => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
+        baseurl  => $repo_baseurl,
+        gpgcheck => 1,
+        enabled  => 1,
+        gpgkey   => $repo_gpgkey,
+        require  => Group[$group], # Ensure group exists before repo setup
+      }
+    }
+  }
+
+  package { $package_dependencies:
+    ensure  => 'present',
+    require => Class['cassandra_pfpt::java'],
+  }
+
+  package { 'cassandra':
+    ensure  => $cassandra_version,
+    require => [ Class['cassandra_pfpt::java'], User[$user] ],
+  }
+
+  package { 'cassandra-tools':
+    ensure  => $cassandra_version,
+    require => Package['cassandra'],
+  }
+}
+        `.trim(),
+      'config.pp': `
+# @summary Manages Cassandra configuration files and OS tuning.
+class cassandra_pfpt::config inherits cassandra_pfpt {
+  file { [$data_dir, $commitlog_dir, $hints_directory]:
+    ensure  => 'directory',
+    owner   => $user,
+    group   => $group,
+    mode    => '0700',
+  }
+
+  file { '/root/.cassandra':
+    ensure => 'directory',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0700',
+  }
+
+  file { $jamm_target:
+    ensure  => 'file',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    source  => $jamm_source,
+  }
+
+  file { '/etc/cassandra/conf/cassandra.yaml':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/cassandra.yaml.erb'),
+    owner   => $user,
+    group   => $group,
+    mode    => '0644',
+  }
+
+  file { '/etc/cassandra/conf/cassandra-rackdc.properties':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/cassandra-rackdc.properties.erb'),
+    owner   => $user,
+    group   => $group,
+    mode    => '0644',
+  }
+
+  file { '/etc/cassandra/conf/jvm-server.options':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/jvm-server.options.erb'),
+    owner   => $user,
+    group   => $group,
+    mode    => '0644',
+  }
+
+  file { '/root/.cassandra/cqlshrc':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/cqlshrc.erb'),
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0600',
+    require => File['/root/.cassandra'],
+  }
+
+  file { $manage_bin_dir:
+    ensure => 'directory',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0755',
+  }
+
+  [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh', 'repair-node.sh',
+    'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
+    'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
+    'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
+    'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
+    'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh' ].each |$script| {
+    file { "\${manage_bin_dir}/\${script}":
+      ensure  => 'file',
+      source  => "puppet:///modules/cassandra_pfpt/scripts/\${script}",
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0755',
+      require => File[$manage_bin_dir],
+    }
+  }
+
+  if $disable_swap {
+    exec { 'swapoff -a':
+      command => '/sbin/swapoff -a',
+      unless  => '/bin/cat /proc/swaps | /bin/grep -q "^/dev" -v',
+      path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
+    }
+    augeas { 'fstab_no_swap':
+      context => '/files/etc/fstab',
+      changes => 'set */[spec="swap"]/#comment "swap"',
+      onlyif  => 'get */[spec="swap"] != ""',
+      require => Exec['swapoff -a'],
+    }
+    $merged_sysctl = $sysctl_settings + { 'vm.swappiness' => 0 }
+  } else {
+    $merged_sysctl = $sysctl_settings
+  }
+
+  file { '/etc/sysctl.d/99-cassandra.conf':
+    ensure  => 'file',
+    content => epp('cassandra_pfpt/sysctl.conf.epp', { 'settings' => $merged_sysctl }),
+    notify  => Exec['apply_sysctl_cassandra'],
+  }
+
+  exec { 'apply_sysctl_cassandra':
+    command     => '/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf',
+    path        => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
+    refreshonly => true,
+  }
+
+  file { '/etc/security/limits.d/cassandra.conf':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/cassandra_limits.conf.erb'),
+  }
+}
+        `.trim(),
+      'service.pp': `
+# @summary Manages the Cassandra service.
+class cassandra_pfpt::service inherits cassandra_pfpt {
+  service { 'cassandra':
+    ensure     => running,
+    enable     => true,
+    hasstatus  => true,
+    hasrestart => true,
+  }
+
+  $change_password_cql = '/root/change_password.cql'
+  file { $change_password_cql:
+    ensure  => file,
+    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';\\n",
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0600',
+  }
+
+  exec { 'change_cassandra_password':
+    command   => "cqlsh -u cassandra -p cassandra -f \${change_password_cql}",
+    path      => ['/bin/', '/usr/bin/'],
+    tries     => 12,
+    try_sleep => 10,
+    unless    => "cqlsh -u cassandra -p '\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \${listen_address} >/dev/null 2>&1",
+    require   => Service['cassandra'],
+  }
+
+  if $enable_range_repair {
+    file { '/etc/systemd/system/range-repair.service':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/range-repair.service.erb'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      notify  => Exec['systemctl_daemon_reload_range_repair'],
+    }
+
+    exec { 'systemctl_daemon_reload_range_repair':
+      command     => '/bin/systemctl daemon-reload',
+      path        => ['/usr/bin', '/bin'],
+      refreshonly => true,
+    }
+
+    service { 'range-repair':
+      ensure    => 'running',
+      enable    => true,
+      hasstatus => true,
+      subscribe => File['/etc/systemd/system/range-repair.service'],
+    }
+  }
+}
+        `.trim(),
+      'firewall.pp': `
+# @summary Placeholder for managing firewall rules for Cassandra.
+class cassandra_pfpt::firewall {
+  # This is a placeholder for firewall rules.
+  # Implementation would go here, e.g., using puppetlabs/firewall module.
+}
+`.trim(),
+    },
+    templates: {
+      'cassandra.yaml.erb': `
+# cassandra.yaml
+# Generated by Puppet from cassandra_pfpt/cassandra.yaml.erb.
+cluster_name: '<%= @cluster_name %>'
+num_tokens: 256
+partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+data_file_directories:
+    - '<%= @data_dir %>'
+commitlog_directory: '<%= @commitlog_dir %>'
+saved_caches_directory: /var/lib/cassandra/saved_caches
+hints_directory: '<%= @hints_directory %>'
+seed_provider:
+    - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+      parameters:
+          - seeds: "<%= @seeds %>"
+listen_address: '<%= @listen_address %>'
+rpc_address: '<%= @listen_address %>'
+native_transport_port: 9042
+endpoint_snitch: GossipingPropertyFileSnitch
+authenticator: PasswordAuthenticator
+authorizer: CassandraAuthorizer
+# Add other cassandra.yaml settings here
+        `.trim(),
+      'cassandra-rackdc.properties.erb': `
+# cassandra-rackdc.properties
+# Generated by Puppet from cassandra_pfpt/cassandra-rackdc.properties.erb
+dc=<%= @datacenter %>
+rack=<%= @rack %>
+        `.trim(),
+      'jvm-server.options.erb': `
+# jvm-server.options
+# Generated by Puppet from cassandra_pfpt/jvm-server.options.erb
+-Xms<%= @max_heap_size %>
+-Xmx<%= @max_heap_size %>
+<% if @gc_type == 'G1GC' %>
+-XX:+UseG1GC
+<% end %>
+<% if @replace_address && !@replace_address.empty? %>
+-Dcassandra.replace_address_first_boot=<%= @replace_address %>
+<% end %>
+# Add other JVM options here
+        `.trim(),
+      'cqlshrc.erb': `
+# cqlshrc
+# Generated by Puppet from cassandra_pfpt/cqlshrc.erb
+[authentication]
+username = cassandra
+password = <%= @cassandra_password %>
+[connection]
+hostname = <%= @listen_address %>
+port = 9042
+        `.trim(),
+      'range-repair.service.erb': `
+[Unit]
+Description=Cassandra Range Repair Service
+[Service]
+Type=simple
+User=cassandra
+Group=cassandra
+ExecStart=/usr/local/bin/range-repair.sh
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+        `.trim(),
+      'cassandra_limits.conf.erb': `
+# /etc/security/limits.d/cassandra.conf
+# Generated by Puppet from cassandra_pfpt/cassandra_limits.conf.erb
+<% @limits_settings.each do |limit, value| -%>
+<%= @user %> - <%= limit %> <%= value %>
+<% end -%>
+        `.trim(),
+      'sysctl.conf.epp': `
+# /etc/sysctl.d/99-cassandra.conf
+# Generated by Puppet from cassandra_pfpt/sysctl.conf.epp
+<% $settings.each |$key, $value| -%>
+<%= $key %> = <%= $value %>
+<% end -%>
+        `.trim(),
+    },
+    scripts: {
+      'cassandra-upgrade-precheck.sh': '#!/bin/bash\n# Placeholder for cassandra-upgrade-precheck.sh\necho "Cassandra Upgrade Pre-check Script"',
+      'cluster-health.sh': '#!/bin/bash\nnodetool status',
+      'repair-node.sh': '#!/bin/bash\nnodetool repair -pr',
+      'drain-node.sh': '#!/bin/bash\nnodetool drain',
+      'cleanup-node.sh': '#!/bin/bash\necho "Cleanup Node Script"',
+      'take-snapshot.sh': '#!/bin/bash\necho "Take Snapshot Script"',
+      'rebuild-node.sh': '#!/bin/bash\necho "Rebuild Node Script"',
+      'garbage-collect.sh': '#!/bin/bash\necho "Garbage Collect Script"',
+      'assassinate-node.sh': '#!/bin/bash\necho "Assassinate Node Script"',
+      'upgrade-sstables.sh': '#!/bin/bash\necho "Upgrade SSTables Script"',
+      'backup-to-s3.sh': '#!/bin/bash\necho "Backup to S3 Script"',
+      'prepare-replacement.sh': '#!/bin/bash\necho "Prepare Replacement Script"',
+      'version-check.sh': '#!/bin/bash\necho "Version Check Script"',
+      'cassandra_range_repair.py': '#!/usr/bin/env python3\nprint("Cassandra Range Repair Python Script")',
+      'range-repair.sh': '#!/bin/bash\necho "Range Repair Script"',
+      'robust_backup.sh': '#!/bin/bash\necho "Robust Backup Script Placeholder"',
+      'restore_from_backup.sh': '#!/bin/bash\necho "Restore from Backup Script Placeholder"',
+      'node_health_check.sh': '#!/bin/bash\necho "Node Health Check Script Placeholder"',
+      'rolling_restart.sh': '#!/bin/bash\necho "Rolling Restart Script Placeholder"',
+    },
+    files: {
+      'jamm-0.3.2.jar': '', // Placeholder for binary file
+    },
   },
-  manifests: {
-    'init.pp': [
-      '# @summary The main profile class for managing Cassandra.',
-      '# This profile should be included on any node. It gathers configuration',
-      '# from Hiera and passes it to the component classes.',
-      'class profile_ggonda_cassandr {',
-      '  $cassandra_version                 = lookup(\'profile_ggonda_cassandr::cassandra_version\', { \'default_value\' => \'4.1.10-1\' })',
-      '  $java_version                      = lookup(\'profile_ggonda_cassandr::java_version\', { \'default_value\' => \'11\' })',
-      '  $java_package_version              = lookup(\'profile_ggonda_cassandr::java_package_version\', { \'default_value\' => \'\' })',
-      '  $cluster_name                      = lookup(\'profile_ggonda_cassandr::cluster_name\', { \'default_value\' => \'Production Cluster\' })',
-      '  $seeds                             = lookup(\'profile_ggonda_cassandr::seeds\', { \'default_value\' => $facts[\'networking\'][\'ip\'] })',
-      '  $listen_address                    = lookup(\'profile_ggonda_cassandr::listen_address\', { \'default_value\' => $facts[\'networking\'][\'ip\'] })',
-      '  $use_java11                        = lookup(\'profile_ggonda_cassandr::use_java11\', { \'default_value\' => true })',
-      '  $use_g1_gc                         = lookup(\'profile_ggonda_cassandr::use_g1_gc\', { \'default_value\' => true })',
-      '  $use_shenandoah_gc                 = lookup(\'profile_ggonda_cassandr::use_shenandoah_gc\', { \'default_value\' => false })',
-      '  $racks                             = lookup(\'profile_ggonda_cassandr::racks\', { \'default_value\' => {} })',
-      '  $datacenter                        = lookup(\'profile_ggonda_cassandr::datacenter\', { \'default_value\' => \'dc1\' })',
-      '  $rack                              = lookup(\'profile_ggonda_cassandr::rack\', { \'default_value\' => \'rack1\' })',
-      '  $cassandra_password                = lookup(\'profile_ggonda_cassandr::cassandra_password\', { \'default_value\' => \'cassandra\' })',
-      '  $max_heap_size                     = lookup(\'profile_ggonda_cassandr::max_heap_size\', { \'default_value\' => \'4G\' })',
-      '  $gc_type                           = lookup(\'profile_ggonda_cassandr::gc_type\', { \'default_value\' => \'G1GC\' })',
-      '  $data_dir                          = lookup(\'profile_ggonda_cassandr::data_dir\', { \'default_value\' => \'/var/lib/cassandra/data\' })',
-      '  $commitlog_dir                     = lookup(\'profile_ggonda_cassandr::commitlog_dir\', { \'default_value\' => \'/var/lib/cassandra/commitlog\' })',
-      '  $hints_directory                   = lookup(\'profile_ggonda_cassandr::hints_directory\', { \'default_value\' => \'/var/lib/cassandra/hints\' })',
-      '  $disable_swap                      = lookup(\'profile_ggonda_cassandr::disable_swap\', { \'default_value\' => true })',
-      '  $replace_address                   = lookup(\'profile_ggonda_cassandr::replace_address\', { \'default_value\' => \'\' })',
-      '  $enable_range_repair               = lookup(\'profile_ggonda_cassandr::enable_range_repair\', { \'default_value\' => false })',
-      '  $ssl_enabled                       = lookup(\'profile_ggonda_cassandr::ssl_enabled\', { \'default_value\' => false })',
-      '  $target_dir                        = lookup(\'profile_ggonda_cassandr::target_dir\', { \'default_value\' => \'/usr/local/bin\' })',
-      '  $keystore_path                     = lookup(\'profile_ggonda_cassandr::keystore_path\', { \'default_value\' => \'/etc/cassandra/keystore.jks\' })',
-      '  $keystore_password                 = lookup(\'profile_ggonda_cassandr::keystore_password\', { \'default_value\' => \'cassandra\' })',
-      '  $truststore_path                   = lookup(\'profile_ggonda_cassandr::truststore_path\', { \'default_value\' => \'/etc/cassandra/truststore.jks\' })',
-      '  $truststore_password               = lookup(\'profile_ggonda_cassandr::truststore_password\', { \'default_value\' => \'cassandra\' })',
-      '  $internode_encryption              = lookup(\'profile_ggonda_cassandr::internode_encryption\', { \'default_value\' => \'all\' })',
-      '  $internode_require_client_auth     = lookup(\'profile_ggonda_cassandr::internode_require_client_auth\', { \'default_value\' => true })',
-      '  $client_optional                   = lookup(\'profile_ggonda_cassandr::client_optional\', { \'default_value\' => false })',
-      '  $client_require_client_auth        = lookup(\'profile_ggonda_cassandr::client_require_client_auth\', { \'default_value\' => false })',
-      '  $client_keystore_path              = lookup(\'profile_ggonda_cassandr::client_keystore_path\', { \'default_value\' => \'/etc/cassandra/keystore.jks\' })',
-      '  $client_truststore_path            = lookup(\'profile_ggonda_cassandr::client_truststore_path\', { \'default_value\' => \'/etc/cassandra/truststore.jks\' })',
-      '  $client_truststore_password        = lookup(\'profile_ggonda_cassandr::client_truststore_password\', { \'default_value\' => \'cassandra\' })',
-      '  $tls_protocol                      = lookup(\'profile_ggonda_cassandr::tls_protocol\', { \'default_value\' => \'TLS\' })',
-      '  $tls_algorithm                     = lookup(\'profile_ggonda_cassandr::tls_algorithm\', { \'default_value\' => \'SunX509\' })',
-      '  $store_type                        = lookup(\'profile_ggonda_cassandr::store_type\', { \'default_value\' => \'JKS\' })',
-      '  $concurrent_compactors             = lookup(\'profile_ggonda_cassandr::concurrent_compactors\', { \'default_value\' => 4 })',
-      '  $compaction_throughput_mb_per_sec  = lookup(\'profile_ggonda_cassandr::compaction_throughput_mb_per_sec\', { \'default_value\' => 16 })',
-      '  $tombstone_warn_threshold          = lookup(\'profile_ggonda_cassandr::tombstone_warn_threshold\', { \'default_value\' => 1000 })',
-      '  $tombstone_failure_threshold       = lookup(\'profile_ggonda_cassandr::tombstone_failure_threshold\', { \'default_value\' => 100000 })',
-      '  $sysctl_settings                    = lookup(\'profile_ggonda_cassandr::sysctl_settings\', { \'default_value\' => {} })',
-      '  $limits_settings                    = lookup(\'profile_ggonda_cassandr::limits_settings\', { \'default_value\' => { \'nofile\' => 100000, \'nproc\' => 32768 } })',
-      '  $manage_repo                       = lookup(\'profile_ggonda_cassandr::manage_repo\', { \'default_value\' => true })',
-      '  $user                               = lookup(\'profile_ggonda_cassandr::user\', { \'default_value\' => \'cassandra\' })',
-      '  $group                              = lookup(\'profile_ggonda_cassandr::group\', { \'default_value\' => \'cassandra\' })',
-      '  $repo_baseurl                       = lookup(\'profile_ggonda_cassandr::repo_baseurl\', { \'default_value\' => "https://downloads.apache.org/cassandra/redhat/${facts[\'os\'][\'release\'][\'major\']}/" })',
-      '  $repo_gpgkey                        = lookup(\'profile_ggonda_cassandr::repo_gpgkey\', { \'default_value\' => \'https://downloads.apache.org/cassandra/KEYS\' })',
-      '  $package_dependencies               = lookup(\'profile_ggonda_cassandr::package_dependencies\', { \'default_value\' => [\'cyrus-sasl-plain\', \'jemalloc\'] })',
-      '  $manage_bin_dir                     = lookup(\'profile_ggonda_cassandr::manage_bin_dir\', { \'default_value\' => \'/usr/local/bin\' })',
-      '  $change_password_cql                = lookup(\'profile_ggonda_cassandr::change_password_cql\', { \'default_value\' => \'/root/change_password.cql\' })',
-      '  $cqlsh_path_env                     = lookup(\'profile_ggonda_cassandr::cqlsh_path_env\', { \'default_value\' => [\'/bin/\', \'/usr/bin/\'] })',
-      '  $jamm_target                        = lookup(\'profile_ggonda_cassandr::jamm_target\', { \'default_value\' => \'/usr/share/cassandra/lib/jamm-0.3.2.jar\' })',
-      '  $jamm_source                        = lookup(\'profile_ggonda_cassandr::jamm_source\', { \'default_value\' => \'puppet:///modules/profile_ggonda_cassandr/files/jamm-0.3.2.jar\' })',
-      '',
-      '  contain profile_ggonda_cassandr::config',
-      '}',
-    ].join('\n'),
-    'cassandra.pp': null,
-    'params.pp': null,
-    'config.pp': [
-      '# @summary Main component class for managing Cassandra configuration and resources.',
-      'class profile_ggonda_cassandr::config {',
-      '  contain profile_ggonda_cassandr::java',
-      '  contain profile_ggonda_cassandr::install',
-      '  contain profile_ggonda_cassandr::service',
-      '',
-      '  # This class contains the main logic and includes the other component classes.',
-      '  file { [$profile_ggonda_cassandr::data_dir, $profile_ggonda_cassandr::commitlog_dir, $profile_ggonda_cassandr::hints_directory]:',
-      '    ensure  => \'directory\',',
-      '    owner   => $profile_ggonda_cassandr::user,',
-      '    group   => $profile_ggonda_cassandr::group,',
-      '    mode    => \'0700\',',
-      '    require => Class[\'profile_ggonda_cassandr::install\'], # Ensure user/group exist',
-      '  }',
-      '',
-      '  # Create .cassandra directory for cqlshrc',
-      '  file { \'/root/.cassandra\':',
-      '    ensure => \'directory\',',
-      '    owner  => \'root\',',
-      '    group  => \'root\',',
-      '    mode   => \'0700\',',
-      '  }',
-      '',
-      '  file { $profile_ggonda_cassandr::jamm_target:',
-      '    ensure  => \'file\',',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '    mode    => \'0644\',',
-      '    source  => $profile_ggonda_cassandr::jamm_source,',
-      '    require => Class[\'profile_ggonda_cassandr::install\'],',
-      '  }',
-      '',
-      '  # Cassandra configuration files',
-      '  file { \'/etc/cassandra/conf/cassandra.yaml\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/cassandra.yaml.erb\'),',
-      '    owner   => $profile_ggonda_cassandr::user,',
-      '    group   => $profile_ggonda_cassandr::group,',
-      '    mode    => \'0644\',',
-      '    require => Class[\'profile_ggonda_cassandr::install\'],',
-      '  }',
-      '',
-      '  file { \'/etc/cassandra/conf/cassandra-rackdc.properties\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/cassandra-rackdc.properties.erb\'),',
-      '    owner   => $profile_ggonda_cassandr::user,',
-      '    group   => $profile_ggonda_cassandr::group,',
-      '    mode    => \'0644\',',
-      '    require => Class[\'profile_ggonda_cassandr::install\'],',
-      '  }',
-      '',
-      '  file { \'/etc/cassandra/conf/jvm-server.options\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/jvm-server.options.erb\'),',
-      '    owner   => $profile_ggonda_cassandr::user,',
-      '    group   => $profile_ggonda_cassandr::group,',
-      '    mode    => \'0644\',',
-      '    require => Class[\'profile_ggonda_cassandr::install\'],',
-      '  }',
-      '',
-      '  file { \'/root/.cassandra/cqlshrc\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/cqlshrc.erb\'),',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '    mode    => \'0600\',',
-      '    require => File[\'/root/.cassandra\'],',
-      '  }',
-      '',
-      '  # Deploy management scripts',
-      '  file { $profile_ggonda_cassandr::manage_bin_dir:',
-      '    ensure => \'directory\',',
-      '    owner  => \'root\',',
-      '    group  => \'root\',',
-      '    mode   => \'0755\',',
-      '  }',
-      '',
-      '  [ \'cassandra-upgrade-precheck.sh\', \'cluster-health.sh\', \'repair-node.sh\',',
-      '    \'cleanup-node.sh\', \'take-snapshot.sh\', \'drain-node.sh\', \'rebuild-node.sh\',',
-      '    \'garbage-collect.sh\', \'assassinate-node.sh\', \'upgrade-sstables.sh\',',
-      '    \'backup-to-s3.sh\', \'prepare-replacement.sh\', \'version-check.sh\',',
-      '    \'cassandra_range_repair.py\', \'range-repair.sh\', \'robust_backup.sh\',',
-      '    \'restore_from_backup.sh\', \'node_health_check.sh\', \'rolling_restart.sh\' ].each |$script| {',
-      '    file { "${profile_ggonda_cassandr::manage_bin_dir}/${script}":',
-      '      ensure  => \'file\',',
-      '      source  => "puppet:///modules/profile_ggonda_cassandr/scripts/${script}",',
-      '      owner   => \'root\',',
-      '      group   => \'root\',',
-      '      mode    => \'0755\',',
-      '    }',
-      '  }',
-      '',
-      '  # OS Tuning for Cassandra',
-      '  if $profile_ggonda_cassandr::disable_swap {',
-      '    # Disable currently running swap',
-      '    exec { \'swapoff -a\':',
-      '      command  => \'/sbin/swapoff -a\',',
-      '      unless   => \'/bin/cat /proc/swaps | /bin/grep -q "^/dev" -v\',',
-      '      path     => [\'/usr/bin\', \'/usr/sbin\', \'/bin\', \'/sbin\'],',
-      '    }',
-      '    # Permanently disable swap in fstab',
-      '    augeas { \'fstab_no_swap\':',
-      '      context => \'/files/etc/fstab\',',
-      '      changes => \'set */[spec="swap"]/#comment "swap"\',',
-      '      onlyif  => \'get */[spec="swap"] != ""\',',
-      '      require => Exec[\'swapoff -a\'],',
-      '    }',
-      '    $merged_sysctl = $profile_ggonda_cassandr::sysctl_settings + { \'vm.swappiness\' => 0 }',
-      '  } else {',
-      '    $merged_sysctl = $profile_ggonda_cassandr::sysctl_settings',
-      '  }',
-      '',
-      '  file { \'/etc/sysctl.d/99-cassandra.conf\':',
-      '    ensure  => \'file\',',
-      '    content => epp(\'profile_ggonda_cassandr/sysctl.conf.epp\', { \'settings\' => $merged_sysctl }),',
-      '    mode    => \'0644\',',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '    notify  => Exec[\'apply_sysctl_cassandra\'],',
-      '  }',
-      '',
-      '  exec { \'apply_sysctl_cassandra\':',
-      '    command     => \'/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf\',',
-      '    path        => [\'/usr/bin\', \'/usr/sbin\', \'/bin\', \'/sbin\'],',
-      '    refreshonly => true,',
-      '  }',
-      '',
-      '  file { \'/etc/security/limits.d/cassandra.conf\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/cassandra_limits.conf.erb\'),',
-      '    mode    => \'0644\',',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '  }',
-      '}',
-    ].join('\n'),
-    'install.pp': [
-      '# @summary Handles package installation for Cassandra and dependencies.',
-      'class profile_ggonda_cassandr::install inherits profile_ggonda_cassandr {',
-      '',
-      '  # Ensure Cassandra user and group exist before anything else',
-      '  user { $user:',
-      '    ensure     => \'present\',',
-      '    system     => true,',
-      '  }',
-      '',
-      '  group { $group:',
-      '    ensure => \'present\',',
-      '    system => true,',
-      '  }',
-      '',
-      '  # YUM Repo for Cassandra',
-      '  if $manage_repo {',
-      '    if $facts[\'os\'][\'family\'] == \'RedHat\' {',
-      '      $os_release_major = regsubst($facts[\'os\'][\'release\'][\'major\'], \'^(\\\\d+).*$\', \'\\\\1\')',
-      '      yumrepo { \'cassandra\':',
-      '        descr    => "Apache Cassandra ${cassandra_version} for EL${os_release_major}",',
-      '        baseurl  => $repo_baseurl,',
-      '        gpgcheck => 1,',
-      '        enabled  => 1,',
-      '        gpgkey   => $repo_gpgkey,',
-      '        repo_gpgcheck => 0,',
-      '        skip_if_unavailable => 1,',
-      '        priority => 99,',
-      '        sslverify => 1,',
-      '      }',
-      '    }',
-      '  }',
-      '',
-      '  # Install dependencies',
-      '  package { $package_dependencies:',
-      '    ensure => \'present\',',
-      '  }',
-      '',
-      '  # Install Cassandra and tools',
-      '  package { \'cassandra\':',
-      '    ensure  => $cassandra_version,',
-      '    require => Class[\'profile_ggonda_cassandr::java\'],',
-      '  }',
-      '',
-      '  package { \'cassandra-tools\':',
-      '    ensure  => $cassandra_version,',
-      '    require => Package[\'cassandra\'],',
-      '  }',
-      '}',
-    ].join('\n'),
-    'service.pp': [
-      '# @summary Manages the Cassandra service, including password changes and range repair.',
-      'class profile_ggonda_cassandr::service inherits profile_ggonda_cassandr {',
-      '',
-      '  # Cassandra service',
-      '  service { \'cassandra\':',
-      '    ensure     => running,',
-      '    enable     => true,',
-      '    hasstatus  => true,',
-      '    hasrestart => true,',
-      '  }',
-      '',
-      '  file { $change_password_cql:',
-      '    ensure  => file,',
-      '    content => "ALTER USER cassandra WITH PASSWORD \'${cassandra_password}\';\\\\n",',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '    mode    => \'0600\',',
-      '  }',
-      '',
-      '  # Wait for Cassandra to start up before attempting to change password',
-      '  exec { \'change_cassandra_password\':',
-      '    command     => "cqlsh -u cassandra -p cassandra -f ${change_password_cql}",',
-      '    path        => $cqlsh_path_env,',
-      '    tries       => 12, # Try 12 times',
-      '    try_sleep   => 10, # Wait 10 seconds between tries (total 2 minutes)',
-      '    unless      => "cqlsh -u cassandra -p \'${cassandra_password}\' -e \'SELECT cluster_name FROM system.local;\' ${listen_address} >/dev/null 2>&1",',
-      '    require     => Service[\'cassandra\'],',
-      '  }',
-      '',
-      '  # Range Repair Service (Systemd)',
-      '  $range_repair_ensure = $enable_range_repair ? { true => \'running\', default => \'stopped\' }',
-      '  $range_repair_enable = $enable_range_repair ? { true => true, default => false }',
-      '',
-      '  file { \'/etc/systemd/system/range-repair.service\':',
-      '    ensure  => \'file\',',
-      '    content => template(\'profile_ggonda_cassandr/range-repair.service.erb\'),',
-      '    owner   => \'root\',',
-      '    group   => \'root\',',
-      '    mode    => \'0644\',',
-      '    notify  => Exec[\'systemctl_daemon_reload_range_repair\'],',
-      '  }',
-      '',
-      '  exec { \'systemctl_daemon_reload_range_repair\':',
-      '    command     => \'/bin/systemctl daemon-reload\',',
-      '    path        => [\'/usr/bin\', \'/bin\'],',
-      '    refreshonly => true,',
-      '    before      => Service[\'range-repair\'],',
-      '  }',
-      '',
-      '  service { \'range-repair\':',
-      '    ensure    => $range_repair_ensure,',
-      '    enable    => $range_repair_enable,',
-      '    hasstatus => true,',
-      '    hasrestart => true,',
-      '    subscribe => File[\'/etc/systemd/system/range-repair.service\'],',
-      '  }',
-      '}',
-    ].join('\n'),
-    'java.pp': [
-      '# @summary Manages Java installation for Cassandra.',
-      'class profile_ggonda_cassandr::java inherits profile_ggonda_cassandr {',
-      '',
-      '  # Determine the correct Java package name based on the version and OS family',
-      '  $java_package_name = $facts[\'os\'][\'family\'] ? {',
-      '    \'RedHat\' => "java-${java_version}-openjdk-headless",',
-      '    \'Debian\' => "openjdk-${java_version}-jre-headless",',
-      '    default  => fail("Unsupported OS family for Java installation: ${facts[\'os\'][\'family\']}"),',
-      '  }',
-      '',
-      '  $java_ensure_version = if $java_package_version and $java_package_version != \'\' {',
-      '    $java_package_version',
-      '  } else {',
-      '    \'present\'',
-      '  }',
-      '',
-      '  package { $java_package_name:',
-      '    ensure  => $java_ensure_version,',
-      '  }',
-      '}',
-    ].join('\n'),
-    'firewall.pp': [
-      '# @summary Manages firewall rules for Cassandra.',
-      'class profile_ggonda_cassandr::firewall {',
-      '',
-      '  # This class is now a placeholder. Firewall rules are no longer managed',
-      '  # by this module to remove the dependency on puppetlabs/firewall.',
-      '',
-      '}',
-    ].join('\n'),
+  profile_cassandra_pfpt: {
+    'metadata.json': `
+{
+  "name": "ggonda-profile_cassandra_pfpt",
+  "version": "1.0.0",
+  "author": "ggonda",
+  "summary": "Puppet profile for managing Cassandra.",
+  "license": "Apache-2.0",
+  "source": "",
+  "project_page": "",
+  "issues_url": "",
+  "dependencies": [
+    { "name": "ggonda-cassandra_pfpt", "version_requirement": ">= 1.0.0" }
+  ],
+  "operatingsystem_support": [
+    { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
+    { "operatingsystem": "CentOS", "operatingsystemrelease": [ "7", "8", "9" ] }
+  ],
+  "requirements": [
+    { "name": "puppet", "version_requirement": ">= 6.0.0 < 8.0.0" }
+  ]
+}
+      `.trim(),
+    manifests: {
+      'init.pp': `
+# @summary Profile for configuring a Cassandra node.
+# This class wraps the cassandra_pfpt component module and provides
+# configuration data via Hiera.
+class profile_cassandra_pfpt {
+  # Hiera lookups with defaults
+  $cassandra_version = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
+  $cluster_name      = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'Production PFPT Cluster' })
+  $seeds             = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
+  $datacenter        = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
+  $rack              = lookup('profile_cassandra_pfpt::rack', { 'default_value' => 'rack1' })
+
+  # Pass looked-up data to the component module
+  class { 'cassandra_pfpt':
+    cassandra_version => $cassandra_version,
+    cluster_name      => $cluster_name,
+    seeds             => $seeds,
+    datacenter        => $datacenter,
+    rack              => $rack,
+    # All other parameters will use their defaults from the cassandra_pfpt class
+  }
+}
+        `.trim(),
+    },
   },
-  templates: {
-    'cassandra.yaml.erb': [
-      '# cassandra.yaml',
-      '# Generated by Puppet from profile_ggonda_cassandr/cassandra.yaml.erb. DO NOT EDIT.',
-      '',
-      'cluster_name: \'<%= @profile_ggonda_cassandr::cluster_name %>\'',
-      'num_tokens: 256',
-      'partitioner: org.apache.cassandra.dht.Murmur3Partitioner',
-      '',
-      'data_file_directories:',
-      '    - \'<%= @profile_ggonda_cassandr::data_dir %>\'',
-      'commitlog_directory: \'<%= @profile_ggonda_cassandr::commitlog_dir %>\'',
-      'saved_caches_directory: /var/lib/cassandra/saved_caches',
-      'hints_directory: \'<%= @profile_ggonda_cassandr::hints_directory %>\'',
-      '',
-      'seed_provider:',
-      '    - class_name: org.apache.cassandra.locator.SimpleSeedProvider',
-      '      parameters:',
-      '          - seeds: "<%= @profile_ggonda_cassandr::seeds %>"',
-      '',
-      'listen_address: \'<%= @profile_ggonda_cassandr::listen_address %>\'',
-      'rpc_address: \'<%= @profile_ggonda_cassandr::listen_address %>\'',
-      'native_transport_port: 9042',
-      'endpoint_snitch: GossipingPropertyFileSnitch',
-      'dynamic_snitch: true',
-      'authenticator: PasswordAuthenticator',
-      'authorizer: CassandraAuthorizer',
-      'start_native_transport: true',
-      'role_manager: CassandraRoleManager',
-      'cdc_raw_directory: /var/lib/cassandra/cdc_raw',
-      'commit_failure_policy: stop',
-      'commitlog_sync: periodic',
-      'disk_failure_policy: stop',
-      'incremental_backups: false',
-      'max_hints_delivery_threads: 2',
-      'native_transport_flush_in_batches_legacy: false',
-      'native_transport_max_frame_size_in_mb: 128',
-      'range_request_timeout_in_ms: 10000',
-      'read_request_timeout_in_ms: 5000',
-      'request_timeout_in_ms: 10000',
-      'ssl_storage_port: 7001',
-      'storage_port: 7000',
-      'truncate_request_timeout_in_ms: 60000',
-      'write_request_timeout_in_ms: 10000',
-      'commitlog_sync_period_in_ms: 10000',
-      '',
-      '<% if @profile_ggonda_cassandr::cassandra_version.to_s.start_with?(\'3.\') -%>',
-      'start_rpc: true',
-      'rpc_port: 9160',
-      'rpc_keepalive: true',
-      'thrift_framed_transport_size_in_mb: 15',
-      '<% else -%>',
-      '# Cassandra 4.x / 5.x specific settings',
-      'enable_transient_replication: false',
-      '<% end -%>',
-      '',
-      '<% if @profile_ggonda_cassandr::ssl_enabled -%>',
-      '# --- Internode (node-to-node) encryption ---',
-      'server_encryption_options:',
-      '  internode_encryption: <%= @profile_ggonda_cassandr::internode_encryption || \'all\' %>  # \'none\' | \'dc\' | \'rack\' | \'all\'',
-      '  keystore: <%= @profile_ggonda_cassandr::keystore_path || "#{@profile_ggonda_cassandr::target_dir}/etc/keystore.jks" %>',
-      '  keystore_password: <%= @profile_ggonda_cassandr::keystore_password %>',
-      '  # Set to true only if you want nodes to present client certs (mutual TLS for internode)',
-      '  require_client_auth: <%= @profile_ggonda_cassandr::internode_require_client_auth ? \'true\' : \'false\' %>',
-      '  <% if @profile_ggonda_cassandr::truststore_path && @profile_ggonda_cassandr::truststore_password -%>',
-      '  truststore: <%= @profile_ggonda_cassandr::truststore_path %>',
-      '  truststore_password: <%= @profile_ggonda_cassandr::truststore_password %>',
-      '  <% end -%>',
-      '  <% if @profile_ggonda_cassandr::tls_protocol -%>',
-      '  protocol: <%= @profile_ggonda_cassandr::tls_protocol %>            # e.g., TLS',
-      '  <% end -%>',
-      '  <% if @profile_ggonda_cassandr::tls_algorithm -%>',
-      '  algorithm: <%= @profile_ggonda_cassandr::tls_algorithm %>          # e.g., SunX509',
-      '  <% end -%>',
-      '  <% if @profile_ggonda_cassandr::store_type -%>',
-      '  store_type: <%= @profile_ggonda_cassandr::store_type %>            # e.g., JKS',
-      '  <% end -%>',
-      '',
-      '# --- Client (app-to-node) encryption ---',
-      'client_encryption_options:',
-      '  enabled: true',
-      '  optional: <%= @profile_ggonda_cassandr::client_optional ? \'true\' : \'false\' %>',
-      '  keystore: <%= @profile_ggonda_cassandr::client_keystore_path || "#{@profile_ggonda_cassandr::target_dir}/etc/keystore.jks" %>',
-      '  keystore_password: <%= @profile_ggonda_cassandr::keystore_password %>',
-      '<% end -%>',
-    ].join('\n'),
-    'cassandra-rackdc.properties.erb': [
-      '# cassandra-rackdc.properties',
-      '# Generated by Puppet from profile_ggonda_cassandr/cassandra-rackdc.properties.erb',
-      '# Used by GossipingPropertyFileSnitch to determine rack and datacenter for this node.',
-      '<% if @facts.key?(\'gce\') && @facts[\'gce\'][\'instance\'] && @facts[\'gce\'][\'instance\'][\'zone\'] -%>',
-      '# GCE-specific snitch settings detected',
-      'dc=<%= @facts[\'gce\'][\'instance\'][\'zone\'] %>',
-      'rack=<%= @profile_ggonda_cassandr::racks[@facts[\'gce\'][\'instance\'][\'zone\']] || \'rack1\' %>',
-      '<% else -%>',
-      '# Using default datacenter and rack from Hiera',
-      'dc=<%= @profile_ggonda_cassandr::datacenter %>',
-      'rack=<%= @profile_ggonda_cassandr::rack %>',
-      '<% end -%>',
-    ].join('\n'),
-    'jvm-server.options.erb': [
-      '# JVM configuration for Cassandra',
-      '-ea',
-      '',
-      '-da:net.openhft...',
-      '',
-      '# Heap size',
-      '-Xms<%= @profile_ggonda_cassandr::max_heap_size %>',
-      '-Xmx<%= @profile_ggonda_cassandr::max_heap_size %>',
-      '',
-      '# GC type',
-      '<% if @profile_ggonda_cassandr::gc_type == \'G1GC\' %>',
-      '-XX:+UseG1GC',
-      '<% if @profile_ggonda_cassandr::java_version.to_i < 14 %>',
-      '-XX:G1HeapRegionSize=16M',
-      '-XX:MaxGCPauseMillis=500',
-      '-XX:InitiatingHeapOccupancyPercent=75',
-      '-XX:+ParallelRefProcEnabled',
-      '-XX:+AggressiveOpts',
-      '<% end %>',
-      '<% elsif @profile_ggonda_cassandr::gc_type == \'CMS\' && @profile_ggonda_cassandr::java_version.to_i < 14 %>',
-      '-XX:+UseConcMarkSweepGC',
-      '-XX:+CMSParallelRemarkEnabled',
-      '-XX:SurvivorRatio=8',
-      '-XX:MaxTenuringThreshold=1',
-      '-XX:CMSInitiatingOccupancyFraction=75',
-      '-XX:+UseCMSInitiatingOccupancyOnly',
-      '-XX:+CMSClassUnloadingEnabled',
-      '-XX:+AlwaysPreTouch',
-      '<% end %>',
-      '',
-      '# GC logging',
-      '<% if @profile_ggonda_cassandr::java_version.to_i >= 11 %>',
-      '-Xlog:gc*:/var/log/cassandra/gc.log:time,uptime,pid,tid,level,tags:filecount=10,filesize=100M',
-      '<% else %>',
-      '-Xloggc:/var/log/cassandra/gc.log',
-      '-XX:+PrintGCDetails',
-      '-XX:+PrintGCDateStamps',
-      '-XX:+PrintHeapAtGC',
-      '-XX:+PrintTenuringDistribution',
-      '-XX:+PrintGCApplicationStoppedTime',
-      '-XX:+UseGCLogFileRotation',
-      '-XX:NumberOfGCLogFiles=10',
-      '-XX:GCLogFileSize=100M',
-      '<% end %>',
-      '',
-      '# Other common options',
-      '-Dcassandra.jmx.local.port=7199',
-      '-Djava.net.preferIPv4Stack=true',
-      '-Dcom.sun.management.jmxremote.port=7199',
-      '-Dcom.sun.management.jmxremote.rmi.port=7199',
-      '-Dcom.sun.management.jmxremote.ssl=false',
-      '-Dcom.sun.management.jmxremote.authenticate=false',
-      '-Dlogback.configurationFile=logback.xml',
-      '-Dlogback.defaultConfigurationFile=logback-default.xml',
-      '',
-      '<% if @profile_ggonda_cassandr::replace_address && !@profile_ggonda_cassandr::replace_address.empty? %>',
-      '# Replace dead node at first boot (set by Hiera/Puppet)',
-      '-Dcassandra.replace_address_first_boot=<%= @profile_ggonda_cassandr::replace_address %>',
-      '<% end %>',
-    ].join('\n'),
-    'cqlshrc.erb': [
-      '# cqlshrc configuration file generated by Puppet',
-      '',
-      '[authentication]',
-      'username = cassandra',
-      'password = <%= @profile_ggonda_cassandr::cassandra_password %>',
-      '',
-      '[connection]',
-      'hostname = <%= @profile_ggonda_cassandr::listen_address %>',
-      'port = 9042',
-      '',
-      '<% if @profile_ggonda_cassandr::ssl_enabled %>',
-      '[ssl]',
-      'certfile =  <%= "#{@profile_ggonda_cassandr::target_dir}/etc/keystore.pem" %>',
-      'version = SSLv23',
-      'validate = false',
-      '<% end %>',
-    ].join('\n'),
-    'range-repair.service.erb': [
-      '[Unit]',
-      'Description=Cassandra Range Repair Service',
-      '',
-      '[Service]',
-      'Type=simple',
-      'User=cassandra',
-      'Group=cassandra',
-      'ExecStart=/usr/local/bin/range-repair.sh',
-      'Restart=on-failure',
-      '',
-      '[Install]',
-      'WantedBy=multi-user.target',
-    ].join('\n'),
-    'cassandra_limits.conf.erb': [
-      '# Generated by Puppet',
-      '# /etc/security/limits.d/cassandra.conf',
-      '',
-      '<% @profile_ggonda_cassandr::limits_settings.each do |limit, value| -%>',
-      '<%= @profile_ggonda_cassandr::user %> - <%= limit %> <%= value %>',
-      '<% end -%>',
-    ].join('\n'),
-    'sysctl.conf.epp': [
-      '# Generated by Puppet',
-      '# /etc/sysctl.d/99-cassandra.conf',
-      '<% $settings.each |$key, $value| -%>',
-      '<%= $key %> = <%= $value %>',
-      '<% end -%>',
-    ].join('\n'),
-  },
-  scripts: {
-    'cassandra-upgrade-precheck.sh': '#!/bin/bash\n# Placeholder for cassandra-upgrade-precheck.sh\necho "Cassandra Upgrade Pre-check Script"',
-    'cluster-health.sh': [
-      '#!/bin/bash',
-      '# cluster-health.sh: Provides a status overview of the Cassandra cluster.',
-      '# Uses nodetool to check the state of all nodes.',
-      '',
-      'set -e',
-      '',
-      'echo "--- Cassandra Cluster Status ---"',
-      'nodetool status',
-      'echo "------------------------------"',
-      'exit 0',
-    ].join('\n'),
-    'repair-node.sh': [
-      '#!/bin/bash',
-      '# repair-node.sh: Performs a primary-range repair on the local node.',
-      '# This is a critical maintenance task for data consistency.',
-      '',
-      'set -e',
-      '',
-      'echo "--- Starting Node Repair (Primary Range) ---"',
-      'nodetool repair -pr',
-      'echo "--- Node Repair Finished ---"',
-      'exit 0',
-    ].join('\n'),
-    'cleanup-node.sh': '#!/bin/bash\n# Placeholder for cleanup-node.sh\necho "Cleanup Node Script"',
-    'take-snapshot.sh': '#!/bin/bash\n# Placeholder for take-snapshot.sh\necho "Take Snapshot Script"',
-    'drain-node.sh': [
-      '#!/bin/bash',
-      '# drain-node.sh: Safely drains the node before shutdown or maintenance.',
-      '# This flushes all memtables and stops listening for connections.',
-      '',
-      'set -e',
-      '',
-      'echo "--- Draining Cassandra Node ---"',
-      'nodetool drain',
-      'echo "--- Node Successfully Drained ---"',
-      'exit 0',
-    ].join('\n'),
-    'rebuild-node.sh': '#!/bin/bash\n# Placeholder for rebuild-node.sh\necho "Rebuild Node Script"',
-    'garbage-collect.sh': '#!/bin/bash\n# Placeholder for garbage-collect.sh\necho "Garbage Collect Script"',
-    'assassinate-node.sh': '#!/bin/bash\n# Placeholder for assassinate-node.sh\necho "Assassinate Node Script"',
-    'upgrade-sstables.sh': '#!/bin/bash\n# Placeholder for upgrade-sstables.sh\necho "Upgrade SSTables Script"',
-    'backup-to-s3.sh': '#!/bin/bash\n# Placeholder for backup-to-s3.sh\necho "Backup to S3 Script"',
-    'prepare-replacement.sh': '#!/bin/bash\n# Placeholder for prepare-replacement.sh\necho "Prepare Replacement Script"',
-    'version-check.sh': '#!/bin/bash\n# Placeholder for version-check.sh\necho "Version Check Script"',
-    'cassandra_range_repair.py': '#!/usr/bin/env python3\n# Placeholder for cassandra_range_repair.py\nprint("Cassandra Range Repair Python Script")',
-    'range-repair.sh': '#!/bin/bash\n# Placeholder for range-repair.sh\necho "Range Repair Script"',
-    'robust_backup.sh': '#!/bin/bash\necho "Robust Backup Script Placeholder"',
-    'restore_from_backup.sh': '#!/bin/bash\necho "Restore from Backup Script Placeholder"',
-    'node_health_check.sh': '#!/bin/bash\necho "Node Health Check Script Placeholder"',
-    'rolling_restart.sh': '#!/bin/bash\necho "Rolling Restart Script Placeholder"',
-  },
-  files: {
-    'jamm-0.3.2.jar': '', // Placeholder for binary file
+  role_cassandra_pfpt: {
+    'metadata.json': `
+{
+  "name": "ggonda-role_cassandra_pfpt",
+  "version": "1.0.0",
+  "author": "ggonda",
+  "summary": "Puppet role for a Cassandra server.",
+  "license": "Apache-2.0",
+  "source": "",
+  "project_page": "",
+  "issues_url": "",
+  "dependencies": [
+    { "name": "ggonda-profile_cassandra_pfpt", "version_requirement": ">= 1.0.0" }
+  ],
+  "operatingsystem_support": [
+    { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
+    { "operatingsystem": "CentOS", "operatingsystemrelease": [ "7", "8", "9" ] }
+  ],
+  "requirements": [
+    { "name": "puppet", "version_requirement": ">= 6.0.0 < 8.0.0" }
+  ]
+}
+      `.trim(),
+    manifests: {
+      'init.pp': `
+# @summary Role class for a Cassandra node.
+# This class defines the server's role by including the necessary profiles.
+class role_cassandra_pfpt {
+  # A Cassandra server is defined by the Cassandra profile.
+  include profile_cassandra_pfpt
+}
+        `.trim(),
+    },
   },
 };
