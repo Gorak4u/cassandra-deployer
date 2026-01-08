@@ -24,11 +24,11 @@ export const puppetCode = {
       '  "operatingsystem_support": [\n' +
       '    {\n' +
       '      "operatingsystem": "RedHat",\n' +
-      '      "operatingsystemrelease": [ "7", "8" ]\n' +
+      '      "operatingsystemrelease": [ "7", "8", "9" ]\n' +
       '    },\n' +
       '    {\n' +
       '      "operatingsystem": "CentOS",\n' +
-      '      "operatingsystemrelease": [ "7", "8" ]\n' +
+      '      "operatingsystemrelease": [ "7", "8", "9" ]\n' +
       '    },\n' +
       '    {\n' +
       '      "operatingsystem": "Debian",\n' +
@@ -50,691 +50,379 @@ export const puppetCode = {
   },
   manifests: {
     'init.pp': 
-      '# @summary Main entry point for the Cassandra profile.\n' +
-      '# @param version The version of Cassandra to install.\n' +
-      '# @param seeds An array of seed node IP addresses.\n' +
-      '# @param authenticator The authentication backend to use.\n' +
-      '# @param authorizer The authorization backend to use.\n' +
-      '# @param client_encryption_enabled Enable/disable client-to-node TLS.\n' +
-      '# @param server_encryption_enabled Enable/disable node-to-node TLS.\n' +
-      'class cassandra (\n' +
-      "  String \\$version                                  = '4.1.3',\n" +
-      "  String \\$package_name                              = 'cassandra',\n" +
-      "  String \\$service_name                              = 'cassandra',\n" +
-      "  String \\$config_dir                                = '/etc/cassandra',\n" +
-      "  Optional[String] \\$java_package_name               = undef,\n" +
-      '\n' +
-      '  # cassandra.yaml - Basic Settings\n' +
-      "  String \\$cluster_name                              = 'MyCassandraCluster',\n" +
-      "  Array[Stdlib::IP::Address] \\$seeds                  = [\\$facts['networking']['ip']],\n" +
-      "  String \\$listen_address                            = \\$facts['networking']['ip'],\n" +
-      "  String \\$rpc_address                               = \\$facts['networking']['ip'],\n" +
-      "  Integer \\$num_tokens                               = 256,\n" +
-      "  String \\$endpoint_snitch                           = 'GossipingPropertyFileSnitch',\n" +
-      '\n' +
-      '  # cassandra.yaml - Directories\n' +
-      "  Array[String] \\$data_file_directories              = ['/var/lib/cassandra/data'],\n" +
-      "  String \\$commitlog_directory                       = '/var/lib/cassandra/commitlog',\n" +
-      "  String \\$saved_caches_directory                   = '/var/lib/cassandra/saved_caches',\n" +
-      '\n' +
-      '  # cassandra.yaml - Security Settings\n' +
-      "  String \\$authenticator                             = 'AllowAllAuthenticator',\n" +
-      "  String \\$authorizer                                = 'AllowAllAuthorizer',\n" +
-      '  Boolean \\$client_encryption_enabled                = false,\n' +
-      "  String \\$client_encryption_keystore                = 'conf/.keystore',\n" +
-      "  String \\$client_encryption_truststore              = 'conf/.truststore',\n" +
-      '  Boolean \\$server_encryption_enabled                = false,\n' +
-      "  String \\$server_encryption_keystore                = 'conf/.keystore',\n" +
-      "  String \\$server_encryption_truststore              = 'conf/.truststore',\n" +
-      '\n' +
-      '  # cassandra.yaml - Performance Tuning\n' +
-      "  Integer \\$concurrent_reads                         = 32,\n" +
-      "  Integer \\$concurrent_writes                        = 64,\n" +
-      "  Integer \\$concurrent_counter_writes                 = 32,\n" +
-      "  Integer \\$concurrent_compactors                     = 4,\n" +
-      "  Integer \\$memtable_flush_writers                    = 4,\n" +
-      "  Integer \\$compaction_throughput_mb_per_sec          = 64,\n" +
-      "  Integer \\$in_memory_compaction_limit_in_mb          = 256,\n" +
-      "  Integer \\$tombstone_warn_threshold                  = 10000,\n" +
-      "  String \\$read_request_timeout_in_ms                = '5000',\n" +
-      "  String \\$write_request_timeout_in_ms               = '5000',\n" +
-      "  String \\$cas_contention_timeout_in_ms              = '2500',\n" +
-      '\n' +
-      '  # cassandra-env.sh / jvm.options - JVM Settings\n' +
-      "  Optional[String] \\$jvm_max_heap_size                = undef, # e.g. '4G' or '8192M'\n" +
-      "  Optional[String] \\$jvm_new_heap_size                = undef, # e.g. '800M'\n" +
-      "  Optional[String] \\$jvm_extra_opts                   = undef, # e.g. '-Djava.rmi.server.hostname=<hostname>'\n" +
-      '  Boolean \\$use_java11                                = false,\n' +
-      '  Boolean \\$use_g1_gc                                 = true,\n' +
-      '  Boolean \\$use_shenandoah_gc                         = false,\n' +
-      '\n' +
-      '  # Rack and DC configuration\n' +
-      '  Hash \\$racks                                      = {},\n' +
-      '\n' +
-      '  # System Tuning\n' +
-      "  Boolean \\$manage_sysctl                             = true,\n" +
-      "  String \\$net_ipv4_tcp_rmem                          = '4096 87380 16777216',\n" +
-      "  String \\$net_ipv4_tcp_wmem                          = '4096 65536 16777216',\n" +
-      "  Integer \\$net_core_rmem_max                         = 16777216,\n" +
-      "  Integer \\$net_core_wmem_max                         = 16777216,\n" +
-      "  Boolean \\$manage_limits                             = true,\n" +
-      "  String \\$limits_memlock                            = 'unlimited',\n" +
-      "  Integer \\$limits_nofile                             = 100000,\n" +
-      "  Integer \\$limits_nproc                              = 32768,\n" +
-      "  String \\$limits_as                                 = 'unlimited',\n" +
-      '\n' +
-      ') {\n' +
-      "  if \\$facts['gce'] {\n" +
-      "    \\$dc = \\$facts['gce']['instance']['zone']\n" +
-      "    \\$zone = \\$facts['gce']['instance']['zone']\n" +
-      '\n' +
-      '    if \\$racks[\\$dc] {\n' +
-      '      if \\$racks[\\$dc][\\$zone] {\n' +
-      '        \\$rack = \\$racks[\\$dc][\\$zone]\n' +
-      '      } else {\n' +
-      "        \\$rack = 'rack1'\n" +
-      '      }\n' +
-      '    } else {\n' +
-      "      \\$rack = 'rack1'\n" +
-      '    }\n' +
+      '# @summary Manages installation and configuration of Apache Cassandra.\n' +
+      '# @param cassandra_version Version of Cassandra to install.\n' +
+      '# @param java_version Java major version to install.\n' +
+      '# @param cluster_name Name of the Cassandra cluster.\n' +
+      '# @param seeds Comma-separated list of seed node IP addresses.\n' +
+      '# @param datacenter The datacenter name for this node.\n' +
+      '# @param rack The rack name for this node.\n' +
+      '# @param max_heap_size JVM maximum heap size.\n' +
+      '# @param gc_type The garbage collector type to use.\n' +
+      '# @param cassandra_password The password to set for the default cassandra user.\n' +
+      '# @param ssl_enabled Whether to enable client-to-node and node-to-node SSL/TLS.\n' +
+      '# @param internode_encryption Encryption level for internode communication.\n' +
+      'class profile_ggonda_cassandr(\n' +
+      "  String \\$cassandra_version         = '4.1.10-1',\n" +
+      "  String \\$java_version              = '11',\n" +
+      "  String \\$cluster_name              = 'ggonda-cass-cluster',\n" +
+      "  String \\$seeds                     = '10.93.16.206,10.93.16.127,10.93.17.191',\n" +
+      "  String \\$datacenter                = 'dc1',\n" +
+      "  String \\$rack                      = 'rack1',\n" +
+      "  String \\$max_heap_size             = '3G',\n" +
+      "  String \\$gc_type                   = 'G1GC',\n" +
+      "  String \\$cassandra_password        = 'PP#C@ss@ndr@000',\n" +
+      "  String \\$data_dir                  = '/var/lib/cassandra/data',\n" +
+      "  String \\$commitlog_dir             = '/var/lib/cassandra/commitlog',\n" +
+      "  Boolean \\$disable_swap              = false,\n" +
+      "  String  \\$replace_address           = '',\n" +
+      "  Boolean \\$enable_range_repair       = false,\n" +
+      "  String \\$listen_address            = \\$facts['networking']['ip'],\n" +
+      "  Boolean \\$ssl_enabled               = true,\n" +
+      "  String \\$keystore_path             = '/etc/pki/tls/certs/etc/keystore.jks',\n" +
+      "  String \\$keystore_password         = 'ChangeMe',\n" +
+      "  String \\$internode_encryption      = 'all',\n" +
+      "  String \\$truststore_path           = '/etc/pki/ca-trust/extracted/java/cacerts',\n" +
+      "  String \\$truststore_password       = 'changeit',\n" +
+      "  String \\$repo_baseurl              = 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra/',\n" +
+      "  String \\$repo_gpgkey               = 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra-gpg-keys/KEYS',\n" +
+      "  String \\$cassandra_user            = 'cassandra',\n" +
+      "  String \\$cassandra_group           = 'cassandra',\n" +
+      "  Array[String] \\$package_dependencies = ['jemalloc','python3','numactl'],\n" +
+      "  String \\$manage_bin_dir            = '/usr/local/bin',\n" +
+      "  String \\$change_password_cql       = '/tmp/change_password.cql',\n" +
+      "  String \\$cqlsh_path_env            = '/usr/bin:/usr/local/bin',\n" +
+      "  String \\$jamm_target               = '/usr/share/cassandra/lib/jamm-0.3.2.jar',\n" +
+      "  String \\$jamm_source               = 'puppet:///modules/ggonda_cassandra/jamm-0.3.2.jar',\n" +
+      ') {\n\n' +
+      "  # Ensure Cassandra user and group exist\n" +
+      "  user { \\$cassandra_user:\n" +
+      "    ensure     => 'present',\n" +
+      "    system     => true,\n" +
+      '  }\n\n' +
+      "  group { \\$cassandra_group:\n" +
+      "    ensure => 'present',\n" +
+      "    system => true,\n" +
+      '  }\n\n' +
+      '  # YUM Repo for Cassandra\n' +
+      "  \\$os_release_major = regsubst(\\$::operatingsystemrelease, '^(\\\\d+).*$', '\\\\1')\n\n" +
+      "  yumrepo { 'cassandra':\n" +
+      "    descr    => \\\"Apache Cassandra \\${cassandra_version} for EL\\${os_release_major}\\\",\n" +
+      "    baseurl  => \\\"\\${repo_baseurl}\\\",\n" +
+      '    gpgcheck => 0,\n' +
+      '    enabled  => 1,\n' +
+      "    gpgkey   => \\\"\\${repo_gpgkey}\\\",\n" +
+      '    repo_gpgcheck => 0,\n' +
+      '    skip_if_unavailable => 1,\n' +
+      '    priority => 99,\n' +
+      '    sslverify => 1,\n' +
+      '  }\n\n' +
+      '  # Install Java\n' +
+      "  if \\$java_version == '8' {\n" +
+      "    \\$actual_java_package = 'java-1.8.0-openjdk-headless'\n" +
+      "  } elsif \\$java_version == '11' {\n" +
+      "    \\$actual_java_package = 'java-11-openjdk-headless'\n" +
+      "  } elsif \\$java_version == '17' {\n" +
+      "    \\$actual_java_package = 'java-17-openjdk-headless'\n" +
       '  } else {\n' +
-      "    \\$dc = 'dc1'\n" +
-      "    \\$rack = 'rack1'\n" +
-      '  }\n' +
-      '\n' +
-      '  contain cassandra::params\n' +
-      '  contain cassandra::java\n' +
-      '  contain cassandra::install\n' +
-      '  contain cassandra::config\n' +
-      '  contain cassandra::service\n' +
-      '\n' +
-      "  Class['cassandra::params']\n" +
-      "  -> Class['cassandra::java']\n" +
-      "  -> Class['cassandra::install']\n" +
-      "  -> Class['cassandra::config']\n" +
-      "  ~> Class['cassandra::service']\n" +
-      '}'
-    ,
-    'params.pp': 
-      '# @summary Namespaces all parameters for the Cassandra profile.\n' +
-      'class cassandra::params {\n' +
-      '  \\$version                  = \\$cassandra::version\n' +
-      '  \\$package_name             = \\$cassandra::package_name\n' +
-      '  \\$service_name             = \\$cassandra::service_name\n' +
-      '  \\$config_dir               = \\$cassandra::config_dir\n' +
-      '  \\$java_package_name        = \\$cassandra::java_package_name\n' +
-      '\n' +
-      '  # Basic Settings\n' +
-      '  \\$cluster_name             = \\$cassandra::cluster_name\n' +
-      '  \\$seeds                    = \\$cassandra::seeds\n' +
-      '  \\$listen_address           = \\$cassandra::listen_address\n' +
-      '  \\$rpc_address              = \\$cassandra::rpc_address\n' +
-      '  \\$num_tokens               = \\$cassandra::num_tokens\n' +
-      '  \\$endpoint_snitch          = \\$cassandra::endpoint_snitch\n' +
-      '\n' +
-      '  # Directories\n' +
-      '  \\$data_file_directories    = \\$cassandra::data_file_directories\n' +
-      '  \\$commitlog_directory      = \\$cassandra::commitlog_directory\n' +
-      '  \\$saved_caches_directory   = \\$cassandra::saved_caches_directory\n' +
-      '\n' +
-      '  # Security Settings\n' +
-      '  \\$authenticator            = \\$cassandra::authenticator\n' +
-      '  \\$authorizer               = \\$cassandra::authorizer\n' +
-      '  \\$client_encryption_enabled = \\$cassandra::client_encryption_enabled\n' +
-      '  \\$client_encryption_keystore = \\$cassandra::client_encryption_keystore\n' +
-      '  \\$client_encryption_truststore = \\$cassandra::client_encryption_truststore\n' +
-      '  \\$server_encryption_enabled = \\$cassandra::server_encryption_enabled\n' +
-      '  \\$server_encryption_keystore = \\$cassandra::server_encryption_keystore\n' +
-      '  \\$server_encryption_truststore = \\$cassandra::server_encryption_truststore\n' +
-      '\n' +
-      '  # Performance Tuning\n' +
-      '  \\$concurrent_reads        = \\$cassandra::concurrent_reads\n' +
-      '  \\$concurrent_writes       = \\$cassandra::concurrent_writes\n' +
-      '  \\$concurrent_counter_writes = \\$cassandra::concurrent_counter_writes\n' +
-      '  \\$concurrent_compactors     = \\$cassandra::concurrent_compactors\n' +
-      '  \\$memtable_flush_writers    = \\$cassandra::memtable_flush_writers\n' +
-      '  \\$compaction_throughput_mb_per_sec = \\$cassandra::compaction_throughput_mb_per_sec\n' +
-      '  \\$in_memory_compaction_limit_in_mb = \\$cassandra::in_memory_compaction_limit_in_mb\n' +
-      '  \\$tombstone_warn_threshold  = \\$cassandra::tombstone_warn_threshold\n' +
-      '  \\$read_request_timeout_in_ms = \\$cassandra::read_request_timeout_in_ms\n' +
-      '  \\$write_request_timeout_in_ms = \\$cassandra::write_request_timeout_in_ms\n' +
-      '  \\$cas_contention_timeout_in_ms = \\$cassandra::cas_contention_timeout_in_ms\n' +
-      '\n' +
-      '  # JVM Settings\n' +
-      '  \\$jvm_max_heap_size        = \\$cassandra::jvm_max_heap_size\n' +
-      '  \\$jvm_new_heap_size        = \\$cassandra::jvm_new_heap_size\n' +
-      '  \\$jvm_extra_opts           = \\$cassandra::jvm_extra_opts\n' +
-      '  \\$use_java11               = \\$cassandra::use_java11\n' +
-      '  \\$use_g1_gc                = \\$cassandra::use_g1_gc\n' +
-      '  \\$use_shenandoah_gc        = \\$cassandra::use_shenandoah_gc\n' +
-      '\n' +
-      '  # Rack and DC\n' +
-      '  \\$dc                       = \\$cassandra::dc\n' +
-      '  \\$rack                     = \\$cassandra::rack\n' +
-      '\n' +
-      '  # System Tuning\n' +
-      '  \\$manage_sysctl             = \\$cassandra::manage_sysctl\n' +
-      '  \\$net_ipv4_tcp_rmem          = \\$cassandra::net_ipv4_tcp_rmem\n' +
-      '  \\$net_ipv4_tcp_wmem          = \\$cassandra::net_ipv4_tcp_wmem\n' +
-      '  \\$net_core_rmem_max         = \\$cassandra::net_core_rmem_max\n' +
-      '  \\$net_core_wmem_max         = \\$cassandra::net_core_wmem_max\n' +
-      '  \\$manage_limits             = \\$cassandra::manage_limits\n' +
-      '  \\$limits_memlock            = \\$cassandra::limits_memlock\n' +
-      '  \\$limits_nofile             = \\$cassandra::limits_nofile\n' +
-      '  \\$limits_nproc              = \\$cassandra::limits_nproc\n' +
-      '  \\$limits_as                 = \\$cassandra::limits_as\n' +
-      '}'
-    ,
-    'java.pp': 
-      '# @summary Installs Java, a dependency for Cassandra.\n' +
-      'class cassandra::java {\n' +
-      '  \\$java_package_name = \\$cassandra::params::java_package_name\n' +
-      '  \\$use_java11 = \\$cassandra::params::use_java11\n' +
-      '\n' +
-      '  # Determine the default Java package based on the OS family and version flag\n' +
-      '  if \\$use_java11 {\n' +
-      "    \\$default_java_package = \\$facts['os']['family'] ? {\n" +
-      "      'RedHat' => 'java-11-openjdk-headless',\n" +
-      "      'Debian' => 'openjdk-11-jre-headless',\n" +
-      "      default  => fail(\\\"Unsupported OS family for Java 11 installation: \${facts['os']['family']}\\\"),\n" +
-      '    }\n' +
-      '  } else {\n' +
-      "    \\$default_java_package = \\$facts['os']['family'] ? {\n" +
-      "      'RedHat' => 'java-1.8.0-openjdk-headless',\n" +
-      "      'Debian' => 'openjdk-8-jre-headless',\n" +
-      "      default  => fail(\\\"Unsupported OS family for Java 8 installation: \${facts['os']['family']}\\\"),\n" +
-      '    }\n' +
-      '  }\n' +
-      '\n' +
-      '  # Use the Hiera-provided package name if it exists, otherwise use the default\n' +
-      '  \\$package_to_install = pick(\\$java_package_name, \\$default_java_package)\n' +
-      '\n' +
-      "  package { 'java-for-cassandra':\n" +
-      '    ensure => installed,\n' +
-      '    name   => \\$package_to_install,\n' +
-      '  }\n' +
-      '}'
-    ,
-    'install.pp': 
-      '# @summary Installs the Cassandra package.\n' +
-      'class cassandra::install {\n' +
-      '  \\$package_name = \\$cassandra::params::package_name\n' +
-      '  \\$version = \\$cassandra::params::version\n' +
-      '\n' +
-      "  \\$version_major_only = regsubst(\\$version, '^(\\\\d)\\\\.(\\\\d)\\\\..*', '\\\\1\\\\2')\n" +
-      '\n' +
-      "  case \\$facts['os']['family'] {\n" +
-      "    'RedHat': {\n" +
-      "      yumrepo { 'cassandra':\n" +
-      "        ensure   => 'present',\n" +
-      "        descr    => \\\"Apache Cassandra \${version_major_only}x repo\\\",\n" +
-      "        baseurl  => \\\"https://downloads.apache.org/cassandra/redhat/\${version_major_only}x/\\\",\n" +
-      '        enabled  => 1,\n' +
-      '        gpgcheck => 0, # For production, set to 1 and manage the key\n' +
-      '      }\n' +
-      "      Yumrepo['cassandra'] -> Package[\\$package_name]\n" +
-      '    }\n' +
-      "    'Debian': {\n" +
-      "      apt::source { 'cassandra':\n" +
-      "        location => 'https://downloads.apache.org/cassandra/debian',\n" +
-      "        release  => \\\"\${version_major_only}x\\\",\n" +
-      "        repos    => 'main',\n" +
-      '        key      => {\n' +
-      "          id     => 'F758CE318D77295D',\n" +
-      "          source => 'https://downloads.apache.org/cassandra/KEYS',\n" +
-      '        },\n' +
-      '      }\n' +
-      "      Apt::Source['cassandra'] -> Package[\\$package_name]\n" +
-      '    }\n' +
-      '    default: {\n' +
-      "      fail(\\\"Cassandra installation is not supported on OS family '\${facts['os']['family']}'\\\")\n" +
-      '    }\n' +
-      '  }\n' +
-      '\n' +
-      '  package { \\$package_name:\n' +
-      '    ensure  => \\$version,\n' +
-      "    require => Class['cassandra::java'],\n" +
-      '  }\n' +
-      '}'
-    ,
-    'config.pp': 
-      '# @summary Manages Cassandra configuration files.\n' +
-      'class cassandra::config {\n' +
-      '  \\$config_dir = \\$cassandra::params::config_dir\n' +
-      '  \\$config_file = "\\${config_dir}/cassandra.yaml"\n' +
-      '  \\$env_file = "\\${config_dir}/cassandra-env.sh"\n' +
-      '  \\$jvm_options_file = "\\${config_dir}/jvm-server.options"\n' +
-      '  \\$rack_dc_file = "\\${config_dir}/cassandra-rackdc.properties"\n' +
-      '  \\$limits_file = "/etc/security/limits.d/cassandra.conf"\n' +
-      '  \\$sysctl_file = "/etc/sysctl.d/90-cassandra.conf"\n' +
-      "  \\$owner = 'cassandra'\n" +
-      "  \\$group = 'cassandra'\n" +
-      '\n' +
-      "  \\$seeds_string = join(\\$cassandra::params::seeds, ',')\n" +
-      '\n' +
-      '  file { \\$config_file:\n' +
-      '    ensure  => file,\n' +
-      '    owner   => \\$owner,\n' +
-      '    group   => \\$group,\n' +
-      "    mode    => '0640',\n" +
-      "    content => template('cassandra/cassandra.yaml.erb'),\n" +
-      '    require => Package[\\$cassandra::params::package_name],\n' +
-      '  }\n' +
-      '\n' +
-      '  file { \\$env_file:\n' +
-      '    ensure  => file,\n' +
-      '    owner   => \\$owner,\n' +
-      '    group   => \\$group,\n' +
-      "    mode    => '0640',\n" +
-      "    content => template('cassandra/cassandra-env.sh.erb'),\n" +
-      '    require => Package[\\$cassandra::params::package_name],\n' +
-      '  }\n' +
-      '\n' +
-      '  file { \\$jvm_options_file:\n' +
-      '    ensure  => file,\n' +
-      '    owner   => \\$owner,\n' +
-      '    group   => \\$group,\n' +
+      "    \\$actual_java_package = \\\"java-\\${java_version}-openjdk-headless\\\" # Fallback\n" +
+      '  }\n\n' +
+      "  package { \\$actual_java_package:\n" +
+      '    ensure  => present,\n' +
+      "    before  => Package['cassandra'],\n" +
+      "    require => Yumrepo['cassandra'],\n" +
+      '  }\n\n' +
+      '  # Install dependencies\n' +
+      "  package { \\$package_dependencies:\n" +
+      "    ensure => 'present',\n" +
+      '  }\n\n' +
+      '  # Install Cassandra and tools\n' +
+      "  package { 'cassandra':\n" +
+      "    ensure  => \\$cassandra_version ? {\n" +
+      "      undef   => present,  # fallback when not provided\n" +
+      "      default => \\$cassandra_version,\n" +
+      '    },\n' +
+      "    require => Yumrepo['cassandra'],\n" +
+      "    before  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  package { 'cassandra-tools':\n" +
+      "    ensure  => \\$cassandra_version ? {\n" +
+      "      undef   => present,\n" +
+      "      default => \\$cassandra_version,\n" +
+      '    },\n' +
+      "    require => Yumrepo['cassandra'],\n" +
+      "    before  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      '  # Create Cassandra data and commitlog directories\n' +
+      "  file { [\\$data_dir, \\$commitlog_dir]:\n" +
+      "    ensure  => 'directory',\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
+      "    mode    => '0700',\n" +
+      "    require => User[\\$cassandra_user],\n" +
+      '  }\n\n' +
+      "  # Create .cassandra directory for cqlshrc\n" +
+      "  file { '/root/.cassandra':\n" +
+      "    ensure => 'directory',\n" +
+      "    owner  => 'root',\n" +
+      "    group  => 'root',\n" +
+      "    mode   => '0700',\n" +
+      '  }\n\n' +
+      "  file { \\$jamm_target:\n" +
+      "    ensure  => 'file',\n" +
+      "    owner   => 'root',\n" +
+      "    group   => 'root',\n" +
       "    mode    => '0644',\n" +
-      "    content => template('cassandra/jvm-server.options.erb'),\n" +
-      '    require => Package[\\$cassandra::params::package_name],\n' +
-      '  }\n' +
-      '\n' +
-      '  file { \\$rack_dc_file:\n' +
-      '    ensure  => file,\n' +
-      '    owner   => \\$owner,\n' +
-      '    group   => \\$group,\n' +
+      "    source  => \\$jamm_source,\n" +
+      "    require => Package['cassandra'],\n" +
+      '  }\n\n' +
+      '  # Cassandra configuration files\n' +
+      "  file { '/etc/cassandra/conf/cassandra.yaml':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/cassandra.yaml.erb'),\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
       "    mode    => '0644',\n" +
-      "    content => template('cassandra/cassandra-rackdc.properties.erb'),\n" +
-      '    require => Package[\\$cassandra::params::package_name],\n' +
-      '  }\n' +
-      '\n' +
-      '  if \\$cassandra::params::manage_limits {\n' +
-      '    file { \\$limits_file:\n' +
-      '      ensure  => file,\n' +
+      "    require => Package['cassandra'],\n" +
+      "    notify  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  file { '/etc/cassandra/conf/cassandra-rackdc.properties':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/cassandra-rackdc.properties.erb'),\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
+      "    mode    => '0644',\n" +
+      "    require => Package['cassandra'],\n" +
+      "    notify  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  file { '/etc/cassandra/conf/jvm-server.options':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/jvm-options.erb'),\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
+      "    mode    => '0644',\n" +
+      "    require => Package['cassandra'],\n" +
+      "    notify  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  file { '/etc/cassandra/conf/jvm11-server.options':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/jvm11-server.options.erb'),\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
+      "    mode    => '0644',\n" +
+      "    require => Package['cassandra'],\n" +
+      "    notify  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  file { '/etc/cassandra/conf/jvm8-server.options':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/jvm8-server.options.erb'),\n" +
+      "    owner   => \\$cassandra_user,\n" +
+      "    group   => \\$cassandra_group,\n" +
+      "    mode    => '0644',\n" +
+      "    require => Package['cassandra'],\n" +
+      "    notify  => Service['cassandra'],\n" +
+      '  }\n\n' +
+      "  file { '/root/.cassandra/cqlshrc':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/cqlshrc.erb'),\n" +
+      "    owner   => 'root',\n" +
+      "    group   => 'root',\n" +
+      "    mode    => '0600',\n" +
+      "    require => File['/root/.cassandra'],\n" +
+      '  }\n\n' +
+      '  # Cassandra service\n' +
+      "  service { 'cassandra':\n" +
+      "    ensure     => running,\n" +
+      "    enable     => true,\n" +
+      "    hasstatus  => true,\n" +
+      "    hasrestart => true,\n" +
+      '    require    => [\n' +
+      "      Package['cassandra'],\n" +
+      "      File['/etc/cassandra/conf/cassandra.yaml'],\n" +
+      "      File['/etc/cassandra/conf/cassandra-rackdc.properties'],\n" +
+      "      File['/etc/cassandra/conf/jvm-server.options'],\n" +
+      '    ],\n' +
+      '  }\n\n' +
+      "  file { \\$change_password_cql:\n" +
+      "    ensure  => file,\n" +
+      "    content => \\\"ALTER USER cassandra WITH PASSWORD '\\${cassandra_password}';\\\\n\\\",\n" +
+      "    owner   => 'root',\n" +
+      "    group   => 'root',\n" +
+      "    mode    => '0600',\n" +
+      '  }\n\n' +
+      '  # Wait for Cassandra to start up before attempting to change password\n' +
+      "  exec { 'change_cassandra_password':\n" +
+      "    command     => \\\"cqlsh -u cassandra -p cassandra -f \\${change_password_cql}\\\",\n" +
+      "    path        => \\$cqlsh_path_env, # Ensure cqlsh is in path\n" +
+      '    tries       => 12, # Try 12 times\n' +
+      '    try_sleep   => 10, # Wait 10 seconds between tries (total 2 minutes)\n' +
+      "    unless      => \\\"cqlsh -u cassandra -p '\\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \\${listen_address} >/dev/null 2>&1\\\",\n" +
+      "    require     => [Service['cassandra'], File[\\$change_password_cql]],\n" +
+      '  }\n\n' +
+      '  # Deploy management scripts\n' +
+      "  file { \\$manage_bin_dir:\n" +
+      "    ensure => 'directory',\n" +
+      "    owner  => 'root',\n" +
+      "    group  => 'root',\n" +
+      "    mode   => '0755',\n" +
+      '  }\n\n' +
+      "  [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh', 'repair-node.sh',\n" +
+      "    'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',\n" +
+      "    'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',\n" +
+      "    'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',\n" +
+      "    'cassandra_range_repair.py', 'range-repair.sh' ].each |\\$script| {\n" +
+      "    file { \\\"\\${manage_bin_dir}/\\${script}\\\":\n" +
+      "      ensure  => 'file',\n" +
+      "      source  => \\\"puppet:///modules/ggonda_cassandra/\\${script}\\\",\n" +
       "      owner   => 'root',\n" +
       "      group   => 'root',\n" +
-      "      mode    => '0644',\n" +
-      "      content => template('cassandra/cassandra_limits.conf.erb'),\n" +
+      "      mode    => '0755',\n" +
       '    }\n' +
-      '  }\n' +
-      '\n' +
-      '  if \\$cassandra::params::manage_sysctl {\n' +
-      '    file { \\$sysctl_file:\n' +
-      '      ensure  => file,\n' +
+      '  }\n\n' +
+      '  # Range Repair Service (Systemd)\n' +
+      "  \\$range_repair_ensure = \\\"\\${enable_range_repair}\\\" ? { 'true' => 'running', default => 'stopped' }\n" +
+      "  \\$range_repair_enable = \\\"\\${enable_range_repair}\\\" ? { 'true' => true, default => false }\n\n" +
+      "  file { '/etc/systemd/system/range-repair.service':\n" +
+      "    ensure  => 'file',\n" +
+      "    content => template('ggonda_cassandra/range-repair.service.erb'),\n" +
+      "    owner   => 'root',\n" +
+      "    group   => 'root',\n" +
+      "    mode    => '0644',\n" +
+      "    notify  => Exec['systemctl_daemon_reload_range_repair'],\n" +
+      "    require => File[\\\"\\${manage_bin_dir}/range-repair.sh\\\"],\n" +
+      '  }\n\n' +
+      "  exec { 'systemctl_daemon_reload_range_repair':\n" +
+      "    command     => '/bin/systemctl daemon-reload',\n" +
+      "    path        => ['/usr/bin', '/bin'],\n" +
+      "    refreshonly => true,\n" +
+      "    before      => Service['range-repair'],\n" +
+      '  }\n\n' +
+      "  service { 'range-repair':\n" +
+      "    ensure    => \\$range_repair_ensure,\n" +
+      "    enable    => \\$range_repair_enable,\n" +
+      "    hasstatus => true,\n" +
+      "    hasrestart => true,\n" +
+      "    subscribe => File['/etc/systemd/system/range-repair.service'],\n" +
+      '  }\n\n' +
+      '  # OS Tuning for Cassandra\n' +
+      "  if \\\"\\${disable_swap}\\\" == \\\"true\\\" {\n" +
+      "    exec { 'swapoff -a':\n" +
+      "      command  => '/sbin/swapoff -a',\n" +
+      "      unless   => '/sbin/swapon -s | /bin/grep -qE \\\"^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0$\\\"',\n" +
+      "      path     => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],\n" +
+      "      before   => File['/etc/sysctl.d/99-cassandra.conf'],\n" +
+      '    }\n\n' +
+      "    file { '/etc/sysctl.d/99-cassandra.conf':\n" +
+      "      ensure  => 'file',\n" +
+      "      content => \\\"vm.swappiness = 0\\\\nfs.aio-max-nr = 1048576\\\\n\\\",\n" +
+      "      mode    => '0644',\n" +
       "      owner   => 'root',\n" +
       "      group   => 'root',\n" +
+      "      notify  => Exec['apply_sysctl_cassandra'],\n" +
+      '    }\n\n' +
+      "    exec { 'apply_sysctl_cassandra':\n" +
+      "      command     => '/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf',\n" +
+      "      path        => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],\n" +
+      "      refreshonly => true,\n" +
+      '    }\n\n' +
+      "    file { '/etc/security/limits.d/cassandra.conf':\n" +
+      "      ensure  => 'file',\n" +
+      "      content => \\\"cassandra - memlock unlimited\\\\ncassandra - nofile 100000\\\\ncassandra - nproc 32768\\\\ncassandra - as unlimited\\\\n\\\",\n" +
       "      mode    => '0644',\n" +
-      "      content => template('cassandra/sysctl.conf.erb'),\n" +
-      '      notify  => Exec[\'apply-cassandra-sysctl\'],\n' +
-      '    }\n' +
-      '\n' +
-      "    exec { 'apply-cassandra-sysctl':\n" +
-      "      command     => 'sysctl --system',\n" +
-      '      refreshonly => true,\n' +
+      "      owner   => 'root',\n" +
+      "      group   => 'root',\n" +
       '    }\n' +
       '  }\n' +
-      '\n' +
-      '  # Ensure data directories exist with correct permissions\n' +
-      '  [ \\$cassandra::params::data_file_directories,\n' +
-      '    \\$cassandra::params::commitlog_directory,\n' +
-      '    \\$cassandra::params::saved_caches_directory,\n' +
-      '  ].flatten.each |String \\$dir| {\n' +
-      '    file { \\$dir:\n' +
-      '      ensure  => directory,\n' +
-      '      owner   => \\$owner,\n' +
-      '      group   => \\$group,\n' +
-      "      mode    => '0750',\n" +
-      '      require => Package[\\$cassandra::params::package_name],\n' +
-      '    }\n' +
-      '  }\n' +
-      '}'
-    ,
-    'service.pp': 
-      '# @summary Manages the Cassandra service.\n' +
-      'class cassandra::service {\n' +
-      '  \\$service_name = \\$cassandra::params::service_name\n' +
-      '\n' +
-      '  service { \\$service_name:\n' +
-      '    ensure    => running,\n' +
-      '    enable    => true,\n' +
-      '    hasstatus => true,\n' +
-      '  }\n' +
-      '}'
-    ,
+      '}',
   },
   templates: {
     'cassandra.yaml.erb': 
       '# cassandra.yaml\n' +
-      '# Generated by Puppet from cassandra/cassandra.yaml.erb. DO NOT EDIT.\n' +
+      '# Generated by Puppet from ggonda_cassandra/cassandra.yaml.erb. DO NOT EDIT.\n' +
       '\n' +
-      "cluster_name: '<%= @cassandra::params::cluster_name %>'\n" +
-      'num_tokens: <%= @cassandra::params::num_tokens %>\n' +
-      '\n' +
-      '# Seed provider\n' +
+      "cluster_name: '<%= @cluster_name %>'\n" +
+      'num_tokens: 256\n' +
+      "listen_address: <%= @listen_address %>\n" +
+      "rpc_address: <%= @listen_address %>\n" +
       'seed_provider:\n' +
       '  - class_name: org.apache.cassandra.locator.SimpleSeedProvider\n' +
       '    parameters:\n' +
-      '      - seeds: "<%= @seeds_string %>"\n' +
-      '\n' +
-      'listen_address: <%= @cassandra::params::listen_address %>\n' +
-      'rpc_address: <%= @cassandra::params::rpc_address %>\n' +
-      '\n' +
-      'endpoint_snitch: <%= @cassandra::params::endpoint_snitch %>\n' +
-      '\n' +
-      '# Data directories\n' +
-      'data_file_directories:\n' +
-      '<% @cassandra::params::data_file_directories.each do |dir| -%>\n' +
-      '  - <%= dir %>\n' +
-      '<% end -%>\n' +
-      '\n' +
-      'commitlog_directory: <%= @cassandra::params::commitlog_directory %>\n' +
-      'saved_caches_directory: <%= @cassandra::params::saved_caches_directory %>\n' +
-      'commitlog_sync: periodic\n' +
-      'commitlog_sync_period_in_ms: 10000\n' +
-      '\n' +
-      '# Performance Tuning\n' +
-      'concurrent_reads: <%= @cassandra::params::concurrent_reads %>\n' +
-      'concurrent_writes: <%= @cassandra::params::concurrent_writes %>\n' +
-      'concurrent_counter_writes: <%= @cassandra::params::concurrent_counter_writes %>\n' +
-      'concurrent_compactors: <%= @cassandra::params::concurrent_compactors %>\n' +
-      'memtable_flush_writers: <%= @cassandra::params::memtable_flush_writers %>\n' +
-      'compaction_throughput_mb_per_sec: <%= @cassandra::params::compaction_throughput_mb_per_sec %>\n' +
-      'in_memory_compaction_limit_in_mb: <%= @cassandra::params::in_memory_compaction_limit_in_mb %>\n' +
-      'tombstone_warn_threshold: <%= @cassandra::params::tombstone_warn_threshold %>\n' +
-      '\n' +
-      '# Timeouts\n' +
-      'read_request_timeout_in_ms: <%= @cassandra::params::read_request_timeout_in_ms %>\n' +
-      'write_request_timeout_in_ms: <%= @cassandra::params::write_request_timeout_in_ms %>\n' +
-      'cas_contention_timeout_in_ms: <%= @cassandra::params::cas_contention_timeout_in_ms %>\n' +
-      '\n' +
-      '# Security\n' +
-      'authenticator: <%= @cassandra::params::authenticator %>\n' +
-      'authorizer: <%= @cassandra::params::authorizer %>\n' +
-      '\n' +
-      '# Client-to-Node Encryption\n' +
-      'client_encryption_options:\n' +
-      '  enabled: <%= @cassandra::params::client_encryption_enabled %>\n' +
-      '<% if @cassandra::params::client_encryption_enabled -%>\n' +
-      '  keystore: <%= @cassandra::params::client_encryption_keystore %>\n' +
-      '  keystore_password: "CHANGEME"\n' +
-      '  truststore: <%= @cassandra::params::client_encryption_truststore %>\n' +
-      '  truststore_password: "CHANGEME"\n' +
-      '<% end -%>\n' +
-      '\n' +
-      '# Node-to-Node Encryption\n' +
+      "      - seeds: \"<%= @seeds %>\"\n" +
+      "endpoint_snitch: GossipingPropertyFileSnitch\n" +
+      "data_file_directories:\n" +
+      "  - <%= @data_dir %>\n" +
+      "commitlog_directory: <%= @commitlog_dir %>\n" +
+      "saved_caches_directory: /var/lib/cassandra/saved_caches\n" +
+      "authenticator: PasswordAuthenticator\n" +
+      "authorizer: CassandraAuthorizer\n" +
+      '<% if @ssl_enabled == true -%>\n' +
       'server_encryption_options:\n' +
-      '  internode_encryption: <%= @cassandra::params::server_encryption_enabled ? "all" : "none" %>\n' +
-      '<% if @cassandra::params::server_encryption_enabled -%>\n' +
-      '  keystore: <%= @cassandra::params::server_encryption_keystore %>\n' +
-      '  keystore_password: "CHANGEME"\n' +
-      '  truststore: <%= @cassandra::params::server_encryption_truststore %>\n' +
-      '  truststore_password: "CHANGEME"\n' +
-      '<% end -%>'
-    ,
-    'cassandra-env.sh.erb': 
-      '#!/bin/sh\n' +
-      '# This file is managed by Puppet from cassandra/cassandra-env.sh.erb.\n' +
-      '# Local changes will be overwritten.\n' +
-      '#\n' +
-      '\n' +
-      '# Set Java Heap Size\n' +
-      '<% if @cassandra::params::jvm_max_heap_size -%>\n' +
-      'MAX_HEAP_SIZE="<%= @cassandra::params::jvm_max_heap_size %>"\n' +
+      "  internode_encryption: <%= @internode_encryption %>\n" +
+      "  keystore: <%= @keystore_path %>\n" +
+      "  keystore_password: <%= @keystore_password %>\n" +
+      "  truststore: <%= @truststore_path %>\n" +
+      "  truststore_password: <%= @truststore_password %>\n" +
+      'client_encryption_options:\n' +
+      '  enabled: true\n' +
+      "  keystore: <%= @keystore_path %>\n" +
+      "  keystore_password: <%= @keystore_password %>\n" +
       '<% end -%>\n' +
-      '<% if @cassandra::params::jvm_new_heap_size -%>\n' +
-      'HEAP_NEWSIZE="<%= @cassandra::params::jvm_new_heap_size %>"\n' +
-      '<% end -%>\n' +
-      '\n' +
-      '# Add extra JVM options\n' +
-      '<% if @cassandra::params::jvm_extra_opts -%>\n' +
-      'JVM_EXTRA_OPTS="$JVM_EXTRA_OPTS <%= @cassandra::params::jvm_extra_opts %>"\n' +
-      '<% end -%>\n' +
-      '\n' +
-      '# Use G1GC for modern garbage collection\n' +
-      '# This is a sensible default for most workloads on modern hardware\n' +
-      'if [ "$JVM_VENDOR" = "OpenJDK" ] && [ "$JVM_VERSION" -ge 7 ]; then\n' +
-      '  CASSANDRA_GC_OPTS="-XX:+UseG1GC -XX:G1RSetUpdatingPauseTimePercent=5 -XX:MaxGCPauseMillis=500"\n' +
-      'fi\n' +
-      'export CASSANDRA_GC_OPTS\n' +
-      ''
-    ,
-    'jvm-server.options.erb': 
-      '# jvm-server.options\n' +
-      '# Generated by Puppet from cassandra/jvm-server.options.erb\n' +
-      '# This file is for Cassandra 4.x and later.\n' +
-      '\n' +
-      '# Basic memory settings\n' +
-      '<% if @cassandra::params::jvm_max_heap_size -%>\n' +
-      '-Xms<%= @cassandra::params::jvm_max_heap_size %>\n' +
-      '-Xmx<%= @cassandra::params::jvm_max_heap_size %>\n' +
-      '<% else -%>\n' +
-      '# Default if not set in Hiera\n' +
-      '-Xms4G\n' +
-      '-Xmx4G\n' +
-      '<% end -%>\n' +
-      '\n' +
-      '# GC Settings\n' +
-      '<% if @cassandra::params::use_shenandoah_gc -%>\n' +
-      '-XX:+UseShenandoahGC\n' +
-      '-XX:+UnlockExperimentalVMOptions\n' +
-      '<% elsif @cassandra::params::use_g1_gc -%>\n' +
-      '-XX:+UseG1GC\n' +
-      '-XX:G1RSetUpdatingPauseTimePercent=5\n' +
-      '-XX:MaxGCPauseMillis=500\n' +
-      '<% else -%>\n' +
-      '-XX:+UseConcMarkSweepGC\n' +
-      '-XX:+CMSParallelRemarkEnabled\n' +
-      '<% end -%>\n' +
-      '\n' +
-      '# Other standard options\n' +
-      '-XX:+HeapDumpOnOutOfMemoryError\n' +
-      '-XX:HeapDumpPath=/var/lib/cassandra/java_pid<pid>.hprof\n' +
-      '-Dcassandra.jmx.local.port=7199\n' +
-      '-Dcom.sun.management.jmxremote.authenticate=false\n' +
-      '-Dcom.sun.management.jmxremote.ssl=false\n' +
-      ''
-    ,
+      '<% if @replace_address != "" -%>\n' +
+      "replace_address_first_boot: <%= @replace_address %>\n" +
+      '<% end -%>',
     'cassandra-rackdc.properties.erb': 
       '# cassandra-rackdc.properties\n' +
       '# Generated by Puppet\n' +
       '# Used by GossipingPropertyFileSnitch\n' +
-      'dc=<%= @cassandra::params::dc %>\n' +
-      'rack=<%= @cassandra::params::rack %>\n'
-    ,
-    'cassandra_limits.conf.erb': 
-      '# /etc/security/limits.d/cassandra.conf\n' +
+      'dc=<%= @datacenter %>\n' +
+      'rack=<%= @rack %>\n',
+    'jvm-server.options.erb': 
+      '# jvm-server.options\n' +
       '# Generated by Puppet\n' +
-      'cassandra - memlock <%= @cassandra::params::limits_memlock %>\n' +
-      'cassandra - nofile <%= @cassandra::params::limits_nofile %>\n' +
-      'cassandra - nproc <%= @cassandra::params::limits_nproc %>\n' +
-      'cassandra - as <%= @cassandra::params::limits_as %>\n' +
-      'root - memlock <%= @cassandra::params::limits_memlock %>\n' +
-      'root - nofile <%= @cassandra::params::limits_nofile %>\n' +
-      'root - nproc <%= @cassandra::params::limits_nproc %>\n' +
-      'root - as <%= @cassandra::params::limits_as %>\n'
-    ,
-    'sysctl.conf.erb':
-      '# /etc/sysctl.d/90-cassandra.conf\n' +
-      '# Generated by Puppet for Cassandra tuning\n' +
-      '\n' +
-      '# Network settings\n' +
-      'net.ipv4.tcp_rmem = <%= @cassandra::params::net_ipv4_tcp_rmem %>\n' +
-      'net.ipv4.tcp_wmem = <%= @cassandra::params::net_ipv4_tcp_wmem %>\n' +
-      'net.core.rmem_max = <%= @cassandra::params::net_core_rmem_max %>\n' +
-      'net.core.wmem_max = <%= @cassandra::params::net_core_wmem_max %>\n' +
-      '\n' +
-      '# Other recommendations\n' +
-      'vm.max_map_count = 1048575\n'
+      '# This file is for Cassandra 4.x and later.\n' +
+      '<% if @java_version.to_i >= 11 -%>\n' +
+      '-Xms<%= @max_heap_size %>\n' +
+      '-Xmx<%= @max_heap_size %>\n' +
+      '<% if @gc_type == "G1GC" -%>\n' +
+      '-XX:+UseG1GC\n' +
+      '-XX:G1RSetUpdatingPauseTimePercent=5\n' +
+      '-XX:MaxGCPauseMillis=500\n' +
+      '<% else -%>\n' +
+      '-XX:+UseShenandoahGC\n' +
+      '<% end -%>\n' +
+      '-XX:+HeapDumpOnOutOfMemoryError\n' +
+      '-Dcassandra.jmx.local.port=7199\n' +
+      '<% else -%>\n' +
+      '-Xms4G\n' +
+      '-Xmx4G\n' +
+      '-XX:+UseConcMarkSweepGC\n' +
+      '-XX:+CMSParallelRemarkEnabled\n' +
+      '<% end -%>',
+    'jvm8-server.options.erb':
+      '-Xms4G\n-Xmx4G\n-XX:+UseConcMarkSweepGC\n-XX:+CMSParallelRemarkEnabled\n',
+    'jvm11-server.options.erb':
+      '-Xms<%= @max_heap_size %>\n-Xmx<%= @max_heap_size %>\n<% if @gc_type == "G1GC" -%>\n-XX:+UseG1GC\n-XX:G1RSetUpdatingPauseTimePercent=5\n-XX:MaxGCPauseMillis=500\n<% else -%>\n-XX:+UseShenandoahGC\n<% end -%>\n',
+    'cqlshrc.erb':
+      "[authentication]\nusername = cassandra\npassword = <%= @cassandra_password %>",
+    'range-repair.service.erb':
+      '[Unit]\nDescription=Cassandra Range Repair Service\n\n[Service]\nType=simple\nUser=cassandra\nGroup=cassandra\nExecStart=/usr/local/bin/range-repair.sh\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target',
   },
   scripts: {
-    'robust_backup.sh': 
-      '#!/bin/bash\n' +
-      '# Robust backup script for a Cassandra node. Manages snapshots and optionally uploads to cloud storage.\n' +
-      'set -e\n' +
-      '\n' +
-      '# --- Configuration ---\n' +
-      'KEYSPACE="${1:-my_keyspace}" # Pass keyspace as first argument, or default\n' +
-      'BACKUP_BASE_DIR="/var/backups/cassandra"\n' +
-      'SNAPSHOT_NAME="snapshot_$(date +%Y-%m-%d_%H-%M-%S)"\n' +
-      'BACKUP_DIR="${BACKUP_BASE_DIR}/${KEYSPACE}/${SNAPSHOT_NAME}"\n' +
-      'DATADIR="/var/lib/cassandra/data"\n' +
-      '# Set to true to upload to a cloud bucket (e.g., S3, GCS)\n' +
-      'UPLOAD_TO_CLOUD=false\n' +
-      'CLOUD_BUCKET_PATH="s3://my-cassandra-backups/"\n' +
-      'LOG_FILE="/var/log/cassandra/backup.log"\n' +
-      '\n' +
-      '# --- Logging ---\n' +
-      'log() {\n' +
-      '  echo "$(date) - $1" | tee -a $LOG_FILE\n' +
-      '  }\n' +
-      '\n' +
-      '# --- Main Logic ---\n' +
-      'log "Starting backup for keyspace: ${KEYSPACE}"\n' +
-      '\n' +
-      'log "Creating snapshot ${SNAPSHOT_NAME}..."\n' +
-      'nodetool snapshot -t "${SNAPSHOT_NAME}" "${KEYSPACE}"\n' +
-      'log "Snapshot created successfully."\n' +
-      '\n' +
-      'log "Copying snapshot files to ${BACKUP_DIR}..."\n' +
-      'mkdir -p "${BACKUP_DIR}"\n' +
-      'find "${DATADIR}/${KEYSPACE}" -type d -path "*/snapshots/${SNAPSHOT_NAME}" -exec rsync -a --no-o --no-g {}/ "${BACKUP_DIR}" \\;\n' +
-      'log "Snapshot files copied."\n' +
-      '\n' +
-      'if [ "$UPLOAD_TO_CLOUD" = true ]; then\n' +
-      '  log "Uploading backup to ${CLOUD_BUCKET_PATH}..."\n' +
-      '  # Add your cloud CLI command here, e.g.:\n' +
-      '  # aws s3 sync "${BACKUP_DIR}" "${CLOUD_BUCKET_PATH}${KEYSPACE}/${SNAPSHOT_NAME}/"\n' +
-      '  log "Cloud upload complete."\n' +
-      'fi\n' +
-      '\n' +
-      'log "Clearing snapshot ${SNAPSHOT_NAME}..."\n' +
-      'nodetool clearsnapshot -t "${SNAPSHOT_NAME}" "${KEYSPACE}"\n' +
-      'log "Snapshot cleared."\n' +
-      '\n' +
-      'log "Backup complete for keyspace: ${KEYSPACE}"\n' +
-      ''
-    ,
-    'restore_from_backup.sh': 
-      '#!/bin/bash\n' +
-      '# Script to restore a Cassandra keyspace from a snapshot backup.\n' +
-      'set -e\n' +
-      '\n' +
-      '# --- Configuration ---\n' +
-      'KEYSPACE="${1:?Please provide a keyspace to restore.}"\n' +
-      'BACKUP_PATH="${2:?Please provide the full path to the backup directory.}"\n' +
-      'DATADIR="/var/lib/cassandra/data"\n' +
-      '\n' +
-      'echo "WARNING: This will stop Cassandra and replace data for keyspace ${KEYSPACE}."\n' +
-      'read -p "Are you sure you want to continue? (y/N) " -n 1 -r\n' +
-      'echo\n' +
-      'if [[ ! $REPLY =~ ^[Yy]$ ]]\n' +
-      'then\n' +
-      '    exit 1\n' +
-      'fi\n' +
-      '\n' +
-      'echo "Stopping Cassandra..."\n' +
-      'systemctl stop cassandra\n' +
-      '\n' +
-      'echo "Clearing old data for keyspace ${KEYSPACE}..."\n' +
-      'find "${DATADIR}/${KEYSPACE}" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +\n' +
-      '\n' +
-      'echo "Restoring data from ${BACKUP_PATH}..."\n' +
-      '# Find the table directories in the backup\n' +
-      'for table_dir in "${BACKUP_PATH}"/*/; do\n' +
-      '  table_name=$(basename "$table_dir")\n' +
-      '  target_dir="${DATADIR}/${KEYSPACE}/${table_name}-*/"\n' +
-      '  if [ -d $target_dir ]; then\n' +
-      '    echo "  - Restoring ${table_name}"\n' +
-      '    rsync -a --no-o --no-g "${table_dir}" "${target_dir}"\n' +
-      '  else\n' +
-      '    echo "  - WARNING: Could not find target directory for table ${table_name}"\n' +
-      '  fi\n' +
-      'done\n' +
-      '\n' +
-      'echo "Fixing permissions..."\n' +
-      'chown -R cassandra:cassandra "${DATADIR}/${KEYSPACE}"\n' +
-      '\n' +
-      'echo "Starting Cassandra..."\n' +
-      'systemctl start cassandra\n' +
-      '\n' +
-      'echo "Waiting for node to come up..."\n' +
-      'sleep 30 # Adjust as needed\n' +
-      '\n' +
-      'echo "Running nodetool refresh for keyspace ${KEYSPACE}..."\n' +
-      'nodetool refresh "${KEYSPACE}"\n' +
-      '\n' +
-      'echo "Restore complete. Remember to run a full repair on the cluster."\n' +
-      ''
-    ,
-    'node_health_check.sh': 
-      '#!/bin/bash\n' +
-      '# Performs a basic health check on the local Cassandra node.\n' +
-      '\n' +
-      'echo "--- Node Status ---"\n' +
-      'nodetool status\n' +
-      'echo\n' +
-      '\n' +
-      'echo "--- Gossip Info ---"\n' +
-      'nodetool gossipinfo\n' +
-      'echo\n' +
-      '\n' +
-      'echo "--- Ring Status ---"\n' +
-      'nodetool ring\n' +
-      'echo\n' +
-      '\n' +
-      'echo "--- Effective Ownership ---"\n' +
-      'nodetool describecluster\n' +
-      'echo\n' +
-      '\n' +
-      'echo "Health check complete. Review output for any issues (e.g., nodes in DN status)."\n' +
-      ''
-    ,
-    'rolling_restart.sh': 
-      '#!/bin/bash\n' +
-      '# Performs a rolling restart of a Cassandra cluster.\n' +
-      '# This script should be run from one of the Cassandra nodes.\n' +
-      'set -e\n' +
-      '\n' +
-      '# --- Configuration ---\n' +
-      '# List of all node IPs in the cluster\n' +
-      'ALL_NODES=("10.0.1.10" "10.0.1.11" "10.0.1.12" "10.0.1.13")\n' +
-      'SSH_USER="admin"\n' +
-      'WAIT_TIME=60 # Seconds to wait between node restarts\n' +
-      '\n' +
-      'log() {\n' +
-      '  echo "[$(date)] - $1"\n' +
-      '}\n' +
-      '\n' +
-      'log "Starting rolling restart of the Cassandra cluster..."\n' +
-      '\n' +
-      'for node in "${ALL_NODES[@]}"; do\n' +
-      '  log "--- Processing node: ${node} ---"\n' +
-      '\n' +
-      '  log "Draining node ${node}..."\n' +
-      '  ssh "${SSH_USER}@${node}" "nodetool drain"\n' +
-      '  if [ $? -ne 0 ]; then\n' +
-      '    log "ERROR: Failed to drain node ${node}. Aborting restart."\n' +
-      '    exit 1\n' +
-      '  fi\n' +
-      '\n' +
-      '  log "Stopping Cassandra service on ${node}..."\n' +
-      '  ssh "${SSH_USER}@${node}" "sudo systemctl stop cassandra"\n' +
-      '\n' +
-      '  log "Starting Cassandra service on ${node}..."\n' +
-      '  ssh "${SSH_USER}@${node}" "sudo systemctl start cassandra"\n' +
-      '\n' +
-      '  log "Waiting for node ${node} to rejoin the cluster..."\n' +
-      '  # This is a simple check; a more robust check would loop until status is UN (Up/Normal)\n' +
-      '  sleep ${WAIT_TIME}\n' +
-      '  ssh "${SSH_USER}@${node}" "nodetool status"\n' +
-      '\n' +
-      '  log "Node ${node} has been restarted. Waiting ${WAIT_TIME} seconds before proceeding to the next node."\n' +
-      '  sleep ${WAIT_TIME}\n' +
-      'done\n' +
-      '\n' +
-      'log "Rolling restart completed for all nodes."\n' +
-      ''
-    ,
+    'cassandra-upgrade-precheck.sh': '#!/bin/bash\n# Placeholder for cassandra-upgrade-precheck.sh\necho "Cassandra Upgrade Pre-check Script"',
+    'cluster-health.sh': '#!/bin/bash\n# Placeholder for cluster-health.sh\necho "Cluster Health Script"',
+    'repair-node.sh': '#!/bin/bash\n# Placeholder for repair-node.sh\necho "Repair Node Script"',
+    'cleanup-node.sh': '#!/bin/bash\n# Placeholder for cleanup-node.sh\necho "Cleanup Node Script"',
+    'take-snapshot.sh': '#!/bin/bash\n# Placeholder for take-snapshot.sh\necho "Take Snapshot Script"',
+    'drain-node.sh': '#!/bin/bash\n# Placeholder for drain-node.sh\necho "Drain Node Script"',
+    'rebuild-node.sh': '#!/bin/bash\n# Placeholder for rebuild-node.sh\necho "Rebuild Node Script"',
+    'garbage-collect.sh': '#!/bin/bash\n# Placeholder for garbage-collect.sh\necho "Garbage Collect Script"',
+    'assassinate-node.sh': '#!/bin/bash\n# Placeholder for assassinate-node.sh\necho "Assassinate Node Script"',
+    'upgrade-sstables.sh': '#!/bin/bash\n# Placeholder for upgrade-sstables.sh\necho "Upgrade SSTables Script"',
+    'backup-to-s3.sh': '#!/bin/bash\n# Placeholder for backup-to-s3.sh\necho "Backup to S3 Script"',
+    'prepare-replacement.sh': '#!/bin/bash\n# Placeholder for prepare-replacement.sh\necho "Prepare Replacement Script"',
+    'version-check.sh': '#!/bin/bash\n# Placeholder for version-check.sh\necho "Version Check Script"',
+    'cassandra_range_repair.py': '#!/usr/bin/env python3\n# Placeholder for cassandra_range_repair.py\nprint("Cassandra Range Repair Python Script")',
+    'range-repair.sh': '#!/bin/bash\n# Placeholder for range-repair.sh\necho "Range Repair Script"',
   },
 };
     
