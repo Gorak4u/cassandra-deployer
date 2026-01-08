@@ -61,7 +61,7 @@ export const puppetCode = {
       "  String \\$version                                  = '4.1.3',\n" +
       "  String \\$package_name                              = 'cassandra',\n" +
       "  String \\$service_name                              = 'cassandra',\n" +
-      "  Stdlib::Absolutepath \\$config_dir                   = '/etc/cassandra',\n" +
+      "  String \\$config_dir                                = '/etc/cassandra',\n" +
       "  Optional[String] \\$java_package_name               = undef,\n" +
       '\n' +
       '  # cassandra.yaml - Basic Settings\n' +
@@ -73,9 +73,9 @@ export const puppetCode = {
       "  String \\$endpoint_snitch                           = 'GossipingPropertyFileSnitch',\n" +
       '\n' +
       '  # cassandra.yaml - Directories\n' +
-      "  Array[Stdlib::Absolutepath] \\$data_file_directories = ['/var/lib/cassandra/data'],\n" +
-      "  Stdlib::Absolutepath \\$commitlog_directory           = '/var/lib/cassandra/commitlog',\n" +
-      "  Stdlib::Absolutepath \\$saved_caches_directory       = '/var/lib/cassandra/saved_caches',\n" +
+      "  Array[String] \\$data_file_directories              = ['/var/lib/cassandra/data'],\n" +
+      "  String \\$commitlog_directory                       = '/var/lib/cassandra/commitlog',\n" +
+      "  String \\$saved_caches_directory                   = '/var/lib/cassandra/saved_caches',\n" +
       '\n' +
       '  # cassandra.yaml - Security Settings\n' +
       "  String \\$authenticator                             = 'AllowAllAuthenticator',\n" +
@@ -124,7 +124,7 @@ export const puppetCode = {
       "  String \\$limits_as                                 = 'unlimited',\n" +
       '\n' +
       ') {\n' +
-      '  if \\$facts[\'gce\'] {\n' +
+      "  if \\$facts['gce'] {\n" +
       "    \\$dc = \\$facts['gce']['instance']['zone']\n" +
       "    \\$zone = \\$facts['gce']['instance']['zone']\n" +
       '\n' +
@@ -236,13 +236,13 @@ export const puppetCode = {
       "    \\$default_java_package = \\$facts['os']['family'] ? {\n" +
       "      'RedHat' => 'java-11-openjdk-headless',\n" +
       "      'Debian' => 'openjdk-11-jre-headless',\n" +
-      '      default  => fail("Unsupported OS family for Java 11 installation: ${facts[\'os\'][\'family\']}"),\n' +
+      "      default  => fail(\\\"Unsupported OS family for Java 11 installation: \${facts['os']['family']}\\\"),\n" +
       '    }\n' +
       '  } else {\n' +
       "    \\$default_java_package = \\$facts['os']['family'] ? {\n" +
       "      'RedHat' => 'java-1.8.0-openjdk-headless',\n" +
       "      'Debian' => 'openjdk-8-jre-headless',\n" +
-      '      default  => fail("Unsupported OS family for Java 8 installation: ${facts[\'os\'][\'family\']}"),\n' +
+      "      default  => fail(\\\"Unsupported OS family for Java 8 installation: \${facts['os']['family']}\\\"),\n" +
       '    }\n' +
       '  }\n' +
       '\n' +
@@ -267,8 +267,8 @@ export const puppetCode = {
       "    'RedHat': {\n" +
       "      yumrepo { 'cassandra':\n" +
       "        ensure   => 'present',\n" +
-      "        descr    => \\\"Apache Cassandra \\${version_major_only}x repo\\\",\n" +
-      "        baseurl  => \\\"https://downloads.apache.org/cassandra/redhat/\\${version_major_only}x/\\\",\n" +
+      "        descr    => \\\"Apache Cassandra \${version_major_only}x repo\\\",\n" +
+      "        baseurl  => \\\"https://downloads.apache.org/cassandra/redhat/\${version_major_only}x/\\\",\n" +
       '        enabled  => 1,\n' +
       '        gpgcheck => 0, # For production, set to 1 and manage the key\n' +
       '      }\n' +
@@ -277,7 +277,7 @@ export const puppetCode = {
       "    'Debian': {\n" +
       "      apt::source { 'cassandra':\n" +
       "        location => 'https://downloads.apache.org/cassandra/debian',\n" +
-      "        release  => \\\"\\${version_major_only}x\\\",\n" +
+      "        release  => \\\"\${version_major_only}x\\\",\n" +
       "        repos    => 'main',\n" +
       '        key      => {\n' +
       "          id     => 'F758CE318D77295D',\n" +
@@ -287,7 +287,7 @@ export const puppetCode = {
       "      Apt::Source['cassandra'] -> Package[\\$package_name]\n" +
       '    }\n' +
       '    default: {\n' +
-      '      fail("Cassandra installation is not supported on OS family \'${facts[\'os\'][\'family\']}\'")\n' +
+      "      fail(\\\"Cassandra installation is not supported on OS family '\${facts['os']['family']}'\\\")\n" +
       '    }\n' +
       '  }\n' +
       '\n' +
@@ -378,7 +378,7 @@ export const puppetCode = {
       '  [ \\$cassandra::params::data_file_directories,\n' +
       '    \\$cassandra::params::commitlog_directory,\n' +
       '    \\$cassandra::params::saved_caches_directory,\n' +
-      '  ].flatten.each |Stdlib::Absolutepath \\$dir| {\n' +
+      '  ].flatten.each |String \\$dir| {\n' +
       '    file { \\$dir:\n' +
       '      ensure  => directory,\n' +
       '      owner   => \\$owner,\n' +
@@ -737,4 +737,6 @@ export const puppetCode = {
     ,
   },
 };
+    
+
     
