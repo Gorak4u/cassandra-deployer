@@ -27,6 +27,12 @@ import { cn } from '@/lib/utils';
 const puppetFiles = [
   { group: 'root', name: 'metadata.json', lang: 'json' },
   { group: 'manifests', name: 'init.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'params.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'install.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'config.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'service.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'java.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'firewall.pp', lang: 'puppet' },
   { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
   { group: 'templates', name: 'cassandra-rackdc.properties.erb', lang: 'text' },
   { group: 'templates', name: 'jvm-server.options.erb', lang: 'text' },
@@ -34,6 +40,8 @@ const puppetFiles = [
   { group: 'templates', name: 'jvm11-server.options.erb', lang: 'text' },
   { group: 'templates', name: 'cqlshrc.erb', lang: 'text' },
   { group: 'templates', name: 'range-repair.service.erb', lang: 'text' },
+  { group: 'templates', name: 'cassandra_limits.conf.erb', lang: 'text' },
+  { group: 'templates', name: 'sysctl.conf.epp', lang: 'text' },
   { group: 'scripts', name: 'cassandra-upgrade-precheck.sh', lang: 'bash' },
   { group: 'scripts', name: 'cluster-health.sh', lang: 'bash' },
   { group: 'scripts', name: 'repair-node.sh', lang: 'bash' },
@@ -49,6 +57,10 @@ const puppetFiles = [
   { group: 'scripts', name: 'version-check.sh', lang: 'bash' },
   { group: 'scripts', name: 'cassandra_range_repair.py', lang: 'python' },
   { group: 'scripts', name: 'range-repair.sh', lang: 'bash' },
+  { group: 'scripts', name: 'robust_backup.sh', lang: 'bash' },
+  { group: 'scripts', name: 'restore_from_backup.sh', lang: 'bash' },
+  { group: 'scripts', name: 'node_health_check.sh', lang: 'bash' },
+  { group: 'scripts', name: 'rolling_restart.sh', lang: 'bash' },
 ];
 
 type PuppetFile = (typeof puppetFiles)[0];
