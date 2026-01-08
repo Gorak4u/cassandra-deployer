@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -204,7 +205,7 @@ export default function Home() {
                       <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
                         metadata.json
                       </code>{' '}
-                       installed in your Puppet environment.
+                       installed in your Puppet environment. All other parameters are now driven by Hiera.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -227,3 +228,5 @@ export default function Home() {
     </main>
   );
 }
+
+    
