@@ -70,8 +70,8 @@ export default function Home() {
           <div className="lg:col-span-1">
             <Card className="shadow-lg sticky top-8">
               <CardHeader>
-                <CardTitle>Puppet Profile</CardTitle>
-                <CardDescription>profile_ggonda_cassandra</CardDescription>
+                <CardTitle>Puppet Module</CardTitle>
+                <CardDescription>ggonda_cassandra</CardDescription>
               </CardHeader>
               <CardContent>
                 <Accordion
@@ -120,7 +120,7 @@ export default function Home() {
                 <CardTitle>{selectedFile.name}</CardTitle>
                 <CardDescription>
                   <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                    profile_ggonda_cassandra/{selectedFile.group}/
+                    ggonda_cassandra/{selectedFile.group}/
                     {selectedFile.name}
                   </span>
                 </CardDescription>
