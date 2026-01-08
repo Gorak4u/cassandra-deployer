@@ -32,6 +32,7 @@ const puppetFiles = [
   { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
   { group: 'files', name: 'cassandra-env.sh', lang: 'bash' },
   { group: 'scripts', name: 'backup.sh', lang: 'bash' },
+  { group: 'root', name: 'metadata.json', lang: 'json' },
 ];
 
 type PuppetFile = (typeof puppetFiles)[0];
@@ -44,9 +45,14 @@ const puppetFilesByGroup = puppetFiles.reduce((acc, file) => {
   return acc;
 }, {} as Record<string, PuppetFile[]>);
 
+const groupOrder = ['root', 'manifests', 'templates', 'files', 'scripts'];
+const sortedGroups = Object.entries(puppetFilesByGroup).sort(
+  ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
+);
+
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
-    puppetFiles[0]
+    puppetFiles.find(f => f.name === 'metadata.json')!
   );
 
   return (
@@ -71,45 +77,43 @@ export default function Home() {
             <Card className="shadow-lg sticky top-8">
               <CardHeader>
                 <CardTitle>Puppet Module</CardTitle>
-                <CardDescription>ggonda_cassandra</CardDescription>
+                <CardDescription>profile_ggonda_cassandra</CardDescription>
               </CardHeader>
               <CardContent>
                 <Accordion
                   type="multiple"
-                  defaultValue={Object.keys(puppetFilesByGroup)}
+                  defaultValue={['root', 'manifests']}
                   className="w-full"
                 >
-                  {Object.entries(puppetFilesByGroup).map(
-                    ([group, files]) => (
-                      <AccordionItem value={group} key={group}>
-                        <AccordionTrigger>
-                          <div className="flex items-center gap-2">
-                            <Folder className="h-5 w-5 text-primary" />
-                            <span className="font-semibold">{group}</span>
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                          <div className="flex flex-col gap-1 pl-4">
-                            {files.map((file) => (
-                              <Button
-                                key={file.name}
-                                variant="ghost"
-                                className={cn(
-                                  'justify-start gap-2',
-                                  selectedFile.name === file.name &&
-                                    'bg-accent text-accent-foreground'
-                                )}
-                                onClick={() => setSelectedFile(file)}
-                              >
-                                <FileIcon className="h-4 w-4" />
-                                {file.name}
-                              </Button>
-                            ))}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    )
-                  )}
+                  {sortedGroups.map(([group, files]) => (
+                    <AccordionItem value={group} key={group}>
+                      <AccordionTrigger>
+                        <div className="flex items-center gap-2">
+                          {group !== 'root' && <Folder className="h-5 w-5 text-primary" />}
+                          <span className="font-semibold">{group === 'root' ? 'Module Files' : group}</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="flex flex-col gap-1 pl-4">
+                          {files.map((file) => (
+                            <Button
+                              key={file.name}
+                              variant="ghost"
+                              className={cn(
+                                'justify-start gap-2',
+                                selectedFile.name === file.name &&
+                                  'bg-accent text-accent-foreground'
+                              )}
+                              onClick={() => setSelectedFile(file)}
+                            >
+                              <FileIcon className="h-4 w-4" />
+                              {file.name}
+                            </Button>
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
                 </Accordion>
               </CardContent>
             </Card>
@@ -120,8 +124,9 @@ export default function Home() {
                 <CardTitle>{selectedFile.name}</CardTitle>
                 <CardDescription>
                   <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                    ggonda_cassandra/{selectedFile.group}/
-                    {selectedFile.name}
+                    {selectedFile.group === 'root'
+                      ? `profile_ggonda_cassandra/${selectedFile.name}`
+                      : `profile_ggonda_cassandra/${selectedFile.group}/${selectedFile.name}`}
                   </span>
                 </CardDescription>
               </CardHeader>
@@ -131,15 +136,11 @@ export default function Home() {
                     <Terminal className="h-4 w-4 text-accent" />
                     <AlertTitle>Prerequisites</AlertTitle>
                     <AlertDescription>
-                      This profile assumes you have the{' '}
+                      This profile assumes you have the modules defined in{' '}
                       <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                        puppetlabs/stdlib
+                        metadata.json
                       </code>{' '}
-                      and{' '}
-                      <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                        puppetlabs/apt
-                      </code>{' '}
-                      modules installed in your Puppet environment.
+                       installed in your Puppet environment.
                     </AlertDescription>
                   </Alert>
                 )}
