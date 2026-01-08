@@ -78,7 +78,7 @@ const sortedGroups = Object.entries(puppetFilesByGroup).sort(
   ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
 );
 
-const REPO_NAME = 'profile_ggonda_cassandra';
+const REPO_NAME = 'profile_ggonda_cassandr';
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
