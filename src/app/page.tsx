@@ -28,9 +28,8 @@ import { cn } from '@/lib/utils';
 const puppetFiles = [
   { group: 'root', name: 'metadata.json', lang: 'json' },
   { group: 'manifests', name: 'init.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'params.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'install.pp', lang: 'puppet' },
   { group: 'manifests', name: 'config.pp', lang: 'puppet' },
+  { group: 'manifests', name: 'install.pp', lang: 'puppet' },
   { group: 'manifests', name: 'service.pp', lang: 'puppet' },
   { group: 'manifests', name: 'java.pp', lang: 'puppet' },
   { group: 'manifests', name: 'firewall.pp', lang: 'puppet' },
@@ -96,6 +95,7 @@ export default function Home() {
         const groupFolder = group === 'root' ? moduleFolder : moduleFolder.folder(group);
         if (groupFolder) {
           Object.entries(files).forEach(([fileName, code]) => {
+            if (code === null) return;
             if (fileName.endsWith('.jar')) {
               // Handle binary file
               groupFolder.file(fileName, 'binary content placeholder', { binary: true });
@@ -215,9 +215,9 @@ export default function Home() {
                 )}
                 <CodeBlock
                   code={
-                    (puppetCode as any)[selectedFile.group as keyof typeof puppetCode][
+                    (puppetCode as any)[selectedFile.group as keyof typeof puppetCode]?.[
                       selectedFile.name as any
-                    ]
+                    ] ?? `// ${selectedFile.name} is not available in the preview.`
                   }
                 />
               </CardContent>
