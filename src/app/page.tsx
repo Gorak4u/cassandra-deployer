@@ -21,95 +21,109 @@ import { RocketIcon } from '@/components/icons';
 import { CodeBlock } from '@/components/code-block';
 import { puppetCode } from '@/lib/puppet-code';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal, Folder, File as FileIcon, Download } from 'lucide-react';
+import { Terminal, Folder, File as FileIcon, Download, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
-const puppetFiles = [
-  { group: 'root', name: 'metadata.json', lang: 'json' },
-  { group: 'manifests', name: 'init.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'config.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'install.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'service.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'java.pp', lang: 'puppet' },
-  { group: 'manifests', name: 'firewall.pp', lang: 'puppet' },
-  { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
-  { group: 'templates', name: 'cassandra-rackdc.properties.erb', lang: 'text' },
-  { group: 'templates', name: 'jvm-server.options.erb', lang: 'text' },
-  { group: 'templates', name: 'cqlshrc.erb', lang: 'text' },
-  { group: 'templates', name: 'range-repair.service.erb', lang: 'text' },
-  { group: 'templates', name: 'cassandra_limits.conf.erb', lang: 'text' },
-  { group: 'templates', name: 'sysctl.conf.epp', lang: 'text' },
-  { group: 'scripts', name: 'cassandra-upgrade-precheck.sh', lang: 'bash' },
-  { group: 'scripts', name: 'cluster-health.sh', lang: 'bash' },
-  { group: 'scripts', name: 'repair-node.sh', lang: 'bash' },
-  { group: 'scripts', name: 'cleanup-node.sh', lang: 'bash' },
-  { group: 'scripts', name: 'take-snapshot.sh', lang: 'bash' },
-  { group: 'scripts', name: 'drain-node.sh', lang: 'bash' },
-  { group: 'scripts', name: 'rebuild-node.sh', lang: 'bash' },
-  { group: 'scripts', name: 'garbage-collect.sh', lang: 'bash' },
-  { group: 'scripts', name: 'assassinate-node.sh', lang: 'bash' },
-  { group: 'scripts', name: 'upgrade-sstables.sh', lang: 'bash' },
-  { group: 'scripts', name: 'backup-to-s3.sh', lang: 'bash' },
-  { group: 'scripts', name: 'prepare-replacement.sh', lang: 'bash' },
-  { group: 'scripts', name: 'version-check.sh', lang: 'bash' },
-  { group: 'scripts', name: 'cassandra_range_repair.py', lang: 'python' },
-  { group: 'scripts', name: 'range-repair.sh', lang: 'bash' },
-  { group: 'scripts', name: 'robust_backup.sh', lang: 'bash' },
-  { group: 'scripts', name: 'restore_from_backup.sh', lang: 'bash' },
-  { group: 'scripts', name: 'node_health_check.sh', lang: 'bash' },
-  { group: 'scripts', name: 'rolling_restart.sh', lang: 'bash' },
-  { group: 'files', name: 'jamm-0.3.2.jar', lang: 'binary' },
-];
 
-type PuppetFile = (typeof puppetFiles)[0];
+type PuppetFile = {
+  repo: string;
+  group: string;
+  name: string;
+  lang: string;
+};
 
-const puppetFilesByGroup = puppetFiles.reduce((acc, file) => {
-  if (!acc[file.group]) {
-    acc[file.group] = [];
+const getPuppetFiles = (): PuppetFile[] => {
+  const files: PuppetFile[] = [];
+  for (const repoName in puppetCode) {
+    const repo = (puppetCode as any)[repoName];
+    for (const groupName in repo) {
+      if (groupName === 'metadata.json') {
+        files.push({ repo: repoName, group: 'root', name: 'metadata.json', lang: 'json' });
+        continue;
+      }
+      const group = repo[groupName];
+      for (const fileName in group) {
+        let lang = 'text';
+        if (fileName.endsWith('.pp')) lang = 'puppet';
+        if (fileName.endsWith('.erb') || fileName.endsWith('.epp')) lang = 'ruby';
+        if (fileName.endsWith('.yaml')) lang = 'yaml';
+        if (fileName.endsWith('.sh')) lang = 'bash';
+        if (fileName.endsWith('.py')) lang = 'python';
+        if (fileName.endsWith('.jar')) lang = 'binary';
+        
+        files.push({ repo: repoName, group: groupName, name: fileName, lang });
+      }
+    }
   }
-  acc[file.group].push(file);
-  return acc;
-}, {} as Record<string, PuppetFile[]>);
+  return files;
+};
 
-const groupOrder = ['root', 'manifests', 'templates', 'scripts', 'files'];
-const sortedGroups = Object.entries(puppetFilesByGroup).sort(
-  ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
-);
+const allPuppetFiles = getPuppetFiles();
 
-const REPO_NAME = 'profile_ggonda_cassandr';
+const REPO_NAMES = Object.keys(puppetCode);
+
+const getRepoFilesByGroup = (repoName: string) => {
+    const repoFiles = allPuppetFiles.filter(f => f.repo === repoName);
+    const filesByGroup = repoFiles.reduce((acc, file) => {
+        if (!acc[file.group]) {
+            acc[file.group] = [];
+        }
+        acc[file.group].push(file);
+        return acc;
+    }, {} as Record<string, PuppetFile[]>);
+
+    const groupOrder = ['root', 'manifests', 'templates', 'scripts', 'files'];
+    return Object.entries(filesByGroup).sort(
+        ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
+    );
+};
+
 
 export default function Home() {
+  const [selectedRepo, setSelectedRepo] = useState<string>(REPO_NAMES[0]);
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
-    puppetFiles.find(f => f.name === 'init.pp')!
+    allPuppetFiles.find(f => f.repo === selectedRepo && f.name === 'init.pp')!
   );
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleDownload = async () => {
     setIsDownloading(true);
     const zip = new JSZip();
-    const moduleFolder = zip.folder(REPO_NAME);
 
-    if (moduleFolder) {
-      Object.entries(puppetCode).forEach(([group, files]) => {
-        const groupFolder = group === 'root' ? moduleFolder : moduleFolder.folder(group);
-        if (groupFolder) {
-          Object.entries(files).forEach(([fileName, code]) => {
-            if (code === null) return;
-            if (fileName.endsWith('.jar')) {
-              // Handle binary file
-              groupFolder.file(fileName, 'binary content placeholder', { binary: true });
-            } else {
-              groupFolder.file(fileName, code as string);
-            }
-          });
+    Object.entries(puppetCode).forEach(([repoName, repoData]) => {
+      const repoFolder = zip.folder(repoName);
+      if (!repoFolder) return;
+
+      Object.entries(repoData).forEach(([groupOrFileName, content]) => {
+        if (groupOrFileName === 'metadata.json') {
+          repoFolder.file('metadata.json', content as string);
+        } else if (typeof content === 'object' && content !== null) {
+          const groupFolder = repoFolder.folder(groupOrFileName);
+          if (groupFolder) {
+            Object.entries(content).forEach(([fileName, fileContent]) => {
+               if (fileContent === null) return;
+               if (fileName.endsWith('.jar')) {
+                 groupFolder.file(fileName, 'binary content placeholder', { binary: true });
+               } else {
+                 groupFolder.file(fileName, fileContent as string);
+               }
+            });
+          }
         }
       });
-    }
+    });
     
     try {
       const content = await zip.generateAsync({ type: 'blob' });
-      saveAs(content, `${REPO_NAME}.zip`);
+      saveAs(content, `puppet-cassandra-modules.zip`);
     } catch (error) {
       console.error('Error creating zip file:', error);
     } finally {
@@ -117,6 +131,15 @@ export default function Home() {
     }
   };
 
+  const handleRepoChange = (repoName: string) => {
+    setSelectedRepo(repoName);
+    const firstFile = allPuppetFiles.find(f => f.repo === repoName);
+    if(firstFile) {
+        setSelectedFile(firstFile);
+    }
+  };
+
+  const sortedGroups = getRepoFilesByGroup(selectedRepo);
 
   return (
     <main className="min-h-screen bg-background font-body text-foreground">
@@ -131,13 +154,13 @@ export default function Home() {
                 Cassandra Deployer
               </h1>
               <p className="text-muted-foreground mt-1">
-                Generate a modern Puppet profile for deploying Apache Cassandra.
+                Generate a modern Puppet architecture for deploying Apache Cassandra.
               </p>
             </div>
           </div>
           <Button onClick={handleDownload} disabled={isDownloading}>
             <Download className="mr-2 h-4 w-4" />
-            {isDownloading ? 'Downloading...' : `Download ${REPO_NAME}`}
+            {isDownloading ? 'Downloading...' : `Download All Modules`}
           </Button>
         </header>
 
@@ -145,8 +168,22 @@ export default function Home() {
           <div className="lg:col-span-1">
             <Card className="shadow-lg sticky top-8">
               <CardHeader>
-                <CardTitle>Puppet Repository</CardTitle>
-                <CardDescription>{REPO_NAME}</CardDescription>
+                <CardTitle>Puppet Repositories</CardTitle>
+                 <Select value={selectedRepo} onValueChange={handleRepoChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a repository" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REPO_NAMES.map(repo => (
+                      <SelectItem key={repo} value={repo}>
+                        <div className="flex items-center gap-2">
+                           <Package className="h-4 w-4" /> 
+                           {repo}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </CardHeader>
               <CardContent>
                 <Accordion
@@ -170,7 +207,7 @@ export default function Home() {
                               variant="ghost"
                               className={cn(
                                 'justify-start gap-2',
-                                selectedFile.name === file.name &&
+                                selectedFile?.name === file.name && selectedFile?.group === file.group &&
                                   'bg-accent text-accent-foreground'
                               )}
                               onClick={() => setSelectedFile(file)}
@@ -188,40 +225,56 @@ export default function Home() {
             </Card>
           </div>
           <div className="lg:col-span-2">
+           {selectedFile && (
             <Card className="w-full shadow-lg">
               <CardHeader>
                 <CardTitle>{selectedFile.name}</CardTitle>
                 <CardDescription>
                   <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                    {REPO_NAME}/{selectedFile.group === 'root'
+                    {selectedFile.repo}/{selectedFile.group === 'root'
                       ? selectedFile.name
                       : `${selectedFile.group}/${selectedFile.name}`}
                   </span>
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {selectedFile.name === 'init.pp' && (
+                {selectedFile.name === 'init.pp' && selectedFile.repo === 'cassandra_pfpt' && (
                   <Alert className="mb-6 border-accent">
                     <Terminal className="h-4 w-4 text-accent" />
-                    <AlertTitle>Prerequisites</AlertTitle>
+                    <AlertTitle>Component Module</AlertTitle>
                     <AlertDescription>
-                      This profile assumes you have the modules defined in{' '}
-                      <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                        metadata.json
-                      </code>{' '}
-                       installed in your Puppet environment. All other parameters are now driven by Hiera.
+                      This is the main component module. It is highly parameterized and should not contain direct Hiera lookups.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                 {selectedFile.name === 'init.pp' && selectedFile.repo === 'profile_cassandra_pfpt' && (
+                  <Alert className="mb-6 border-accent">
+                    <Terminal className="h-4 w-4 text-accent" />
+                    <AlertTitle>Profile Module</AlertTitle>
+                    <AlertDescription>
+                      This profile wraps the component module and provides its data via Hiera.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                 {selectedFile.name === 'init.pp' && selectedFile.repo === 'role_cassandra_pfpt' && (
+                  <Alert className="mb-6 border-accent">
+                    <Terminal className="h-4 w-4 text-accent" />
+                    <AlertTitle>Role Module</AlertTitle>
+                    <AlertDescription>
+                      This role includes the profile to define a complete Cassandra server. This is what you assign to nodes.
                     </AlertDescription>
                   </Alert>
                 )}
                 <CodeBlock
                   code={
-                    (puppetCode as any)[selectedFile.group as keyof typeof puppetCode]?.[
-                      selectedFile.name as any
-                    ] ?? `// ${selectedFile.name} is not available in the preview.`
+                    selectedFile.group === 'root'
+                    ? (puppetCode as any)[selectedFile.repo]['metadata.json']
+                    : (puppetCode as any)[selectedFile.repo]?.[selectedFile.group]?.[selectedFile.name] ?? `// ${selectedFile.name} is not available in the preview.`
                   }
                 />
               </CardContent>
             </Card>
+           )}
           </div>
         </div>
 
