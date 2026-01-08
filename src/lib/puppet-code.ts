@@ -29,42 +29,42 @@ export const puppetCode = {
 # This class orchestrates the installation, configuration, and service management.
 class cassandra_pfpt (
   # Package and Service Parameters
-  String $cassandra_version                 = '4.1.10-1',
-  String $java_version                      = '11',
-  String $java_package_version              = '',
-  Boolean $manage_repo                       = true,
-  String $user                               = 'cassandra',
-  String $group                              = 'cassandra',
-  String $repo_baseurl                       = "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/",
-  String $repo_gpgkey                        = 'https://downloads.apache.org/cassandra/KEYS',
-  Array[String] $package_dependencies       = ['cyrus-sasl-plain', 'jemalloc'],
+  String $cassandra_version,
+  String $java_version,
+  String $java_package_version,
+  Boolean $manage_repo,
+  String $user,
+  String $group,
+  String $repo_baseurl,
+  String $repo_gpgkey,
+  Array[String] $package_dependencies,
 
   # Configuration Parameters
-  String $cluster_name                      = 'Production Cluster',
-  String $seeds                             = $facts['networking']['ip'],
-  String $listen_address                    = $facts['networking']['ip'],
-  String $datacenter                        = 'dc1',
-  String $rack                              = 'rack1',
-  String $data_dir                          = '/var/lib/cassandra/data',
-  String $commitlog_dir                     = '/var/lib/cassandra/commitlog',
-  String $hints_directory                   = '/var/lib/cassandra/hints',
-  String $max_heap_size                     = '4G',
-  String $gc_type                           = 'G1GC',
-  String $cassandra_password                = 'cassandra',
-  String $replace_address                   = '',
+  String $cluster_name,
+  String $seeds,
+  String $listen_address,
+  String $datacenter,
+  String $rack,
+  String $data_dir,
+  String $commitlog_dir,
+  String $hints_directory,
+  String $max_heap_size,
+  String $gc_type,
+  String $cassandra_password,
+  String $replace_address,
 
   # OS Tuning Parameters
-  Boolean $disable_swap                     = true,
-  Hash $sysctl_settings                     = {},
-  Hash $limits_settings                     = { 'nofile' => 100000, 'nproc' => 32768 },
+  Boolean $disable_swap,
+  Hash $sysctl_settings,
+  Hash $limits_settings,
 
   # Script and File Parameters
-  String $manage_bin_dir                    = '/usr/local/bin',
-  String $jamm_source                       = 'puppet:///modules/cassandra_pfpt/files/jamm-0.3.2.jar',
-  String $jamm_target                       = '/usr/share/cassandra/lib/jamm-0.3.2.jar',
+  String $manage_bin_dir,
+  String $jamm_source,
+  String $jamm_target,
 
   # Service Management
-  Boolean $enable_range_repair              = false
+  Boolean $enable_range_repair
 ) {
 
   contain cassandra_pfpt::java
@@ -399,25 +399,25 @@ WantedBy=multi-user.target
         `.trim(),
     },
     scripts: {
-      'cassandra-upgrade-precheck.sh': '#!/bin/bash\n# Placeholder for cassandra-upgrade-precheck.sh\necho "Cassandra Upgrade Pre-check Script"',
-      'cluster-health.sh': '#!/bin/bash\nnodetool status',
-      'repair-node.sh': '#!/bin/bash\nnodetool repair -pr',
-      'drain-node.sh': '#!/bin/bash\nnodetool drain',
-      'cleanup-node.sh': '#!/bin/bash\necho "Cleanup Node Script"',
-      'take-snapshot.sh': '#!/bin/bash\necho "Take Snapshot Script"',
-      'rebuild-node.sh': '#!/bin/bash\necho "Rebuild Node Script"',
-      'garbage-collect.sh': '#!/bin/bash\necho "Garbage Collect Script"',
-      'assassinate-node.sh': '#!/bin/bash\necho "Assassinate Node Script"',
-      'upgrade-sstables.sh': '#!/bin/bash\necho "Upgrade SSTables Script"',
-      'backup-to-s3.sh': '#!/bin/bash\necho "Backup to S3 Script"',
-      'prepare-replacement.sh': '#!/bin/bash\necho "Prepare Replacement Script"',
-      'version-check.sh': '#!/bin/bash\necho "Version Check Script"',
-      'cassandra_range_repair.py': '#!/usr/bin/env python3\nprint("Cassandra Range Repair Python Script")',
-      'range-repair.sh': '#!/bin/bash\necho "Range Repair Script"',
-      'robust_backup.sh': '#!/bin/bash\necho "Robust Backup Script Placeholder"',
-      'restore_from_backup.sh': '#!/bin/bash\necho "Restore from Backup Script Placeholder"',
-      'node_health_check.sh': '#!/bin/bash\necho "Node Health Check Script Placeholder"',
-      'rolling_restart.sh': '#!/bin/bash\necho "Rolling Restart Script Placeholder"',
+      'cassandra-upgrade-precheck.sh': '#!/bin/bash\\n# Placeholder for cassandra-upgrade-precheck.sh\\necho "Cassandra Upgrade Pre-check Script"',
+      'cluster-health.sh': '#!/bin/bash\\nnodetool status',
+      'repair-node.sh': '#!/bin/bash\\nnodetool repair -pr',
+      'drain-node.sh': '#!/bin/bash\\nnodetool drain',
+      'cleanup-node.sh': '#!/bin/bash\\necho "Cleanup Node Script"',
+      'take-snapshot.sh': '#!/bin/bash\\necho "Take Snapshot Script"',
+      'rebuild-node.sh': '#!/bin/bash\\necho "Rebuild Node Script"',
+      'garbage-collect.sh': '#!/bin/bash\\necho "Garbage Collect Script"',
+      'assassinate-node.sh': '#!/bin/bash\\necho "Assassinate Node Script"',
+      'upgrade-sstables.sh': '#!/bin/bash\\necho "Upgrade SSTables Script"',
+      'backup-to-s3.sh': '#!/bin/bash\\necho "Backup to S3 Script"',
+      'prepare-replacement.sh': '#!/bin/bash\\necho "Prepare Replacement Script"',
+      'version-check.sh': '#!/bin/bash\\necho "Version Check Script"',
+      'cassandra_range_repair.py': '#!/usr/bin/env python3\\nprint("Cassandra Range Repair Python Script")',
+      'range-repair.sh': '#!/bin/bash\\necho "Range Repair Script"',
+      'robust_backup.sh': '#!/bin/bash\\necho "Robust Backup Script Placeholder"',
+      'restore_from_backup.sh': '#!/bin/bash\\necho "Restore from Backup Script Placeholder"',
+      'node_health_check.sh': '#!/bin/bash\\necho "Node Health Check Script Placeholder"',
+      'rolling_restart.sh': '#!/bin/bash\\necho "Rolling Restart Script Placeholder"',
     },
     files: {
       'jamm-0.3.2.jar': '', // Placeholder for binary file
@@ -452,21 +452,66 @@ WantedBy=multi-user.target
 # This class wraps the cassandra_pfpt component module and provides
 # configuration data via Hiera.
 class profile_cassandra_pfpt {
-  # Hiera lookups with defaults
-  $cassandra_version = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
-  $cluster_name      = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'Production PFPT Cluster' })
-  $seeds             = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
-  $datacenter        = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
-  $rack              = lookup('profile_cassandra_pfpt::rack', { 'default_value' => 'rack1' })
+  # Hiera lookups for all cassandra_pfpt parameters
+  $cassandra_version    = lookup('cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
+  $java_version         = lookup('cassandra_pfpt::java_version', { 'default_value' => '11' })
+  $java_package_version = lookup('cassandra_pfpt::java_package_version', { 'default_value' => '' })
+  $manage_repo          = lookup('cassandra_pfpt::manage_repo', { 'default_value' => true })
+  $user                 = lookup('cassandra_pfpt::user', { 'default_value' => 'cassandra' })
+  $group                = lookup('cassandra_pfpt::group', { 'default_value' => 'cassandra' })
+  $repo_baseurl         = lookup('cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/" })
+  $repo_gpgkey          = lookup('cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://downloads.apache.org/cassandra/KEYS' })
+  $package_dependencies = lookup('cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc'] })
+  $cluster_name         = lookup('cassandra_pfpt::cluster_name', { 'default_value' => 'Production PFPT Cluster' })
+  $seeds                = lookup('cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
+  $listen_address       = lookup('cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
+  $datacenter           = lookup('cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
+  $rack                 = lookup('cassandra_pfpt::rack', { 'default_value' => 'rack1' })
+  $data_dir             = lookup('cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
+  $commitlog_dir        = lookup('cassandra_pfpt::commitlog_dir', { 'default_value' => '/var/lib/cassandra/commitlog' })
+  $hints_directory      = lookup('cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
+  $max_heap_size        = lookup('cassandra_pfpt::max_heap_size', { 'default_value' => '4G' })
+  $gc_type              = lookup('cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
+  $cassandra_password   = lookup('cassandra_pfpt::cassandra_password', { 'default_value' => 'cassandra' })
+  $replace_address      = lookup('cassandra_pfpt::replace_address', { 'default_value' => '' })
+  $disable_swap         = lookup('cassandra_pfpt::disable_swap', { 'default_value' => true })
+  $sysctl_settings      = lookup('cassandra_pfpt::sysctl_settings', { 'default_value' => {} })
+  $limits_settings      = lookup('cassandra_pfpt::limits_settings', { 'default_value' => { 'nofile' => 100000, 'nproc' => 32768 } })
+  $manage_bin_dir       = lookup('cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/bin' })
+  $jamm_source          = lookup('cassandra_pfpt::jamm_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/files/jamm-0.3.2.jar' })
+  $jamm_target          = lookup('cassandra_pfpt::jamm_target', { 'default_value' => '/usr/share/cassandra/lib/jamm-0.3.2.jar' })
+  $enable_range_repair  = lookup('cassandra_pfpt::enable_range_repair', { 'default_value' => false })
 
   # Pass looked-up data to the component module
   class { 'cassandra_pfpt':
-    cassandra_version => $cassandra_version,
-    cluster_name      => $cluster_name,
-    seeds             => $seeds,
-    datacenter        => $datacenter,
-    rack              => $rack,
-    # All other parameters will use their defaults from the cassandra_pfpt class
+    cassandra_version    => $cassandra_version,
+    java_version         => $java_version,
+    java_package_version => $java_package_version,
+    manage_repo          => $manage_repo,
+    user                 => $user,
+    group                => $group,
+    repo_baseurl         => $repo_baseurl,
+    repo_gpgkey          => $repo_gpgkey,
+    package_dependencies => $package_dependencies,
+    cluster_name         => $cluster_name,
+    seeds                => $seeds,
+    listen_address       => $listen_address,
+    datacenter           => $datacenter,
+    rack                 => $rack,
+    data_dir             => $data_dir,
+    commitlog_dir        => $commitlog_dir,
+    hints_directory      => $hints_directory,
+    max_heap_size        => $max_heap_size,
+    gc_type              => $gc_type,
+    cassandra_password   => $cassandra_password,
+    replace_address      => $replace_address,
+    disable_swap         => $disable_swap,
+    sysctl_settings      => $sysctl_settings,
+    limits_settings      => $limits_settings,
+    manage_bin_dir       => $manage_bin_dir,
+    jamm_source          => $jamm_source,
+    jamm_target          => $jamm_target,
+    enable_range_repair  => $enable_range_repair,
   }
 }
         `.trim(),
@@ -507,3 +552,5 @@ class role_cassandra_pfpt {
     },
   },
 };
+
+    
