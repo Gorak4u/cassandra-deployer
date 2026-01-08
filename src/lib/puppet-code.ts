@@ -1,3 +1,4 @@
+
 export const puppetCode = {
   manifests: {
     'init.pp': `class profile_ggonda_cassandra (
@@ -11,9 +12,9 @@ export const puppetCode = {
 
   # cassandra.yaml parameters
   String $cluster_name = 'MyCassandraCluster',
-  Array[String] $seeds = [\\$facts['networking']['ip']],
-  String $listen_address = \\$facts['networking']['ip'],
-  String $rpc_address = \\$facts['networking']['ip'],
+  Array[String] $seeds = [\\\${facts['networking']['ip']}],
+  String $listen_address = \\\${facts['networking']['ip']},
+  String $rpc_address = \\\${facts['networking']['ip']},
   Array[Stdlib::Absolutepath] $data_file_directories = ['/var/lib/cassandra/data'],
   Stdlib::Absolutepath $commitlog_directory = '/var/lib/cassandra/commitlog',
 ) {
@@ -59,7 +60,7 @@ class profile_ggonda_cassandra::java {
   $default_java_package = $facts['os']['family'] ? {
     'RedHat' => 'java-1.8.0-openjdk-headless',
     'Debian' => 'openjdk-8-jre-headless',
-    default  => fail("Unsupported OS family for Java installation: ${facts['os']['family']}"),
+    default  => fail("Unsupported OS family for Java installation: \\\${facts['os']['family']}"),
   }
 
   # Use the Hiera-provided package name if it exists, otherwise use the default
@@ -76,7 +77,7 @@ class profile_ggonda_cassandra::install {
   $version = $profile_ggonda_cassandra::params::version
 
   # Extract major version for repo path, e.g., 4.0.1 -> 40
-  $version_major = regsubst($version, '^(\\d)\\.(\\d)\\..*', '\\1\\2')
+  $version_major = regsubst($version, '^(\\\\d)\\\\.(\\\\d)\\\\..*', '\\\\1\\\\2')
 
   # OS-specific installation logic
   case $facts['os']['family'] {
@@ -84,8 +85,8 @@ class profile_ggonda_cassandra::install {
       # For production, set gpgcheck to 1 and manage the key with a gpgkey resource
       yumrepo { 'cassandra':
         ensure   => 'present',
-        descr    => "Apache Cassandra ${version_major}x repo",
-        baseurl  => "https://downloads.apache.org/cassandra/redhat/${version_major}x/",
+        descr    => "Apache Cassandra \\\${version_major}x repo",
+        baseurl  => "https://downloads.apache.org/cassandra/redhat/\\\${version_major}x/",
         enabled  => 1,
         gpgcheck => 0,
       }
@@ -96,7 +97,7 @@ class profile_ggonda_cassandra::install {
       # This requires the puppetlabs/apt module
       apt::source { 'cassandra':
         location => 'https://downloads.apache.org/cassandra/debian',
-        release  => "${version_major}x",
+        release  => "\\\${version_major}x",
         repos    => 'main',
         # Key management is required for production
         # key      => { 'id' => '...', 'source' => '...' },
@@ -105,7 +106,7 @@ class profile_ggonda_cassandra::install {
       Apt::Source['cassandra'] -> Package[$package_name]
     }
     default: {
-      fail("Cassandra installation is not supported on OS family '${facts['os']['family']}'")
+      fail("Cassandra installation is not supported on OS family '\\\${facts['os']['family']}'")
     }
   }
 
@@ -228,12 +229,12 @@ commitlog_directory: <%= @profile_ggonda_cassandra::params::commitlog_directory 
 # Variables
 KEYSPACE="my_keyspace"
 SNAPSHOT_NAME="snapshot_$(date +%Y-%m-%d_%H-%M-%S)"
-BACKUP_DIR="/var/backups/cassandra/${SNAPSHOT_NAME}"
+BACKUP_DIR="/var/backups/cassandra/\\\${SNAPSHOT_NAME}"
 
-echo "Creating snapshot ${SNAPSHOT_NAME} for keyspace ${KEYSPACE}..."
+echo "Creating snapshot \\\${SNAPSHOT_NAME} for keyspace \\\${KEYSPACE}..."
 
 # Create the snapshot
-nodetool snapshot -t "${SNAPSHOT_NAME}" "${KEYSPACE}"
+nodetool snapshot -t "\\\${SNAPSHOT_NAME}" "\\\${KEYSPACE}"
 
 if [ $? -ne 0 ]; then
   echo "Snapshot creation failed."
@@ -241,14 +242,14 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Snapshot created successfully."
-echo "Copying snapshot files to ${BACKUP_DIR}..."
+echo "Copying snapshot files to \\\${BACKUP_DIR}..."
 
 # Find and copy the snapshot files
 # This logic will vary based on your Cassandra data directory structure
-SNAPSHOT_PATH=$(find /var/lib/cassandra/data/${KEYSPACE}/*/snapshots/${SNAPSHOT_NAME} -type d | head -n 1)
+SNAPSHOT_PATH=$(find /var/lib/cassandra/data/\\\${KEYSPACE}/*/snapshots/\\\${SNAPSHOT_NAME} -type d | head -n 1)
 
-mkdir -p "${BACKUP_DIR}"
-cp -r "${SNAPSHOT_PATH}"/* "${BACKUP_DIR}/"
+mkdir -p "\\\${BACKUP_DIR}"
+cp -r "\\\${SNAPSHOT_PATH}"/* "\\\${BACKUP_DIR}/"
 
 if [ $? -ne 0 ]; then
   echo "Failed to copy snapshot files."
@@ -256,11 +257,11 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-echo "Backup copied to ${BACKUP_DIR}."
-echo "Clearing snapshot ${SNAPSHOT_NAME}..."
+echo "Backup copied to \\\${BACKUP_DIR}."
+echo "Clearing snapshot \\\${SNAPSHOT_NAME}..."
 
 # Clear the snapshot
-nodetool clearsnapshot -t "${SNAPSHOT_NAME}" "${KEYSPACE}"
+nodetool clearsnapshot -t "\\\${SNAPSHOT_NAME}" "\\\${KEYSPACE}"
 
 echo "Backup complete."
 `,
