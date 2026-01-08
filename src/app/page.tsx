@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
   Card,
   CardContent,
@@ -18,11 +20,12 @@ import { RocketIcon } from '@/components/icons';
 import { CodeBlock } from '@/components/code-block';
 import { puppetCode } from '@/lib/puppet-code';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal, Folder, File as FileIcon } from 'lucide-react';
+import { Terminal, Folder, File as FileIcon, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 const puppetFiles = [
+  { group: 'root', name: 'metadata.json', lang: 'json' },
   { group: 'manifests', name: 'init.pp', lang: 'puppet' },
   { group: 'manifests', name: 'params.pp', lang: 'puppet' },
   { group: 'manifests', name: 'java.pp', lang: 'puppet' },
@@ -32,7 +35,6 @@ const puppetFiles = [
   { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
   { group: 'files', name: 'cassandra-env.sh', lang: 'bash' },
   { group: 'scripts', name: 'backup.sh', lang: 'bash' },
-  { group: 'root', name: 'metadata.json', lang: 'json' },
 ];
 
 type PuppetFile = (typeof puppetFiles)[0];
@@ -56,22 +58,56 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
     puppetFiles.find(f => f.name === 'metadata.json')!
   );
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    const zip = new JSZip();
+    const moduleFolder = zip.folder(REPO_NAME);
+
+    if (moduleFolder) {
+      Object.entries(puppetCode).forEach(([group, files]) => {
+        const groupFolder = group === 'root' ? moduleFolder : moduleFolder.folder(group);
+        if (groupFolder) {
+          Object.entries(files).forEach(([fileName, code]) => {
+            groupFolder.file(fileName, code);
+          });
+        }
+      });
+    }
+    
+    try {
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, `${REPO_NAME}.zip`);
+    } catch (error) {
+      console.error('Error creating zip file:', error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
 
   return (
     <main className="min-h-screen bg-background font-body text-foreground">
       <div className="container mx-auto p-4 md:p-8">
-        <header className="flex items-center gap-4 mb-8">
-          <div className="bg-primary text-primary-foreground p-3 rounded-lg shadow-md">
-            <RocketIcon className="w-8 h-8" />
+        <header className="flex items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-4">
+            <div className="bg-primary text-primary-foreground p-3 rounded-lg shadow-md">
+              <RocketIcon className="w-8 h-8" />
+            </div>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-headline font-bold text-primary">
+                Cassandra Deployer
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                Generate a modern Puppet profile for deploying Apache Cassandra.
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl md:text-4xl font-headline font-bold text-primary">
-              Cassandra Deployer
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Generate a modern Puppet profile for deploying Apache Cassandra.
-            </p>
-          </div>
+          <Button onClick={handleDownload} disabled={isDownloading}>
+            <Download className="mr-2 h-4 w-4" />
+            {isDownloading ? 'Downloading...' : `Download ${REPO_NAME}`}
+          </Button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
