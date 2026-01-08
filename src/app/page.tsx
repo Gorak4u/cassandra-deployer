@@ -50,6 +50,8 @@ const sortedGroups = Object.entries(puppetFilesByGroup).sort(
   ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
 );
 
+const REPO_NAME = 'profile_ggonda_cassandra';
+
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
     puppetFiles.find(f => f.name === 'metadata.json')!
@@ -76,8 +78,8 @@ export default function Home() {
           <div className="lg:col-span-1">
             <Card className="shadow-lg sticky top-8">
               <CardHeader>
-                <CardTitle>Puppet Module</CardTitle>
-                <CardDescription>ggonda-cassandra</CardDescription>
+                <CardTitle>Puppet Repository</CardTitle>
+                <CardDescription>{REPO_NAME}</CardDescription>
               </CardHeader>
               <CardContent>
                 <Accordion
@@ -124,9 +126,9 @@ export default function Home() {
                 <CardTitle>{selectedFile.name}</CardTitle>
                 <CardDescription>
                   <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                    {selectedFile.group === 'root'
-                      ? `ggonda-cassandra/${selectedFile.name}`
-                      : `ggonda-cassandra/${selectedFile.group}/${selectedFile.name}`}
+                    {REPO_NAME}/{selectedFile.group === 'root'
+                      ? selectedFile.name
+                      : `${selectedFile.group}/${selectedFile.name}`}
                   </span>
                 </CardDescription>
               </CardHeader>
