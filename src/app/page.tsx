@@ -33,8 +33,12 @@ const puppetFiles = [
   { group: 'manifests', name: 'config.pp', lang: 'puppet' },
   { group: 'manifests', name: 'service.pp', lang: 'puppet' },
   { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
-  { group: 'files', name: 'cassandra-env.sh', lang: 'bash' },
-  { group: 'scripts', name: 'backup.sh', lang: 'bash' },
+  { group: 'templates', name: 'cassandra-env.sh.erb', lang: 'bash' },
+  { group: 'templates', name: 'jvm-server.options.erb', lang: 'text' },
+  { group: 'scripts', name: 'robust_backup.sh', lang: 'bash' },
+  { group: 'scripts', name: 'restore_from_backup.sh', lang: 'bash' },
+  { group: 'scripts', name: 'node_health_check.sh', lang: 'bash' },
+  { group: 'scripts', name: 'rolling_restart.sh', lang: 'bash' },
 ];
 
 type PuppetFile = (typeof puppetFiles)[0];
@@ -47,7 +51,7 @@ const puppetFilesByGroup = puppetFiles.reduce((acc, file) => {
   return acc;
 }, {} as Record<string, PuppetFile[]>);
 
-const groupOrder = ['root', 'manifests', 'templates', 'files', 'scripts'];
+const groupOrder = ['root', 'manifests', 'templates', 'scripts'];
 const sortedGroups = Object.entries(puppetFilesByGroup).sort(
   ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
 );
@@ -56,7 +60,7 @@ const REPO_NAME = 'profile_ggonda_cassandra';
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState<PuppetFile>(
-    puppetFiles.find(f => f.name === 'metadata.json')!
+    puppetFiles.find(f => f.name === 'init.pp')!
   );
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -120,15 +124,15 @@ export default function Home() {
               <CardContent>
                 <Accordion
                   type="multiple"
-                  defaultValue={['root', 'manifests']}
+                  defaultValue={['root', 'manifests', 'templates', 'scripts']}
                   className="w-full"
                 >
                   {sortedGroups.map(([group, files]) => (
                     <AccordionItem value={group} key={group}>
                       <AccordionTrigger>
                         <div className="flex items-center gap-2">
-                          {group !== 'root' && <Folder className="h-5 w-5 text-primary" />}
-                          <span className="font-semibold">{group === 'root' ? 'Module Files' : group}</span>
+                          <Folder className="h-5 w-5 text-primary" />
+                          <span className="font-semibold">{group}</span>
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
@@ -195,7 +199,7 @@ export default function Home() {
         </div>
 
         <footer className="text-center mt-8 text-sm text-muted-foreground">
-          <p>Built with stability and reliability in mind.</p>
+          <p>Built for stability and scale.</p>
         </footer>
       </div>
     </main>
