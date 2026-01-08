@@ -77,7 +77,7 @@ export default function Home() {
             <Card className="shadow-lg sticky top-8">
               <CardHeader>
                 <CardTitle>Puppet Module</CardTitle>
-                <CardDescription>profile_ggonda_cassandra</CardDescription>
+                <CardDescription>ggonda-cassandra</CardDescription>
               </CardHeader>
               <CardContent>
                 <Accordion
@@ -125,8 +125,8 @@ export default function Home() {
                 <CardDescription>
                   <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
                     {selectedFile.group === 'root'
-                      ? `profile_ggonda_cassandra/${selectedFile.name}`
-                      : `profile_ggonda_cassandra/${selectedFile.group}/${selectedFile.name}`}
+                      ? `ggonda-cassandra/${selectedFile.name}`
+                      : `ggonda-cassandra/${selectedFile.group}/${selectedFile.name}`}
                   </span>
                 </CardDescription>
               </CardHeader>

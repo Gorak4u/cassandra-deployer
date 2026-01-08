@@ -1,14 +1,14 @@
 export const puppetCode = {
   root: {
     'metadata.json': `{
-  "name": "ggonda-profile_ggonda_cassandra",
+  "name": "ggonda-cassandra",
   "version": "0.1.0",
   "author": "ggonda",
   "summary": "Puppet profile to manage Apache Cassandra",
   "license": "Apache-2.0",
-  "source": "https://github.com/ggonda/puppet-profile_ggonda_cassandra",
-  "project_page": "https://github.com/ggonda/puppet-profile_ggonda_cassandra",
-  "issues_url": "https://github.com/ggonda/puppet-profile_ggonda_cassandra/issues",
+  "source": "https://github.com/ggonda/puppet-cassandra",
+  "project_page": "https://github.com/ggonda/puppet-cassandra",
+  "issues_url": "https://github.com/ggonda/puppet-cassandra/issues",
   "dependencies": [
     {
       "name": "puppetlabs/stdlib",
@@ -58,7 +58,7 @@ export const puppetCode = {
 }`,
   },
   manifests: {
-    'init.pp': `class profile_ggonda_cassandra (
+    'init.pp': `class cassandra (
   # Hiera-configurable parameters with defaults from puppetlabs-stdlib
   String $version              = '4.0.1',
   String $package_name         = 'cassandra',
@@ -77,41 +77,41 @@ export const puppetCode = {
 ) {
   # This makes the parameters available to other classes in the module
   # without having to pass them explicitly.
-  contain profile_ggonda_cassandra::params
+  contain cassandra::params
 
   # The main classes that compose the profile
-  contain profile_ggonda_cassandra::java
-  contain profile_ggonda_cassandra::install
-  contain profile_ggonda_cassandra::config
-  contain profile_ggonda_cassandra::service
+  contain cassandra::java
+  contain cassandra::install
+  contain cassandra::config
+  contain cassandra::service
 
   # Define the order of execution
-  Class['profile_ggonda_cassandra::params']
-  -> Class['profile_ggonda_cassandra::java']
-  -> Class['profile_ggonda_cassandra::install']
-  -> Class['profile_ggonda_cassandra::config']
-  ~> Class['profile_ggonda_cassandra::service']
+  Class['cassandra::params']
+  -> Class['cassandra::java']
+  -> Class['cassandra::install']
+  -> Class['cassandra::config']
+  ~> Class['cassandra::service']
 }`,
     'params.pp': `# @summary Sets up parameters for the Cassandra profile.
 # This class pulls values from the main class, which are looked up in Hiera.
 # No logic should be here, only parameter assignments for namespacing.
-class profile_ggonda_cassandra::params {
-  $version               = $profile_ggonda_cassandra::version
-  $package_name          = $profile_ggonda_cassandra::package_name
-  $service_name          = $profile_ggonda_cassandra::service_name
-  $config_file           = $profile_ggonda_cassandra::config_file
-  $env_file              = $profile_ggonda_cassandra::env_file
-  $java_package_name     = $profile_ggonda_cassandra::java_package_name
-  $cluster_name          = $profile_ggonda_cassandra::cluster_name
-  $seeds                 = $profile_ggonda_cassandra::seeds
-  $listen_address        = $profile_ggonda_cassandra::listen_address
-  $rpc_address           = $profile_ggonda_cassandra::rpc_address
-  $data_file_directories = $profile_ggonda_cassandra::data_file_directories
-  $commitlog_directory   = $profile_ggonda_cassandra::commitlog_directory
+class cassandra::params {
+  $version               = $cassandra::version
+  $package_name          = $cassandra::package_name
+  $service_name          = $cassandra::service_name
+  $config_file           = $cassandra::config_file
+  $env_file              = $cassandra::env_file
+  $java_package_name     = $cassandra::java_package_name
+  $cluster_name          = $cassandra::cluster_name
+  $seeds                 = $cassandra::seeds
+  $listen_address        = $cassandra::listen_address
+  $rpc_address           = $cassandra::rpc_address
+  $data_file_directories = $cassandra::data_file_directories
+  $commitlog_directory   = $cassandra::commitlog_directory
 }`,
     'java.pp': `# @summary Installs Java, a dependency for Cassandra.
-class profile_ggonda_cassandra::java {
-  $java_package_name = $profile_ggonda_cassandra::params::java_package_name
+class cassandra::java {
+  $java_package_name = $cassandra::params::java_package_name
 
   # Determine the default Java package based on the OS family
   $default_java_package = $facts['os']['family'] ? {
@@ -129,9 +129,9 @@ class profile_ggonda_cassandra::java {
   }
 }`,
     'install.pp': `# @summary Installs the Cassandra package.
-class profile_ggonda_cassandra::install {
-  $package_name = $profile_ggonda_cassandra::params::package_name
-  $version = $profile_ggonda_cassandra::params::version
+class cassandra::install {
+  $package_name = $cassandra::params::package_name
+  $version = $cassandra::params::version
 
   # Extract major version for repo path, e.g., 4.0.1 -> 40
   $version_major = regsubst($version, '^(\\\\d)\\\\.(\\\\d)\\\\..*', '\\\\1\\\\2')
@@ -169,26 +169,26 @@ class profile_ggonda_cassandra::install {
 
   package { $package_name:
     ensure  => $version,
-    require => Class['profile_ggonda_cassandra::java'],
+    require => Class['cassandra::java'],
   }
 }`,
     'config.pp': `# @summary Manages Cassandra configuration files.
-class profile_ggonda_cassandra::config {
-  $config_file = $profile_ggonda_cassandra::params::config_file
-  $env_file    = $profile_ggonda_cassandra::params::env_file
+class cassandra::config {
+  $config_file = $cassandra::params::config_file
+  $env_file    = $cassandra::params::env_file
   $owner       = 'cassandra'
   $group       = 'cassandra'
 
   # Create a string of seed nodes for the template
-  $seeds_string = join($profile_ggonda_cassandra::params::seeds, ',')
+  $seeds_string = join($cassandra::params::seeds, ',')
 
   file { $config_file:
     ensure  => file,
     owner   => $owner,
     group   => $group,
     mode    => '0644',
-    content => template('profile_ggonda_cassandra/cassandra.yaml.erb'),
-    require => Package[$profile_ggonda_cassandra::params::package_name],
+    content => template('cassandra/cassandra.yaml.erb'),
+    require => Package[$cassandra::params::package_name],
   }
 
   file { $env_file:
@@ -196,32 +196,32 @@ class profile_ggonda_cassandra::config {
     owner   => $owner,
     group   => $group,
     mode    => '0644',
-    source  => 'puppet:///modules/profile_ggonda_cassandra/cassandra-env.sh',
-    require => Package[$profile_ggonda_cassandra::params::package_name],
+    source  => 'puppet:///modules/cassandra/cassandra-env.sh',
+    require => Package[$cassandra::params::package_name],
   }
 
   # Ensure data directories exist with correct permissions
-  $profile_ggonda_cassandra::params::data_file_directories.each |String $dir| {
+  $cassandra::params::data_file_directories.each |String $dir| {
     file { $dir:
       ensure  => directory,
       owner   => $owner,
       group   => $group,
       mode    => '0750',
-      require => Package[$profile_ggonda_cassandra::params::package_name],
+      require => Package[$cassandra::params::package_name],
     }
   }
 
-  file { $profile_ggonda_cassandra::params::commitlog_directory:
+  file { $cassandra::params::commitlog_directory:
     ensure  => directory,
     owner   => $owner,
     group   => $group,
     mode    => '0750',
-    require => Package[$profile_ggonda_cassandra::params::package_name],
+    require => Package[$cassandra::params::package_name],
   }
 }`,
     'service.pp': `# @summary Manages the Cassandra service.
-class profile_ggonda_cassandra::service {
-  $service_name = $profile_ggonda_cassandra::params::service_name
+class cassandra::service {
+  $service_name = $cassandra::params::service_name
 
   service { $service_name:
     ensure    => running,
@@ -234,9 +234,9 @@ class profile_ggonda_cassandra::service {
   },
   templates: {
     'cassandra.yaml.erb': `# cassandra.yaml
-# Generated by Puppet from profile_ggonda_cassandra/cassandra.yaml.erb
+# Generated by Puppet from cassandra/cassandra.yaml.erb
 
-cluster_name: '<%= @profile_ggonda_cassandra::params::cluster_name %>'
+cluster_name: '<%= @cassandra::params::cluster_name %>'
 num_tokens: 256
 
 # Seed provider
@@ -245,19 +245,19 @@ seed_provider:
     parameters:
       - seeds: "<%= @seeds_string %>"
 
-listen_address: <%= @profile_ggonda_cassandra::params::listen_address %>
-rpc_address: <%= @profile_ggonda_cassandra::params::rpc_address %>
+listen_address: <%= @cassandra::params::listen_address %>
+rpc_address: <%= @cassandra::params::rpc_address %>
 
 # Snitch
 endpoint_snitch: GossipingPropertyFileSnitch
 
 # Data directories
 data_file_directories:
-<%- @profile_ggonda_cassandra::params::data_file_directories.each do |dir| -%>
+<%- @cassandra::params::data_file_directories.each do |dir| -%>
   - <%= dir %>
 <%- end -%>
 
-commitlog_directory: <%= @profile_ggonda_cassandra::params::commitlog_directory %>
+commitlog_directory: <%= @cassandra::params::commitlog_directory %>
 
 # Authentication and Authorization (commented out by default for security)
 # authenticator: PasswordAuthenticator
