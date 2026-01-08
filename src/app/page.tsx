@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import {
   Card,
   CardContent,
@@ -5,12 +8,19 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { RocketIcon } from '@/components/icons';
 import { CodeBlock } from '@/components/code-block';
 import { puppetCode } from '@/lib/puppet-code';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal } from 'lucide-react';
+import { Terminal, Folder, File as FileIcon } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 const puppetFiles = [
   { group: 'manifests', name: 'init.pp', lang: 'puppet' },
@@ -24,7 +34,21 @@ const puppetFiles = [
   { group: 'scripts', name: 'backup.sh', lang: 'bash' },
 ];
 
+type PuppetFile = (typeof puppetFiles)[0];
+
+const puppetFilesByGroup = puppetFiles.reduce((acc, file) => {
+  if (!acc[file.group]) {
+    acc[file.group] = [];
+  }
+  acc[file.group].push(file);
+  return acc;
+}, {} as Record<string, PuppetFile[]>);
+
 export default function Home() {
+  const [selectedFile, setSelectedFile] = useState<PuppetFile>(
+    puppetFiles[0]
+  );
+
   return (
     <main className="min-h-screen bg-background font-body text-foreground">
       <div className="container mx-auto p-4 md:p-8">
@@ -42,60 +66,94 @@ export default function Home() {
           </div>
         </header>
 
-        <Card className="w-full shadow-lg">
-          <CardHeader>
-            <CardTitle>Puppet Profile: profile_ggonda_cassandra</CardTitle>
-            <CardDescription>
-              Below is a complete, OS-agnostic Puppet profile for Cassandra. It
-              uses Hiera for dynamic configuration and follows modern Puppet
-              practices.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Alert className="mb-6 border-accent">
-              <Terminal className="h-4 w-4 text-accent" />
-              <AlertTitle>Prerequisites</AlertTitle>
-              <AlertDescription>
-                This profile assumes you have the{' '}
-                <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                  puppetlabs/stdlib
-                </code>{' '}
-                and{' '}
-                <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                  puppetlabs/apt
-                </code>{' '}
-                modules installed in your Puppet environment.
-              </AlertDescription>
-            </Alert>
-            <Tabs defaultValue="init.pp" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 gap-1 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-9 h-auto">
-                {puppetFiles.map((file) => (
-                  <TabsTrigger key={file.name} value={file.name}>
-                    {file.name}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-
-              {puppetFiles.map((file) => (
-                <TabsContent key={file.name} value={file.name} className="mt-4">
-                  <div className="text-sm text-muted-foreground mb-2 font-mono">
-                    <span className="font-semibold text-foreground">
-                      Path:
-                    </span>{' '}
-                    profile_ggonda_cassandra/{file.group}/{file.name}
-                  </div>
-                  <CodeBlock
-                    code={
-                      puppetCode[file.group as keyof typeof puppetCode][
-                        file.name as any
-                      ]
-                    }
-                  />
-                </TabsContent>
-              ))}
-            </Tabs>
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1">
+            <Card className="shadow-lg sticky top-8">
+              <CardHeader>
+                <CardTitle>Puppet Profile</CardTitle>
+                <CardDescription>profile_ggonda_cassandra</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Accordion
+                  type="multiple"
+                  defaultValue={Object.keys(puppetFilesByGroup)}
+                  className="w-full"
+                >
+                  {Object.entries(puppetFilesByGroup).map(
+                    ([group, files]) => (
+                      <AccordionItem value={group} key={group}>
+                        <AccordionTrigger>
+                          <div className="flex items-center gap-2">
+                            <Folder className="h-5 w-5 text-primary" />
+                            <span className="font-semibold">{group}</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <div className="flex flex-col gap-1 pl-4">
+                            {files.map((file) => (
+                              <Button
+                                key={file.name}
+                                variant="ghost"
+                                className={cn(
+                                  'justify-start gap-2',
+                                  selectedFile.name === file.name &&
+                                    'bg-accent text-accent-foreground'
+                                )}
+                                onClick={() => setSelectedFile(file)}
+                              >
+                                <FileIcon className="h-4 w-4" />
+                                {file.name}
+                              </Button>
+                            ))}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    )
+                  )}
+                </Accordion>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="lg:col-span-2">
+            <Card className="w-full shadow-lg">
+              <CardHeader>
+                <CardTitle>{selectedFile.name}</CardTitle>
+                <CardDescription>
+                  <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
+                    profile_ggonda_cassandra/{selectedFile.group}/
+                    {selectedFile.name}
+                  </span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {selectedFile.name === 'init.pp' && (
+                  <Alert className="mb-6 border-accent">
+                    <Terminal className="h-4 w-4 text-accent" />
+                    <AlertTitle>Prerequisites</AlertTitle>
+                    <AlertDescription>
+                      This profile assumes you have the{' '}
+                      <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
+                        puppetlabs/stdlib
+                      </code>{' '}
+                      and{' '}
+                      <code className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
+                        puppetlabs/apt
+                      </code>{' '}
+                      modules installed in your Puppet environment.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <CodeBlock
+                  code={
+                    puppetCode[selectedFile.group as keyof typeof puppetCode][
+                      selectedFile.name as any
+                    ]
+                  }
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
         <footer className="text-center mt-8 text-sm text-muted-foreground">
           <p>Built with stability and reliability in mind.</p>
