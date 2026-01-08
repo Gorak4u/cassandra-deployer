@@ -49,7 +49,7 @@ export const puppetCode = {
       '      "version_requirement": ">= 6.0.0 < 8.0.0"',
       '    }',
       '  ]',
-      '}'
+      '}',
     ].join('\n'),
   },
   manifests: {
@@ -729,6 +729,7 @@ export const puppetCode = {
     'node_health_check.sh': '#!/bin/bash\necho "Node Health Check Script Placeholder"',
     'rolling_restart.sh': '#!/bin/bash\necho "Rolling Restart Script Placeholder"',
   },
+  files: {
+    'jamm-0.3.2.jar': '', // Placeholder for binary file
+  },
 };
-
-    

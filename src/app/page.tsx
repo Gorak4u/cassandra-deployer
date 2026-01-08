@@ -37,8 +37,6 @@ const puppetFiles = [
   { group: 'templates', name: 'cassandra.yaml.erb', lang: 'yaml' },
   { group: 'templates', name: 'cassandra-rackdc.properties.erb', lang: 'text' },
   { group: 'templates', name: 'jvm-server.options.erb', lang: 'text' },
-  { group: 'templates', name: 'jvm8-server.options.erb', lang: 'text' },
-  { group: 'templates', name: 'jvm11-server.options.erb', lang: 'text' },
   { group: 'templates', name: 'cqlshrc.erb', lang: 'text' },
   { group: 'templates', name: 'range-repair.service.erb', lang: 'text' },
   { group: 'templates', name: 'cassandra_limits.conf.erb', lang: 'text' },
@@ -62,6 +60,7 @@ const puppetFiles = [
   { group: 'scripts', name: 'restore_from_backup.sh', lang: 'bash' },
   { group: 'scripts', name: 'node_health_check.sh', lang: 'bash' },
   { group: 'scripts', name: 'rolling_restart.sh', lang: 'bash' },
+  { group: 'files', name: 'jamm-0.3.2.jar', lang: 'binary' },
 ];
 
 type PuppetFile = (typeof puppetFiles)[0];
@@ -74,7 +73,7 @@ const puppetFilesByGroup = puppetFiles.reduce((acc, file) => {
   return acc;
 }, {} as Record<string, PuppetFile[]>);
 
-const groupOrder = ['root', 'manifests', 'templates', 'scripts'];
+const groupOrder = ['root', 'manifests', 'templates', 'scripts', 'files'];
 const sortedGroups = Object.entries(puppetFilesByGroup).sort(
   ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
 );
@@ -97,7 +96,12 @@ export default function Home() {
         const groupFolder = group === 'root' ? moduleFolder : moduleFolder.folder(group);
         if (groupFolder) {
           Object.entries(files).forEach(([fileName, code]) => {
-            groupFolder.file(fileName, code);
+            if (fileName.endsWith('.jar')) {
+              // Handle binary file
+              groupFolder.file(fileName, 'binary content placeholder', { binary: true });
+            } else {
+              groupFolder.file(fileName, code as string);
+            }
           });
         }
       });
@@ -147,7 +151,7 @@ export default function Home() {
               <CardContent>
                 <Accordion
                   type="multiple"
-                  defaultValue={['root', 'manifests', 'templates', 'scripts']}
+                  defaultValue={['root', 'manifests', 'templates', 'scripts', 'files']}
                   className="w-full"
                 >
                   {sortedGroups.map(([group, files]) => (
@@ -211,7 +215,7 @@ export default function Home() {
                 )}
                 <CodeBlock
                   code={
-                    puppetCode[selectedFile.group as keyof typeof puppetCode][
+                    (puppetCode as any)[selectedFile.group as keyof typeof puppetCode][
                       selectedFile.name as any
                     ]
                   }
@@ -228,5 +232,3 @@ export default function Home() {
     </main>
   );
 }
-
-    
