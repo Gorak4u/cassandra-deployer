@@ -43,8 +43,8 @@ export const puppetCode = {
   manifests: {
     'init.pp': [
       '# @summary The main profile class for managing Cassandra.',
-      '# This class should be included on any node that needs Cassandra.',
-      '# It retrieves all configuration from Hiera and passes it to the `cassandra` component class.',
+      '# This profile should be included on any node. It gathers configuration',
+      '# from Hiera and passes it to the `cassandra` component class.',
       'class profile_ggonda_cassandr {',
       '  $cassandra_version                 = lookup(\'profile_ggonda_cassandr::cassandra_version\', { \'default_value\' => \'4.1.10-1\' })',
       '  $java_version                      = lookup(\'profile_ggonda_cassandr::java_version\', { \'default_value\' => \'11\' })',
@@ -774,7 +774,3 @@ export const puppetCode = {
     'jamm-0.3.2.jar': '', // Placeholder for binary file
   },
 };
-
-    
-
-    
