@@ -136,7 +136,7 @@ class cassandra_pfpt::java inherits cassandra_pfpt {
   } elsif $java_version == '17' {
     $actual_java_package = 'java-17-openjdk-headless'
   } else {
-    $actual_java_package = "java-\${java_version}-openjdk-headless" # Fallback
+    fail("Unsupported Java version: \${java_version}")
   }
 
   $java_pkg_name = if $java_package_name and $java_package_name != '' {
@@ -167,15 +167,15 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
       yumrepo { 'cassandra':
-        descr        => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
-        baseurl      => $repo_baseurl,
-        enabled      => 1,
-        gpgcheck     => $repo_gpgcheck,
-        gpgkey       => $repo_gpgkey,
-        priority     => $repo_priority,
+        descr               => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
+        baseurl             => $repo_baseurl,
+        enabled             => 1,
+        gpgcheck            => $repo_gpgcheck,
+        gpgkey              => $repo_gpgkey,
+        priority            => $repo_priority,
         skip_if_unavailable => $repo_skip_if_unavailable,
-        sslverify    => $repo_sslverify,
-        require      => Group[$group],
+        sslverify           => $repo_sslverify,
+        require             => Group[$group],
       }
     }
     # Add logic for other OS families like Debian if needed
@@ -327,11 +327,20 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   }
 
   if $ssl_enabled {
-    notify { 'Placeholder for SSL certificate generation':
-      message => "SSL is enabled. Custom type 'ssl_certificate' would be invoked here for domain \${https_domain}.",
+    exec { 'create the certs dir':
+      command => "mkdir -p \${target_dir}/etc",
+      path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
+      unless  => "test -d \${target_dir}/etc",
     }
-    notify { 'Placeholder for Java KeyStore generation':
-      message => "SSL is enabled. Custom type 'java_ks' would be invoked here to create \${keystore_path}.",
+
+    notify { 'ssl_certificate_placeholder':
+      message => "Placeholder for ssl_certificate custom type. This would generate certs for domain \${https_domain} in \${target_dir}/etc.",
+      require => Exec['create the certs dir'],
+    }
+
+    notify { 'java_ks_placeholder':
+      message => "Placeholder for java_ks custom type. This would create \${keystore_path} from the generated certs.",
+      require => Notify['ssl_certificate_placeholder'],
     }
 
     file { $keystore_path:
@@ -339,8 +348,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       owner   => 'root',
       group   => 'root',
       mode    => '0444',
-      # This would require the result of the java_ks custom type
-      # require => Java_ks["host:\${keystore_path}"],
+      require => Notify['java_ks_placeholder'],
     }
 
     file { $truststore_path:
@@ -466,7 +474,7 @@ truncate_request_timeout_in_ms: <%= @truncate_request_timeout_in_ms %>
 write_request_timeout_in_ms: <%= @write_request_timeout_in_ms %>
 commitlog_sync_period_in_ms: <%= @commitlog_sync_period_in_ms %>
 
-<% if @cassandra_version.start_with?('3.') -%>
+<% if @cassandra_version.to_s.start_with?('3.') -%>
 start_rpc: <%= @start_rpc %>
 rpc_port: <%= @rpc_port %>
 rpc_keepalive: <%= @rpc_keepalive %>
@@ -479,10 +487,10 @@ enable_transient_replication: <%= @enable_transient_replication %>
 <% if @ssl_enabled -%>
 # --- Internode (node-to-node) encryption ---
 server_encryption_options:
-  internode_encryption: <%= @internode_encryption || 'all' %>
+  internode_encryption: <%= @internode_encryption %>
   keystore: <%= @keystore_path %>
   keystore_password: <%= @keystore_password %>
-  require_client_auth: <%= @internode_require_client_auth ? 'true' : 'false' %>
+  require_client_auth: <%= @internode_require_client_auth %>
   <% if @truststore_path && @truststore_password -%>
   truststore: <%= @truststore_path %>
   truststore_password: <%= @truststore_password %>
@@ -500,10 +508,10 @@ server_encryption_options:
 # --- Client (app-to-node) encryption ---
 client_encryption_options:
   enabled: true
-  optional: <%= @client_optional ? 'true' : 'false' %>
+  optional: <%= @client_optional %>
   keystore: <%= @client_keystore_path %>
   keystore_password: <%= @keystore_password %>
-  require_client_auth: <%= @client_require_client_auth ? 'true' : 'false' %>
+  require_client_auth: <%= @client_require_client_auth %>
   <% if @client_truststore_path && @client_truststore_password -%>
   truststore: <%= @client_truststore_path %>
   truststore_password: <%= @client_truststore_password %>
