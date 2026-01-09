@@ -36,6 +36,10 @@ class cassandra_pfpt (
   String $group,
   String $repo_baseurl,
   String $repo_gpgkey,
+  Boolean $repo_gpgcheck,
+  Integer $repo_priority,
+  Boolean $repo_skip_if_unavailable,
+  Boolean $repo_sslverify,
   Array[String] $package_dependencies,
   String $cluster_name,
   String $seeds,
@@ -62,6 +66,7 @@ class cassandra_pfpt (
   Hash $racks,
   Boolean $ssl_enabled,
   String $target_dir,
+  String $https_domain,
   String $keystore_path,
   String $keystore_password,
   String $truststore_path,
@@ -123,20 +128,25 @@ class cassandra_pfpt (
       'java.pp': `
 # @summary Manages Java installation for Cassandra.
 class cassandra_pfpt::java inherits cassandra_pfpt {
-  $java_pkg_name = $facts['os']['family'] ? {
-    'RedHat' => "java-\${java_version}-openjdk-headless",
-    'Debian' => "openjdk-\${java_version}-jre-headless",
-    default  => fail("Unsupported OS family for Java installation: \${facts['os']['family']}"),
+
+  if $java_version == '8' {
+    $actual_java_package = 'java-1.8.0-openjdk-headless'
+  } elsif $java_version == '11' {
+    $actual_java_package = 'java-11-openjdk-headless'
+  } elsif $java_version == '17' {
+    $actual_java_package = 'java-17-openjdk-headless'
+  } else {
+    $actual_java_package = "java-\${java_version}-openjdk-headless" # Fallback
   }
 
-  $java_ensure_version = if $java_package_name and $java_package_name != '' {
+  $java_pkg_name = if $java_package_name and $java_package_name != '' {
     $java_package_name
   } else {
-    'present'
+    $actual_java_package
   }
 
   package { $java_pkg_name:
-    ensure  => $java_ensure_version,
+    ensure  => 'present',
   }
 }
         `.trim(),
@@ -157,14 +167,18 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
       yumrepo { 'cassandra':
-        descr    => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
-        baseurl  => $repo_baseurl,
-        gpgcheck => 1,
-        enabled  => 1,
-        gpgkey   => $repo_gpgkey,
-        require  => Group[$group], # Ensure group exists before repo setup
+        descr        => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
+        baseurl      => $repo_baseurl,
+        enabled      => 1,
+        gpgcheck     => $repo_gpgcheck,
+        gpgkey       => $repo_gpgkey,
+        priority     => $repo_priority,
+        skip_if_unavailable => $repo_skip_if_unavailable,
+        sslverify    => $repo_sslverify,
+        require      => Group[$group],
       }
     }
+    # Add logic for other OS families like Debian if needed
   }
 
   package { $package_dependencies:
@@ -172,13 +186,19 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
     require => Class['cassandra_pfpt::java'],
   }
 
+  $cassandra_ensure = $cassandra_version ? {
+    undef   => 'present',
+    default => $cassandra_version,
+  }
+
   package { 'cassandra':
-    ensure  => $cassandra_version,
+    ensure  => $cassandra_ensure,
     require => [ Class['cassandra_pfpt::java'], User[$user] ],
+    before  => Class['cassandra_pfpt::config'],
   }
 
   package { 'cassandra-tools':
-    ensure  => $cassandra_version,
+    ensure  => $cassandra_ensure,
     require => Package['cassandra'],
   }
 }
@@ -206,6 +226,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     group   => 'root',
     mode    => '0644',
     source  => $jamm_source,
+    require => Package['cassandra'],
   }
 
   file { '/etc/cassandra/conf/cassandra.yaml':
@@ -214,6 +235,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    notify  => Class['cassandra_pfpt::service'],
   }
 
   file { '/etc/cassandra/conf/cassandra-rackdc.properties':
@@ -222,6 +244,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    notify  => Class['cassandra_pfpt::service'],
   }
 
   file { '/etc/cassandra/conf/jvm-server.options':
@@ -230,6 +253,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    notify  => Class['cassandra_pfpt::service'],
   }
 
   file { '/root/.cassandra/cqlshrc':
@@ -281,21 +305,49 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     $merged_sysctl = $sysctl_settings
   }
 
-  file { '/etc/sysctl.d/99-cassandra.conf':
-    ensure  => 'file',
-    content => template('cassandra_pfpt/sysctl.conf.erb'),
-    notify  => Exec['apply_sysctl_cassandra'],
+  if !empty($merged_sysctl) {
+    file { '/etc/sysctl.d/99-cassandra.conf':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/sysctl.conf.erb'),
+      notify  => Exec['apply_sysctl_cassandra'],
+    }
+
+    exec { 'apply_sysctl_cassandra':
+      command     => '/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf',
+      path        => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
+      refreshonly => true,
+    }
   }
 
-  exec { 'apply_sysctl_cassandra':
-    command     => '/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf',
-    path        => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
-    refreshonly => true,
+  if !empty($limits_settings) {
+    file { '/etc/security/limits.d/cassandra.conf':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/cassandra_limits.conf.erb'),
+    }
   }
 
-  file { '/etc/security/limits.d/cassandra.conf':
-    ensure  => 'file',
-    content => template('cassandra_pfpt/cassandra_limits.conf.erb'),
+  if $ssl_enabled {
+    notify { 'Placeholder for SSL certificate generation':
+      message => "SSL is enabled. Custom type 'ssl_certificate' would be invoked here for domain \${https_domain}.",
+    }
+    notify { 'Placeholder for Java KeyStore generation':
+      message => "SSL is enabled. Custom type 'java_ks' would be invoked here to create \${keystore_path}.",
+    }
+
+    file { $keystore_path:
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0444',
+      # This would require the result of the java_ks custom type
+      # require => Java_ks["host:\${keystore_path}"],
+    }
+
+    file { $truststore_path:
+      ensure => 'link',
+      target => $keystore_path,
+      require => File[$keystore_path],
+    }
   }
 }
         `.trim(),
@@ -323,7 +375,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     tries     => 12,
     try_sleep => 10,
     unless    => "cqlsh -u cassandra -p '\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \${listen_address} >/dev/null 2>&1",
-    require   => Service['cassandra'],
+    require   => [Service['cassandra'], File[$change_password_cql]],
   }
 
   if $enable_range_repair {
@@ -334,6 +386,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
+      require => File["\${manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -356,6 +409,17 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 class cassandra_pfpt::firewall {
   # This is a placeholder for firewall rules.
   # Implementation would go here, e.g., using puppetlabs/firewall module.
+  # Example:
+  # firewall { '100 allow cassandra gossip':
+  #   dport  => 7000,
+  #   proto  => 'tcp',
+  #   action => 'accept',
+  # }
+  # firewall { '101 allow cassandra thrift':
+  #   dport  => 9160,
+  #   proto  => 'tcp',
+  #   action => 'accept',
+  # }
 }
 `.trim(),
     },
@@ -415,31 +479,35 @@ enable_transient_replication: <%= @enable_transient_replication %>
 <% if @ssl_enabled -%>
 # --- Internode (node-to-node) encryption ---
 server_encryption_options:
-  internode_encryption: <%= @internode_encryption || 'all' %>  # 'none' | 'dc' | 'rack' | 'all'
-  keystore: <%= @keystore_path || "#{@target_dir}/etc/keystore.jks" %>
+  internode_encryption: <%= @internode_encryption || 'all' %>
+  keystore: <%= @keystore_path %>
   keystore_password: <%= @keystore_password %>
-  # Set to true only if you want nodes to present client certs (mutual TLS for internode)
   require_client_auth: <%= @internode_require_client_auth ? 'true' : 'false' %>
   <% if @truststore_path && @truststore_password -%>
   truststore: <%= @truststore_path %>
   truststore_password: <%= @truststore_password %>
   <% end -%>
   <% if @tls_protocol -%>
-  protocol: <%= @tls_protocol %>            # e.g., TLS
+  protocol: <%= @tls_protocol %>
   <% end -%>
   <% if @tls_algorithm -%>
-  algorithm: <%= @tls_algorithm %>          # e.g., SunX509
+  algorithm: <%= @tls_algorithm %>
   <% end -%>
   <% if @store_type -%>
-  store_type: <%= @store_type %>            # e.g., JKS
+  store_type: <%= @store_type %>
   <% end -%>
 
 # --- Client (app-to-node) encryption ---
-client_encryption_options: 
+client_encryption_options:
   enabled: true
-  optional: <%= @client_optional ? 'true' : 'false' %> 
-  keystore: <%= @client_keystore_path || "#{@target_dir}/etc/keystore.jks" %>
+  optional: <%= @client_optional ? 'true' : 'false' %>
+  keystore: <%= @client_keystore_path %>
   keystore_password: <%= @keystore_password %>
+  require_client_auth: <%= @client_require_client_auth ? 'true' : 'false' %>
+  <% if @client_truststore_path && @client_truststore_password -%>
+  truststore: <%= @client_truststore_path %>
+  truststore_password: <%= @client_truststore_password %>
+  <% end -%>
 <% end -%>
         `.trim(),
       'cassandra-rackdc.properties.erb': `
@@ -537,7 +605,7 @@ Description=Cassandra Range Repair Service
 Type=simple
 User=cassandra
 Group=cassandra
-ExecStart=<%= @target_dir %>/range-repair.sh
+ExecStart=<%= @manage_bin_dir %>/range-repair.sh
 Restart=on-failure
 [Install]
 WantedBy=multi-user.target
@@ -633,6 +701,7 @@ class profile_cassandra_pfpt {
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
   $enable_range_repair              = lookup('profile_cassandra_pfpt::enable_range_repair', { 'default_value' => false })
   $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => false })
+  $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
   $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/usr/local/bin' })
   $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/cassandra/keystore.jks' })
   $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'default_value' => 'cassandra' })
@@ -652,16 +721,20 @@ class profile_cassandra_pfpt {
   $compaction_throughput_mb_per_sec = lookup('profile_cassandra_pfpt::compaction_throughput_mb_per_sec', { 'default_value' => 16 })
   $tombstone_warn_threshold         = lookup('profile_cassandra_pfpt::tombstone_warn_threshold', { 'default_value' => 1000 })
   $tombstone_failure_threshold      = lookup('profile_cassandra_pfpt::tombstone_failure_threshold', { 'default_value' => 100000 })
-  $sysctl_settings                  = lookup('profile_cassandra_pfpt::sysctl_settings', { 'default_value' => {} })
-  $limits_settings                  = lookup('profile_cassandra_pfpt::limits_settings', { 'default_value' => { 'nofile' => 100000, 'nproc' => 32768 } })
+  $sysctl_settings                  = lookup('profile_cassandra_pfpt::sysctl_settings', { 'default_value' => { 'fs.aio-max-nr' => 1048576 } })
+  $limits_settings                  = lookup('profile_cassandra_pfpt::limits_settings', { 'default_value' => { 'memlock' => 'unlimited', 'nofile' => 100000, 'nproc' => 32768, 'as' => 'unlimited' } })
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
   $user                             = lookup('profile_cassandra_pfpt::user', { 'default_value' => 'cassandra' })
   $group                            = lookup('profile_cassandra_pfpt::group', { 'default_value' => 'cassandra' })
   $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/" })
   $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://downloads.apache.org/cassandra/KEYS' })
-  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc'] })
+  $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
+  $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
+  $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
+  $repo_sslverify                   = lookup('profile_cassandra_pfpt::repo_sslverify', { 'default_value' => true })
+  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl'] })
   $manage_bin_dir                   = lookup('profile_cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/bin' })
-  $change_password_cql              = lookup('profile_cassandra_pfpt::change_password_cql', { 'default_value' => '/root/change_password.cql' })
+  $change_password_cql              = lookup('profile_cassandra_pfpt::change_password_cql', { 'default_value' => '/tmp/change_password.cql' })
   $cqlsh_path_env                   = lookup('profile_cassandra_pfpt::cqlsh_path_env', { 'default_value' => '/usr/bin/' })
   $jamm_target                      = lookup('profile_cassandra_pfpt::jamm_target', { 'default_value' => '/usr/share/cassandra/lib/jamm-0.3.2.jar' })
   $jamm_source                      = lookup('profile_cassandra_pfpt::jamm_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/files/jamm-0.3.2.jar' })
@@ -699,6 +772,10 @@ class profile_cassandra_pfpt {
     group                            => $group,
     repo_baseurl                     => $repo_baseurl,
     repo_gpgkey                      => $repo_gpgkey,
+    repo_gpgcheck                    => $repo_gpgcheck,
+    repo_priority                    => $repo_priority,
+    repo_skip_if_unavailable         => $repo_skip_if_unavailable,
+    repo_sslverify                   => $repo_sslverify,
     package_dependencies             => $package_dependencies,
     cluster_name                     => $cluster_name,
     seeds                            => $seeds,
@@ -724,6 +801,7 @@ class profile_cassandra_pfpt {
     use_shenandoah_gc                => $use_shenandoah_gc,
     racks                            => $racks,
     ssl_enabled                      => $ssl_enabled,
+    https_domain                     => $https_domain,
     target_dir                       => $target_dir,
     keystore_path                    => $keystore_path,
     keystore_password                => $keystore_password,
