@@ -1,3 +1,4 @@
+
 export const manifests = {
       'init.pp': `
 # @summary Profile for configuring a Cassandra node.
@@ -228,3 +229,5 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
+    
