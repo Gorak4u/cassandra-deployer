@@ -116,7 +116,27 @@ class cassandra_pfpt (
   String $jmx_access_file_content,
   String $jmx_password_file_path,
   String $jmx_access_file_path,
-  String $service_timeout_start_sec
+  String $service_timeout_start_sec,
+  Optional[String] $authorizer,
+  Optional[String] $authenticator,
+  Optional[Integer] $num_tokens,
+  Optional[Integer] $native_transport_port,
+  Optional[String] $endpoint_snitch,
+  Optional[String] $listen_interface,
+  Optional[String] $rpc_interface,
+  Optional[String] $broadcast_address,
+  Optional[String] $broadcast_rpc_address,
+  Optional[Integer] $counter_cache_size_in_mb,
+  Optional[Integer] $key_cache_size_in_mb,
+  Optional[String] $disk_optimization_strategy,
+  Optional[String] $auto_snapshot,
+  Optional[Integer] $phi_convict_threshold,
+  Optional[Integer] $concurrent_reads,
+  Optional[Integer] $concurrent_writes,
+  Optional[Integer] $concurrent_counter_writes,
+  Optional[String] $memtable_allocation_type,
+  Optional[Integer] $index_summary_capacity_in_mb,
+  Optional[Integer] $file_cache_size_in_mb
 ) {
 
   contain cassandra_pfpt::java
@@ -167,7 +187,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
@@ -431,7 +451,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => file,
-    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';\\n",
+    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';\\\\n",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
@@ -497,58 +517,164 @@ class cassandra_pfpt::firewall {
     templates: {
       'cassandra.yaml.erb': `
 cluster_name: '<%= @cluster_name %>'
-num_tokens: 256
-partitioner: org.apache.cassandra.dht.Murmur3Partitioner
-
+<% if @num_tokens -%>
+num_tokens: <%= @num_tokens %>
+<% end -%>
+<% if @hints_directory -%>
+hints_directory: <%= @hints_directory %>
+<% end -%>
+<% if @authenticator -%>
+authenticator: <%= @authenticator %>
+<% end -%>
+<% if @authorizer -%>
+authorizer: <%= @authorizer %>
+<% end -%>
+<% if @role_manager -%>
+role_manager: <%= @role_manager %>
+<% end -%>
+<% if @endpoint_snitch -%>
+endpoint_snitch: <%= @endpoint_snitch %>
+<% end -%>
+<% if @data_dir -%>
 data_file_directories:
-    - '<%= @data_dir %>'
-commitlog_directory: '<%= @commitlog_dir %>'
-saved_caches_directory: /var/lib/cassandra/saved_caches
-hints_directory: '<%= @hints_directory %>'
-cdc_raw_directory: '<%= @cdc_raw_directory %>'
+    - <%= @data_dir %>
+<% end -%>
+<% if @commitlog_directory -%>
+commitlog_directory: <%= @commitlog_directory %>
+<% end -%>
+<% if @cdc_raw_directory -%>
+cdc_raw_directory: <%= @cdc_raw_directory %>
+<% end -%>
 
 seed_provider:
     - class_name: org.apache.cassandra.locator.SimpleSeedProvider
       parameters:
           - seeds: "<%= @seeds %>"
 
+<% if @listen_address -%>
 listen_address: '<%= @listen_address %>'
-rpc_address: '<%= @listen_address %>'
-native_transport_port: 9042
-endpoint_snitch: GossipingPropertyFileSnitch
-dynamic_snitch: <%= @dynamic_snitch %>
-authenticator: PasswordAuthenticator
-authorizer: CassandraAuthorizer
-start_native_transport: <%= @start_native_transport %>
-role_manager: <%= @role_manager %>
-commit_failure_policy: <%= @commit_failure_policy %>
-commitlog_sync: <%= @commitlog_sync %>
-disk_failure_policy: <%= @disk_failure_policy %>
-incremental_backups: <%= @incremental_backups %>
-max_hints_delivery_threads: <%= @max_hints_delivery_threads %>
-native_transport_flush_in_batches_legacy: <%= @native_transport_flush_in_batches_legacy %>
-native_transport_max_frame_size_in_mb: <%= @native_transport_max_frame_size_in_mb %>
-range_request_timeout_in_ms: <%= @range_request_timeout_in_ms %>
-read_request_timeout_in_ms: <%= @read_request_timeout_in_ms %>
-request_timeout_in_ms: <%= @request_timeout_in_ms %>
-ssl_storage_port: <%= @ssl_storage_port %>
+<% end -%>
+<% if @listen_interface -%>
+listen_interface: '<%= @listen_interface %>'
+<% end -%>
+<% if @broadcast_address -%>
+broadcast_address: '<%= @broadcast_address %>'
+<% end -%>
+<% if @rpc_address -%>
+rpc_address: '<%= @rpc_address %>'
+<% end -%>
+<% if @rpc_interface -%>
+rpc_interface: '<%= @rpc_interface %>'
+<% end -%>
+<% if @broadcast_rpc_address -%>
+broadcast_rpc_address: '<%= @broadcast_rpc_address %>'
+<% end -%>
+<% if @native_transport_port -%>
+native_transport_port: <%= @native_transport_port %>
+<% end -%>
+<% if @storage_port -%>
 storage_port: <%= @storage_port %>
-truncate_request_timeout_in_ms: <%= @truncate_request_timeout_in_ms %>
-write_request_timeout_in_ms: <%= @write_request_timeout_in_ms %>
-commitlog_sync_period_in_ms: <%= @commitlog_sync_period_in_ms %>
+<% end -%>
+<% if @ssl_storage_port -%>
+ssl_storage_port: <%= @ssl_storage_port %>
+<% end -%>
 
-<% if @cassandra_version.to_s.start_with?('3.') -%>
+<% if @start_native_transport -%>
+start_native_transport: <%= @start_native_transport %>
+<% end -%>
+<% if @start_rpc -%>
 start_rpc: <%= @start_rpc %>
+<% end -%>
+<% if @rpc_port -%>
 rpc_port: <%= @rpc_port %>
-rpc_keepalive: <%= @rpc_keepalive %>
-thrift_framed_transport_size_in_mb: <%= @thrift_framed_transport_size_in_mb %>
-<% else -%>
-# Cassandra 4.x / 5.x specific settings
+<% end -%>
+
+<% if @dynamic_snitch -%>
+dynamic_snitch: <%= @dynamic_snitch %>
+<% end -%>
+<% if @phi_convict_threshold -%>
+phi_convict_threshold: <%= @phi_convict_threshold %>
+<% end -%>
+
+<% if @concurrent_reads -%>
+concurrent_reads: <%= @concurrent_reads %>
+<% end -%>
+<% if @concurrent_writes -%>
+concurrent_writes: <%= @concurrent_writes %>
+<% end -%>
+<% if @concurrent_counter_writes -%>
+concurrent_counter_writes: <%= @concurrent_counter_writes %>
+<% end -%>
+<% if @memtable_allocation_type -%>
+memtable_allocation_type: <%= @memtable_allocation_type %>
+<% end -%>
+<% if @disk_optimization_strategy -%>
+disk_optimization_strategy: <%= @disk_optimization_strategy %>
+<% end -%>
+
+<% if @key_cache_size_in_mb -%>
+key_cache_size_in_mb: <%= @key_cache_size_in_mb %>
+<% end -%>
+<% if @counter_cache_size_in_mb -%>
+counter_cache_size_in_mb: <%= @counter_cache_size_in_mb %>
+<% end -%>
+<% if @file_cache_size_in_mb -%>
+file_cache_size_in_mb: <%= @file_cache_size_in_mb %>
+<% end -%>
+<% if @index_summary_capacity_in_mb -%>
+index_summary_capacity_in_mb: <%= @index_summary_capacity_in_mb %>
+<% end -%>
+
+<% if @commitlog_sync -%>
+commitlog_sync: <%= @commitlog_sync %>
+<% end -%>
+<% if @commitlog_sync_period_in_ms -%>
+commitlog_sync_period_in_ms: <%= @commitlog_sync_period_in_ms %>
+<% end -%>
+<% if @commit_failure_policy -%>
+commit_failure_policy: <%= @commit_failure_policy %>
+<% end -%>
+
+<% if @request_timeout_in_ms -%>
+request_timeout_in_ms: <%= @request_timeout_in_ms %>
+<% end -%>
+<% if @read_request_timeout_in_ms -%>
+read_request_timeout_in_ms: <%= @read_request_timeout_in_ms %>
+<% end -%>
+<% if @range_request_timeout_in_ms -%>
+range_request_timeout_in_ms: <%= @range_request_timeout_in_ms %>
+<% end -%>
+<% if @write_request_timeout_in_ms -%>
+write_request_timeout_in_ms: <%= @write_request_timeout_in_ms %>
+<% end -%>
+<% if @truncate_request_timeout_in_ms -%>
+truncate_request_timeout_in_ms: <%= @truncate_request_timeout_in_ms %>
+<% end -%>
+
+<% if @incremental_backups -%>
+incremental_backups: <%= @incremental_backups %>
+<% end -%>
+<% if @auto_snapshot -%>
+auto_snapshot: <%= @auto_snapshot %>
+<% end -%>
+
+<% if @tombstone_warn_threshold -%>
+tombstone_warn_threshold: <%= @tombstone_warn_threshold %>
+<% end -%>
+<% if @tombstone_failure_threshold -%>
+tombstone_failure_threshold: <%= @tombstone_failure_threshold %>
+<% end -%>
+<% if @compaction_throughput_mb_per_sec -%>
+compaction_throughput_mb_per_sec: <%= @compaction_throughput_mb_per_sec %>
+<% end -%>
+<% if @concurrent_compactors -%>
+concurrent_compactors: <%= @concurrent_compactors %>
+<% end -%>
+<% if @enable_transient_replication -%>
 enable_transient_replication: <%= @enable_transient_replication %>
 <% end -%>
 
 <% if @ssl_enabled -%>
-# --- Internode (node-to-node) encryption ---
 server_encryption_options:
   internode_encryption: <%= @internode_encryption %>
   keystore: <%= @keystore_path %>
@@ -568,7 +694,6 @@ server_encryption_options:
   store_type: <%= @store_type %>
   <% end -%>
 
-# --- Client (app-to-node) encryption ---
 client_encryption_options:
   enabled: true
   optional: <%= @client_optional %>
@@ -715,14 +840,14 @@ TimeoutStartSec=<%= @service_timeout_start_sec %>
 `.trim(),
     },
     scripts: {
-      'cassandra-upgrade-precheck.sh': '#!/bin/bash\\n# Placeholder for cassandra-upgrade-precheck.sh\\necho "Cassandra Upgrade Pre-check Script"',
-      'cluster-health.sh': '#!/bin/bash\\nnodetool status',
-      'repair-node.sh': '#!/bin/bash\\nnodetool repair -pr',
-      'drain-node.sh': '#!/bin/bash\\nnodetool drain',
-      'cleanup-node.sh': '#!/bin/bash\\necho "Cleanup Node Script"',
-      'take-snapshot.sh': '#!/bin/bash\\necho "Take Snapshot Script"',
-      'rebuild-node.sh': '#!/bin/bash\\necho "Rebuild Node Script"',
-      'garbage-collect.sh': '#!/bin/bash\\necho "Garbage Collect Script"',
+      'cassandra-upgrade-precheck.sh': '#!/bin/bash\\\\n# Placeholder for cassandra-upgrade-precheck.sh\\\\necho "Cassandra Upgrade Pre-check Script"',
+      'cluster-health.sh': '#!/bin/bash\\\\nnodetool status',
+      'repair-node.sh': '#!/bin/bash\\\\nnodetool repair -pr',
+      'drain-node.sh': '#!/bin/bash\\\\nnodetool drain',
+      'cleanup-node.sh': '#!/bin/bash\\\\necho "Cleanup Node Script"',
+      'take-snapshot.sh': '#!/bin/bash\\\\necho "Take Snapshot Script"',
+      'rebuild-node.sh': '#!/bin/bash\\\\necho "Rebuild Node Script"',
+      'garbage-collect.sh': '#!/bin/bash\\\\necho "Garbage Collect Script"',
       'assassinate-node.sh': `#!/bin/bash
 # Assassinate a node. Use with extreme caution.
 
@@ -758,7 +883,7 @@ else
   exit 1
 fi
 `,
-      'upgrade-sstables.sh': '#!/bin/bash\\necho "Upgrade SSTables Script"',
+      'upgrade-sstables.sh': '#!/bin/bash\\\\necho "Upgrade SSTables Script"',
       'backup-to-s3.sh': `#!/bin/bash
 # Performs a snapshot and mocks S3 upload.
 
@@ -794,14 +919,14 @@ log_message "Snapshot taken successfully."
 
 # Find snapshot directory. This path might vary.
 # Example: /var/lib/cassandra/data/keyspace/table/snapshots/TAG
-SNAPSHOT_ROOT_DIR="\${CASSANDRA_DATA_DIR}"
+SNAPSHOT_ROOT_DIR="\\\${CASSANDRA_DATA_DIR}"
 
 # Prepare temporary directory for tarball
 mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
 
-log_message "Creating tar.gz archive of snapshot data from $SNAPSHOT_ROOT_DIR to $BACKUP_TEMP_DIR/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz ..."
+log_message "Creating tar.gz archive of snapshot data from $SNAPSHOT_ROOT_DIR to $BACKUP_TEMP_DIR/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz ..."
 # Find all snapshot directories for the current tag and tar them
-find "$SNAPSHOT_ROOT_DIR" -type d -name "$SNAPSHOT_TAG" -exec tar -czvf "\${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz" -C {} . \\; 
+find "$SNAPSHOT_ROOT_DIR" -type d -name "$SNAPSHOT_TAG" -exec tar -czvf "\\\${BACKUP_TEMP_DIR}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz" -C {} . \\\\; 
 if [ $? -ne 0 ]; then
   log_message "ERROR: Failed to create tar.gz archive of snapshot data."
   cleanup_temp
@@ -810,11 +935,11 @@ fi
 log_message "Snapshot data archived successfully."
 
 # 3. Upload to S3 (mocked command)
-UPLOAD_PATH="s3://\${BUCKET_NAME}/cassandra/\${HOSTNAME}/\${SNAPSHOT_TAG}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz"
+UPLOAD_PATH="s3://\\\${BUCKET_NAME}/cassandra/\\\${HOSTNAME}/\\\${SNAPSHOT_TAG}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz"
 log_message "Mocking S3 upload command:"
-echo "aws s3 cp \${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz $UPLOAD_PATH"
+echo "aws s3 cp \\\${BACKUP_TEMP_DIR}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz $UPLOAD_PATH"
 # In a real scenario, you'd run:
-# aws s3 cp "\${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz" "$UPLOAD_PATH"
+# aws s3 cp "\\\${BACKUP_TEMP_DIR}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz" "$UPLOAD_PATH"
 # if [ $? -ne 0 ]; then
 #   log_message "ERROR: Failed to upload backup to S3."
 #   cleanup_temp
@@ -833,14 +958,14 @@ cleanup_temp
 log_message "Cassandra backup to S3 process completed."
 exit 0
 `,
-      'prepare-replacement.sh': '#!/bin/bash\\necho "Prepare Replacement Script"',
-      'version-check.sh': '#!/bin/bash\\necho "Version Check Script"',
-      'cassandra_range_repair.py': '#!/usr/bin/env python3\\nprint("Cassandra Range Repair Python Script")',
-      'range-repair.sh': '#!/bin/bash\\necho "Range Repair Script"',
-      'robust_backup.sh': '#!/bin/bash\\necho "Robust Backup Script Placeholder"',
-      'restore_from_backup.sh': '#!/bin/bash\\necho "Restore from Backup Script Placeholder"',
-      'node_health_check.sh': '#!/bin/bash\\necho "Node Health Check Script Placeholder"',
-      'rolling_restart.sh': '#!/bin/bash\\necho "Rolling Restart Script Placeholder"',
+      'prepare-replacement.sh': '#!/bin/bash\\\\necho "Prepare Replacement Script"',
+      'version-check.sh': '#!/bin/bash\\\\necho "Version Check Script"',
+      'cassandra_range_repair.py': '#!/usr/bin/env python3\\\\nprint("Cassandra Range Repair Python Script")',
+      'range-repair.sh': '#!/bin/bash\\\\necho "Range Repair Script"',
+      'robust_backup.sh': '#!/bin/bash\\\\necho "Robust Backup Script Placeholder"',
+      'restore_from_backup.sh': '#!/bin/bash\\\\necho "Restore from Backup Script Placeholder"',
+      'node_health_check.sh': '#!/bin/bash\\\\necho "Node Health Check Script Placeholder"',
+      'rolling_restart.sh': '#!/bin/bash\\\\necho "Rolling Restart Script Placeholder"',
     },
     files: {
       'jamm-0.3.2.jar': '', // Placeholder for binary file
@@ -922,7 +1047,7 @@ class profile_cassandra_pfpt {
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
   $user                             = lookup('profile_cassandra_pfpt::user', { 'default_value' => 'cassandra' })
   $group                            = lookup('profile_cassandra_pfpt::group', { 'default_value' => 'cassandra' })
-  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/" })
+  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\\\${facts['os']['release']['major']}/" })
   $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://downloads.apache.org/cassandra/KEYS' })
   $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
@@ -959,11 +1084,33 @@ class profile_cassandra_pfpt {
   $thrift_framed_transport_size_in_mb = lookup('profile_cassandra_pfpt::thrift_framed_transport_size_in_mb', { 'default_value' => 15 })
   $enable_transient_replication     = lookup('profile_cassandra_pfpt::enable_transient_replication', { 'default_value' => false })
   $manage_jmx_security              = lookup('profile_cassandra_pfpt::manage_jmx_security', { 'default_value' => false })
-  $jmx_password_file_content        = lookup('profile_cassandra_pfpt::jmx_password_file_content', { 'default_value' => "monitorRole QED\\ncontrolRole R&D" })
-  $jmx_access_file_content          = lookup('profile_cassandra_pfpt::jmx_access_file_content', { 'default_value' => "monitorRole readonly\\ncontrolRole readwrite" })
+  $jmx_password_file_content        = lookup('profile_cassandra_pfpt::jmx_password_file_content', { 'default_value' => "monitorRole QED\\\\ncontrolRole R&D" })
+  $jmx_access_file_content          = lookup('profile_cassandra_pfpt::jmx_access_file_content', { 'default_value' => "monitorRole readonly\\\\ncontrolRole readwrite" })
   $jmx_password_file_path           = lookup('profile_cassandra_pfpt::jmx_password_file_path', { 'default_value' => '/etc/cassandra/jmxremote.password' })
   $jmx_access_file_path             = lookup('profile_cassandra_pfpt::jmx_access_file_path', { 'default_value' => '/etc/cassandra/jmxremote.access' })
   $service_timeout_start_sec        = lookup('profile_cassandra_pfpt::service_timeout_start_sec', { 'default_value' => '400s' })
+  
+  $authorizer                     = lookup('profile_cassandra_pfpt::authorizer', { 'default_value' => 'CassandraAuthorizer' })
+  $authenticator                  = lookup('profile_cassandra_pfpt::authenticator', { 'default_value' => 'PasswordAuthenticator' })
+  $num_tokens                     = lookup('profile_cassandra_pfpt::num_tokens', { 'default_value' => 256 })
+  $native_transport_port          = lookup('profile_cassandra_pfpt::native_transport_port', { 'default_value' => 9042 })
+  $endpoint_snitch                = lookup('profile_cassandra_pfpt::endpoint_snitch', { 'default_value' => 'GossipingPropertyFileSnitch' })
+  $listen_interface               = lookup('profile_cassandra_pfpt::listen_interface', { 'default_value' => undef })
+  $rpc_interface                  = lookup('profile_cassandra_pfpt::rpc_interface', { 'default_value' => undef })
+  $broadcast_address              = lookup('profile_cassandra_pfpt::broadcast_address', { 'default_value' => undef })
+  $broadcast_rpc_address          = lookup('profile_cassandra_pfpt::broadcast_rpc_address', { 'default_value' => undef })
+  $counter_cache_size_in_mb       = lookup('profile_cassandra_pfpt::counter_cache_size_in_mb', { 'default_value' => undef })
+  $key_cache_size_in_mb           = lookup('profile_cassandra_pfpt::key_cache_size_in_mb', { 'default_value' => undef })
+  $disk_optimization_strategy     = lookup('profile_cassandra_pfpt::disk_optimization_strategy', { 'default_value' => 'ssd' })
+  $auto_snapshot                  = lookup('profile_cassandra_pfpt::auto_snapshot', { 'default_value' => true })
+  $phi_convict_threshold          = lookup('profile_cassandra_pfpt::phi_convict_threshold', { 'default_value' => 8 })
+  $concurrent_reads               = lookup('profile_cassandra_pfpt::concurrent_reads', { 'default_value' => 32 })
+  $concurrent_writes              = lookup('profile_cassandra_pfpt::concurrent_writes', { 'default_value' => 32 })
+  $concurrent_counter_writes      = lookup('profile_cassandra_pfpt::concurrent_counter_writes', { 'default_value' => 32 })
+  $memtable_allocation_type       = lookup('profile_cassandra_pfpt::memtable_allocation_type', { 'default_value' => 'heap_buffers' })
+  $index_summary_capacity_in_mb   = lookup('profile_cassandra_pfpt::index_summary_capacity_in_mb', { 'default_value' => undef })
+  $file_cache_size_in_mb          = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
+
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
@@ -1055,6 +1202,26 @@ class profile_cassandra_pfpt {
     jmx_password_file_path           => $jmx_password_file_path,
     jmx_access_file_path             => $jmx_access_file_path,
     service_timeout_start_sec        => $service_timeout_start_sec,
+    authorizer                       => $authorizer,
+    authenticator                    => $authenticator,
+    num_tokens                       => $num_tokens,
+    native_transport_port            => $native_transport_port,
+    endpoint_snitch                  => $endpoint_snitch,
+    listen_interface                 => $listen_interface,
+    rpc_interface                    => $rpc_interface,
+    broadcast_address                => $broadcast_address,
+    broadcast_rpc_address            => $broadcast_rpc_address,
+    counter_cache_size_in_mb         => $counter_cache_size_in_mb,
+    key_cache_size_in_mb             => $key_cache_size_in_mb,
+    disk_optimization_strategy       => $disk_optimization_strategy,
+    auto_snapshot                    => $auto_snapshot,
+    phi_convict_threshold            => $phi_convict_threshold,
+    concurrent_reads                 => $concurrent_reads,
+    concurrent_writes                => $concurrent_writes,
+    concurrent_counter_writes        => $concurrent_counter_writes,
+    memtable_allocation_type         => $memtable_allocation_type,
+    index_summary_capacity_in_mb     => $index_summary_capacity_in_mb,
+    file_cache_size_in_mb            => $file_cache_size_in_mb,
   }
 }
         `.trim(),
@@ -1146,5 +1313,7 @@ exit $?
 
 
 
+
+    
 
     
