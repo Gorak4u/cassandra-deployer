@@ -149,7 +149,7 @@ class cassandra_pfpt::java inherits cassandra_pfpt {
       '8'     => 'java-1.8.0-openjdk-headless',
       '11'    => 'java-11-openjdk-headless',
       '17'    => 'java-17-openjdk-headless',
-      default => "java-${java_version}-openjdk-headless",
+      default => "java-\${java_version}-openjdk-headless",
     }
   }
 
@@ -176,7 +176,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
     if $facts['os']['family'] == 'RedHat' {
       $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \\${cassandra_version} for EL\\${os_release_major}",
+        descr               => "Apache Cassandra \\\${cassandra_version} for EL\\\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -538,7 +538,3 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
-
-    
-
-    
