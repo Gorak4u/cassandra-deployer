@@ -193,7 +193,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   package { 'cassandra':
     ensure  => $cassandra_ensure,
-    require => [ Class['cassandra_pfpt::java'], User[$user] ],
+    require => [ Class['cassandra_pfpt::java'], User[$user], Yumrepo['cassandra'] ],
     before  => Class['cassandra_pfpt::config'],
   }
 
@@ -211,6 +211,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0700',
+    require => Package['cassandra'],
   }
 
   file { '/root/.cassandra':
@@ -235,6 +236,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
 
@@ -244,6 +246,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
 
@@ -253,6 +256,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => $user,
     group   => $group,
     mode    => '0644',
+    require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
 
@@ -367,6 +371,12 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     enable     => true,
     hasstatus  => true,
     hasrestart => true,
+    require    => [
+      Package['cassandra'],
+      File['/etc/cassandra/conf/cassandra.yaml'],
+      File['/etc/cassandra/conf/cassandra-rackdc.properties'],
+      File['/etc/cassandra/conf/jvm-server.options'],
+    ],
   }
 
   file { $change_password_cql:
@@ -387,6 +397,9 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
   }
 
   if $enable_range_repair {
+    $range_repair_ensure = $enable_range_repair ? { true => 'running', default => 'stopped' }
+    $range_repair_enable = $enable_range_repair ? { true => true, default => false }
+
     file { '/etc/systemd/system/range-repair.service':
       ensure  => 'file',
       content => template('cassandra_pfpt/range-repair.service.erb'),
@@ -404,8 +417,8 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     }
 
     service { 'range-repair':
-      ensure    => 'running',
-      enable    => true,
+      ensure    => $range_repair_ensure,
+      enable    => $range_repair_enable,
       hasstatus => true,
       subscribe => File['/etc/systemd/system/range-repair.service'],
     }
@@ -642,7 +655,41 @@ WantedBy=multi-user.target
       'take-snapshot.sh': '#!/bin/bash\\necho "Take Snapshot Script"',
       'rebuild-node.sh': '#!/bin/bash\\necho "Rebuild Node Script"',
       'garbage-collect.sh': '#!/bin/bash\\necho "Garbage Collect Script"',
-      'assassinate-node.sh': '#!/bin/bash\\necho "Assassinate Node Script"',
+      'assassinate-node.sh': `#!/bin/bash
+# Assassinate a node. Use with extreme caution.
+
+log_message() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
+
+NODE_IP="$1"
+
+if [ -z "$NODE_IP" ]; then
+  log_message "Error: Node IP address must be provided as an argument."
+  log_message "Usage: $0 <ip_address_of_dead_node>"
+  exit 1
+fi
+
+log_message "WARNING: Attempting to assassinate node at IP: $NODE_IP. This will remove it from the cluster."
+log_message "Are you sure you want to proceed? Type 'yes' to confirm."
+read confirmation
+
+if [ "$confirmation" != "yes" ]; then
+  log_message "Aborted."
+  exit 0
+fi
+
+nodetool assassinate "$NODE_IP"
+ASSASSINATE_STATUS=$?
+
+if [ $ASSASSINATE_STATUS -eq 0 ]; then
+  log_message "Nodetool assassinate of $NODE_IP completed successfully."
+  exit 0
+else
+  log_message "Nodetool assassinate of $NODE_IP FAILED with exit code $ASSASSINATE_STATUS."
+  exit 1
+fi
+`,
       'upgrade-sstables.sh': '#!/bin/bash\\necho "Upgrade SSTables Script"',
       'backup-to-s3.sh': '#!/bin/bash\\necho "Backup to S3 Script"',
       'prepare-replacement.sh': '#!/bin/bash\\necho "Prepare Replacement Script"',
@@ -895,3 +942,5 @@ class role_cassandra_pfpt {
     },
   },
 };
+
+    
