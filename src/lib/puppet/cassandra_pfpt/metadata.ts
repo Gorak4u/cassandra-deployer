@@ -1,3 +1,4 @@
+
 export const metadata = `
 {
   "name": "cassandra_pfpt",
@@ -8,7 +9,10 @@ export const metadata = `
   "source": "",
   "project_page": "",
   "issues_url": "",
-  "dependencies": [],
+  "dependencies": [
+    { "name": "puppetlabs/ssl_certificate", "version_requirement": ">= 1.0.0" },
+    { "name": "puppetlabs/java_ks", "version_requirement": ">= 1.0.0" }
+  ],
   "operatingsystem_support": [
     { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
     { "operatingsystem": "CentOS", "operatingsystemrelease": [ "7", "8", "9" ] },

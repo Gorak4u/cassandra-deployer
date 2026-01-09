@@ -145,7 +145,7 @@ class cassandra_pfpt::java inherits cassandra_pfpt {
   if $java_package_name and $java_package_name != '' {
     $actual_java_package = $java_package_name
   } else {
-    $actual_java_package = $java_version ? {
+    $actual_java_package = $${java_version} ? {
       '8'     => 'java-1.8.0-openjdk-headless',
       '11'    => 'java-11-openjdk-headless',
       '17'    => 'java-17-openjdk-headless',
@@ -291,9 +291,9 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh' ].each |$script| {
-    file { "\\\${manage_bin_dir}/\\\${script}":
+    file { "\\${manage_bin_dir}/\\${script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\\\${script}",
+      source  => "puppet:///modules/cassandra_pfpt/scripts/\\${script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
@@ -345,29 +345,33 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
       unless  => "test -d \\\${target_dir}/etc",
     }
-
-    notify { 'ssl_certificate_placeholder':
-      message => "Placeholder for ssl_certificate custom type. This would generate certs for domain \\\${https_domain} in \\\${target_dir}/etc.",
+    # Custom type that generates cert/key files for the domain
+    ssl_certificate { "\\\${target_dir}/etc/keystore":
+      domain  => $https_domain,
       require => Exec['create the certs dir'],
     }
-
-    notify { 'java_ks_placeholder':
-      message => "Placeholder for java_ks custom type. This would create \\\${keystore_path} from the generated certs.",
-      require => Notify['ssl_certificate_placeholder'],
+    # Java keystore creation: JKS from PEM + KEY
+    java_ks { "host:\\\${target_dir}/etc/keystore.jks":
+      ensure      => latest,
+      certificate => "\\\${target_dir}/etc/keystore.pem",
+      private_key => "\\\${target_dir}/etc/keystore.key",
+      password    => $keystore_password,
+      require     => [
+        File["\\\${target_dir}/etc/keystore.jks"],
+        Ssl_certificate["\\\${target_dir}/etc/keystore"], # ensure certs exist first
+      ],
     }
-
-    file { $keystore_path:
-      ensure  => 'file',
-      owner   => 'root',
-      group   => 'root',
-      mode    => '0444',
-      require => Notify['java_ks_placeholder'],
+    file { "\\\${target_dir}/etc/keystore.jks":
+      ensure => file,
+      owner  => 'root',
+      group  => 'root',
+      mode   => '0444',
+      require => Ssl_certificate["\\\${target_dir}/etc/keystore"],
     }
-
-    file { $truststore_path:
-      ensure  => link,
-      target  => $keystore_path,
-      require => File[$keystore_path],
+    file { "\\\${target_dir}/etc/truststore.jks":
+      ensure => link,
+      target => "\\\${target_dir}/etc/keystore.jks",
+      require => File["\\\${target_dir}/etc/keystore.jks"],
     }
   }
 
@@ -438,18 +442,18 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => file,
-    content => "ALTER USER cassandra WITH PASSWORD '\\\${cassandra_password}';\\n",
+    content => "ALTER USER cassandra WITH PASSWORD '\\${cassandra_password}';\\n",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
   }
 
   exec { 'change_cassandra_password':
-    command   => "cqlsh -u cassandra -p cassandra -f \\\${change_password_cql}",
+    command   => "cqlsh -u cassandra -p cassandra -f \\${change_password_cql}",
     path      => ['/bin/', $cqlsh_path_env],
     tries     => 12,
     try_sleep => 10,
-    unless    => "cqlsh -u cassandra -p '\\\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \\\${listen_address} >/dev/null 2>&1",
+    unless    => "cqlsh -u cassandra -p '\\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \\${listen_address} >/dev/null 2>&1",
     require   => [Service['cassandra'], File[$change_password_cql]],
   }
 
@@ -464,7 +468,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\\\${manage_bin_dir}/range-repair.sh"],
+      require => File["\\${manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -538,3 +542,5 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
+    
