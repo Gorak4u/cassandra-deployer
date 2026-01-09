@@ -278,7 +278,7 @@ port = 9042
 
 <% if @ssl_enabled %>
 [ssl]
-certfile =  <%~ "#{@target_dir}/etc/keystore.pem" %>
+certfile = <%= @target_dir %>/etc/keystore.pem
 version = SSLv23
 validate = false
 <% end %>
@@ -338,4 +338,3 @@ metrics:
 <% end %>
 `.trim(),
     };
-
