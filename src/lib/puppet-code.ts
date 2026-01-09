@@ -1001,38 +1001,38 @@ class profile_cassandra_pfpt {
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
-  $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'Production Cluster' })
-  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
-  $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
+  $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'ggonda-cass-cluster' })
+  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => '10.93.16.206,10.93.16.127,10.93.17.191' })
   $use_java11                       = lookup('profile_cassandra_pfpt::use_java11', { 'default_value' => true })
   $use_g1_gc                        = lookup('profile_cassandra_pfpt::use_g1_gc', { 'default_value' => true })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
   $rack                             = lookup('profile_cassandra_pfpt::rack', { 'default_value' => 'rack1' })
-  $cassandra_password               = lookup('profile_cassandra_pfpt::cassandra_password', { 'default_value' => 'cassandra' })
-  $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '4G' })
+  $cassandra_password               = lookup('profile_cassandra_pfpt::cassandra_password', { 'default_value' => 'PP#C@ss@ndr@000' })
+  $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
   $gc_type                          = lookup('profile_cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
   $data_dir                         = lookup('profile_cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
   $commitlog_dir                    = lookup('profile_cassandra_pfpt::commitlog_dir', { 'default_value' => '/var/lib/cassandra/commitlog' })
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
-  $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => true })
+  $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => false })
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
   $enable_range_repair              = lookup('profile_cassandra_pfpt::enable_range_repair', { 'default_value' => false })
-  $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => false })
+  $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
+  $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => true })
   $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
-  $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/usr/local/bin' })
-  $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/cassandra/keystore.jks' })
-  $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'default_value' => 'cassandra' })
-  $truststore_path                  = lookup('profile_cassandra_pfpt::truststore_path', { 'default_value' => '/etc/cassandra/truststore.jks' })
-  $truststore_password              = lookup('profile_cassandra_pfpt::truststore_password', { 'default_value' => 'cassandra' })
+  $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/etc/pki/tls/certs' })
+  $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
+  $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'default_value' => 'ChangeMe' })
+  $truststore_path                  = lookup('profile_cassandra_pfpt::truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
+  $truststore_password              = lookup('profile_cassandra_pfpt::truststore_password', { 'default_value' => 'changeit' })
   $internode_encryption             = lookup('profile_cassandra_pfpt::internode_encryption', { 'default_value' => 'all' })
   $internode_require_client_auth    = lookup('profile_cassandra_pfpt::internode_require_client_auth', { 'default_value' => true })
   $client_optional                  = lookup('profile_cassandra_pfpt::client_optional', { 'default_value' => false })
   $client_require_client_auth       = lookup('profile_cassandra_pfpt::client_require_client_auth', { 'default_value' => false })
-  $client_keystore_path             = lookup('profile_cassandra_pfpt::client_keystore_path', { 'default_value' => '/etc/cassandra/keystore.jks' })
-  $client_truststore_path           = lookup('profile_cassandra_pfpt::client_truststore_path', { 'default_value' => '/etc/cassandra/truststore.jks' })
-  $client_truststore_password       = lookup('profile_cassandra_pfpt::client_truststore_password', { 'default_value' => 'cassandra' })
+  $client_keystore_path             = lookup('profile_cassandra_pfpt::client_keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
+  $client_truststore_path           = lookup('profile_cassandra_pfpt::client_truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
+  $client_truststore_password       = lookup('profile_cassandra_pfpt::client_truststore_password', { 'default_value' => 'changeit' })
   $tls_protocol                     = lookup('profile_cassandra_pfpt::tls_protocol', { 'default_value' => 'TLS' })
   $tls_algorithm                    = lookup('profile_cassandra_pfpt::tls_algorithm', { 'default_value' => 'SunX509' })
   $store_type                       = lookup('profile_cassandra_pfpt::store_type', { 'default_value' => 'JKS' })
@@ -1163,7 +1163,7 @@ class profile_cassandra_pfpt {
     client_truststore_password       => $client_truststore_password,
     tls_protocol                     => $tls_protocol,
     tls_algorithm                    => $tls_algorithm,
-    store_type                       => $store_.type,
+    store_type                       => $store_type,
     concurrent_compactors            => $concurrent_compactors,
     compaction_throughput_mb_per_sec => $compaction_throughput_mb_per_sec,
     tombstone_warn_threshold         => $tombstone_warn_threshold,
@@ -1315,3 +1315,4 @@ exit $?
     
 
     
+
