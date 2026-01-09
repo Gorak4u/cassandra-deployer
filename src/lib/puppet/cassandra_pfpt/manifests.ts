@@ -112,7 +112,13 @@ class cassandra_pfpt (
   Optional[Integer] $concurrent_counter_writes,
   Optional[String] $memtable_allocation_type,
   Optional[Integer] $index_summary_capacity_in_mb,
-  Optional[Integer] $file_cache_size_in_mb
+  Optional[Integer] $file_cache_size_in_mb,
+  # Coralogix Settings
+  Boolean $manage_coralogix_agent,
+  String $coralogix_api_key,
+  String $coralogix_region,
+  Boolean $coralogix_logs_enabled,
+  Boolean $coralogix_metrics_enabled
 ) {
 
   contain cassandra_pfpt::java
@@ -120,6 +126,11 @@ class cassandra_pfpt (
   contain cassandra_pfpt::config
   contain cassandra_pfpt::service
   contain cassandra_pfpt::firewall
+
+  if $manage_coralogix_agent {
+    contain cassandra_pfpt::coralogix
+    Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
+  }
 
   Class['cassandra_pfpt::java']
   -> Class['cassandra_pfpt::install']
@@ -138,7 +149,7 @@ class cassandra_pfpt::java inherits cassandra_pfpt {
       '8'     => 'java-1.8.0-openjdk-headless',
       '11'    => 'java-11-openjdk-headless',
       '17'    => 'java-17-openjdk-headless',
-      default => "java-\\\${java_version}-openjdk-headless",
+      default => "java-\${java_version}-openjdk-headless",
     }
   }
 
@@ -163,9 +174,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \\\${cassandra_version} for EL\\\${os_release_major}",
+        descr               => "Apache Cassandra \\${cassandra_version} for EL\\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -293,7 +304,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0\\$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s+0\\$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -330,18 +341,18 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
 
   if $ssl_enabled {
     exec { 'create the certs dir':
-      command => "mkdir -p \\\${target_dir}/etc",
+      command => "mkdir -p \\${target_dir}/etc",
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
-      unless  => "test -d \\\${target_dir}/etc",
+      unless  => "test -d \\${target_dir}/etc",
     }
 
     notify { 'ssl_certificate_placeholder':
-      message => "Placeholder for ssl_certificate custom type. This would generate certs for domain \\\${https_domain} in \\\${target_dir}/etc.",
+      message => "Placeholder for ssl_certificate custom type. This would generate certs for domain \\${https_domain} in \\${target_dir}/etc.",
       require => Exec['create the certs dir'],
     }
 
     notify { 'java_ks_placeholder':
-      message => "Placeholder for java_ks custom type. This would create \\\${keystore_path} from the generated certs.",
+      message => "Placeholder for java_ks custom type. This would create \\${keystore_path} from the generated certs.",
       require => Notify['ssl_certificate_placeholder'],
     }
 
@@ -427,18 +438,18 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => file,
-    content => "ALTER USER cassandra WITH PASSWORD '\\\${cassandra_password}';\\\\n",
+    content => "ALTER USER cassandra WITH PASSWORD '\\${cassandra_password}';\\n",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
   }
 
   exec { 'change_cassandra_password':
-    command   => "cqlsh -u cassandra -p cassandra -f \\\${change_password_cql}",
+    command   => "cqlsh -u cassandra -p cassandra -f \\${change_password_cql}",
     path      => ['/bin/', $cqlsh_path_env],
     tries     => 12,
     try_sleep => 10,
-    unless    => "cqlsh -u cassandra -p '\\\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \\\${listen_address} >/dev/null 2>&1",
+    unless    => "cqlsh -u cassandra -p '\\${cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \\${listen_address} >/dev/null 2>&1",
     require   => [Service['cassandra'], File[$change_password_cql]],
   }
 
@@ -453,7 +464,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\\\${manage_bin_dir}/range-repair.sh"],
+      require => File["\\${manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -489,6 +500,43 @@ class cassandra_pfpt::firewall {
   # }
 }
 `.trim(),
+    'coralogix.pp': `
+# @summary Manages Coralogix agent installation and configuration.
+class cassandra_pfpt::coralogix inherits cassandra_pfpt {
+
+  if $facts['os']['family'] == 'RedHat' {
+    yumrepo { 'coralogix':
+      ensure   => 'present',
+      baseurl  => 'https://yum.coralogix.com/coralogix-el8-x86_64',
+      descr    => 'coralogix repo',
+      enabled  => 1,
+      gpgcheck => 0,
+    }
+
+    package { 'coralogix-agent':
+      ensure  => 'installed',
+      require => Yumrepo['coralogix'],
+    }
+
+    file { '/etc/coralogix/agent.conf':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/coralogix-agent.conf.erb'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0640',
+      require => Package['coralogix-agent'],
+      notify  => Service['coralogix-agent'],
+    }
+
+    service { 'coralogix-agent':
+      ensure    => 'running',
+      enable    => true,
+      hasstatus => true,
+      require   => File['/etc/coralogix/agent.conf'],
+    }
+  }
+}
+    `.trim()
     };
 
     

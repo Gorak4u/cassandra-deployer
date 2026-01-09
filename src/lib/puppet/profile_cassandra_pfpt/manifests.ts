@@ -115,6 +115,13 @@ class profile_cassandra_pfpt {
   $index_summary_capacity_in_mb     = lookup('profile_cassandra_pfpt::index_summary_capacity_in_mb', { 'default_value' => undef })
   $file_cache_size_in_mb            = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
 
+  # Coralogix Settings
+  $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
+  $coralogix_api_key                = lookup('profile_cassandra_pfpt::coralogix_api_key', { 'default_value' => '' })
+  $coralogix_region                 = lookup('profile_cassandra_pfpt::coralogix_region', { 'default_value' => 'US' })
+  $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
+  $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
+
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
     java_version                     => $java_version,
@@ -225,6 +232,11 @@ class profile_cassandra_pfpt {
     memtable_allocation_type         => $memtable_allocation_type,
     index_summary_capacity_in_mb     => $index_summary_capacity_in_mb,
     file_cache_size_in_mb            => $file_cache_size_in_mb,
+    manage_coralogix_agent           => $manage_coralogix_agent,
+    coralogix_api_key                => $coralogix_api_key,
+    coralogix_region                 => $coralogix_region,
+    coralogix_logs_enabled           => $coralogix_logs_enabled,
+    coralogix_metrics_enabled        => $coralogix_metrics_enabled,
   }
 }
         `.trim(),
