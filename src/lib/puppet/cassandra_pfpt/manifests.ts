@@ -375,6 +375,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     }
   }
 
+
   if $manage_jmx_security {
     file { $jmx_password_file_path:
       ensure  => 'file',
