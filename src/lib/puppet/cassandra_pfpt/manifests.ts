@@ -1,4 +1,5 @@
 
+
 export const manifests = {
       'init.pp': `
 # @summary Main component class for managing Cassandra.
@@ -174,7 +175,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${$cassandra_version} for EL\${$os_release_major}",
         baseurl             => $repo_baseurl,
@@ -235,7 +236,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => 'root',
     group   => 'root',
     mode    => '0644',
-    source  => $jamm_source,
+    content => '',
     require => Package['cassandra'],
   }
 
@@ -304,7 +305,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0\\\\$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s+0\\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -362,15 +363,15 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       ],
     }
     file { "\${$target_dir}/etc/keystore.jks":
-      ensure => file,
-      owner  => 'root',
-      group  => 'root',
-      mode   => '0444',
+      ensure  => file,
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0444',
       require => Ssl_certificate["\${$target_dir}/etc/keystore"],
     }
     file { "\${$target_dir}/etc/truststore.jks":
-      ensure => link,
-      target => "\${$target_dir}/etc/keystore.jks",
+      ensure  => link,
+      target  => "\${$target_dir}/etc/keystore.jks",
       require => File["\${$target_dir}/etc/keystore.jks"],
     }
   }
@@ -443,7 +444,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => file,
-    content => "ALTER USER cassandra WITH PASSWORD '\${$cassandra_password}';\\\\n",
+    content => "ALTER USER cassandra WITH PASSWORD '\${$cassandra_password}';\\n",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
@@ -543,3 +544,5 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
+
