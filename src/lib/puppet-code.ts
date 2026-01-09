@@ -1,4 +1,5 @@
 
+
 export const puppetCode = {
   cassandra_pfpt: {
     'metadata.json': `
@@ -129,7 +130,7 @@ class cassandra_pfpt (
   Optional[Integer] $counter_cache_size_in_mb,
   Optional[Integer] $key_cache_size_in_mb,
   Optional[String] $disk_optimization_strategy,
-  Optional[String] $auto_snapshot,
+  Optional[Boolean] $auto_snapshot,
   Optional[Integer] $phi_convict_threshold,
   Optional[Integer] $concurrent_reads,
   Optional[Integer] $concurrent_writes,
@@ -539,8 +540,8 @@ endpoint_snitch: <%= @endpoint_snitch %>
 data_file_directories:
     - <%= @data_dir %>
 <% end -%>
-<% if @commitlog_directory -%>
-commitlog_directory: <%= @commitlog_directory %>
+<% if @commitlog_dir -%>
+commitlog_directory: <%= @commitlog_dir %>
 <% end -%>
 <% if @cdc_raw_directory -%>
 cdc_raw_directory: <%= @cdc_raw_directory %>
@@ -559,9 +560,6 @@ listen_interface: '<%= @listen_interface %>'
 <% end -%>
 <% if @broadcast_address -%>
 broadcast_address: '<%= @broadcast_address %>'
-<% end -%>
-<% if @rpc_address -%>
-rpc_address: '<%= @rpc_address %>'
 <% end -%>
 <% if @rpc_interface -%>
 rpc_interface: '<%= @rpc_interface %>'
@@ -1002,7 +1000,7 @@ exit 0
 class profile_cassandra_pfpt {
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
-  $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => '' })
+  $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'Production Cluster' })
   $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
   $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
@@ -1165,7 +1163,7 @@ class profile_cassandra_pfpt {
     client_truststore_password       => $client_truststore_password,
     tls_protocol                     => $tls_protocol,
     tls_algorithm                    => $tls_algorithm,
-    store_type                       => $store_type,
+    store_type                       => $store_.type,
     concurrent_compactors            => $concurrent_compactors,
     compaction_throughput_mb_per_sec => $compaction_throughput_mb_per_sec,
     tombstone_warn_threshold         => $tombstone_warn_threshold,
