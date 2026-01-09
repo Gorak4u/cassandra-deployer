@@ -30,7 +30,7 @@ export const puppetCode = {
 class cassandra_pfpt (
   String $cassandra_version,
   String $java_version,
-  String $java_package_name,
+  Optional[String] $java_package_name,
   Boolean $manage_repo,
   String $user,
   String $group,
@@ -135,7 +135,7 @@ class cassandra_pfpt (
 # @summary Manages Java installation for Cassandra.
 class cassandra_pfpt::java inherits cassandra_pfpt {
 
-  if $java_package_name {
+  if $java_package_name and $java_package_name != '' {
     $actual_java_package = $java_package_name
   } else {
     $actual_java_package = $java_version ? {
@@ -1143,4 +1143,5 @@ exit $?
 };
 
     
+
 
