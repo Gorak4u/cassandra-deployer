@@ -52,7 +52,7 @@ class profile_cassandra_pfpt {
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
   $user                             = lookup('profile_cassandra_pfpt::user', { 'default_value' => 'cassandra' })
   $group                            = lookup('profile_cassandra_pfpt::group', { 'default_value' => 'cassandra' })
-  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\\\${facts['os']['release']['major']}/" })
+  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/" })
   $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://downloads.apache.org/cassandra/KEYS' })
   $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
