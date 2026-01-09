@@ -1,5 +1,6 @@
 
 
+
 export const puppetCode = {
   cassandra_pfpt: {
     'metadata.json': `
@@ -30,8 +31,8 @@ export const puppetCode = {
 # This class is fully parameterized and should receive its data from a profile.
 class cassandra_pfpt (
   String $cassandra_version,
-  String $java_version,
-  String $java_package_version,
+  String $java_release,
+  String $java_package_name,
   Boolean $manage_repo,
   String $user,
   String $group,
@@ -99,19 +100,19 @@ class cassandra_pfpt (
       'java.pp': `
 # @summary Manages Java installation for Cassandra.
 class cassandra_pfpt::java inherits cassandra_pfpt {
-  $java_package_name = $facts['os']['family'] ? {
-    'RedHat' => "java-\${java_version}-openjdk-headless",
-    'Debian' => "openjdk-\${java_version}-jre-headless",
+  $java_pkg_name = $facts['os']['family'] ? {
+    'RedHat' => "java-\${java_release}-openjdk-headless",
+    'Debian' => "openjdk-\${java_release}-jre-headless",
     default  => fail("Unsupported OS family for Java installation: \${facts['os']['family']}"),
   }
 
-  $java_ensure_version = if $java_package_version and $java_package_version != '' {
-    $java_package_version
+  $java_ensure_version = if $java_package_name and $java_package_name != '' {
+    $java_package_name
   } else {
     'present'
   }
 
-  package { $java_package_name:
+  package { $java_pkg_name:
     ensure  => $java_ensure_version,
   }
 }
@@ -515,8 +516,8 @@ WantedBy=multi-user.target
 # configuration data via Hiera.
 class profile_cassandra_pfpt {
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
-  $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
-  $java_package_version             = lookup('profile_cassandra_pfpt::java_package_version', { 'default_value' => '' })
+  $java_release                     = lookup('profile_cassandra_pfpt::java_release', { 'default_value' => '11' })
+  $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => '' })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'Production Cluster' })
   $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => $facts['networking']['ip'] })
   $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
@@ -571,8 +572,8 @@ class profile_cassandra_pfpt {
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
-    java_version                     => $java_version,
-    java_package_version             => $java_package_version,
+    java_release                     => $java_release,
+    java_package_name                => $java_package_name,
     manage_repo                      => $manage_repo,
     user                             => $user,
     group                            => $group,
