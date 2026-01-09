@@ -65,8 +65,8 @@ class cassandra_pfpt (
   Boolean $use_shenandoah_gc,
   Hash $racks,
   Boolean $ssl_enabled,
-  String $target_dir,
   String $https_domain,
+  String $target_dir,
   String $keystore_path,
   String $keystore_password,
   String $truststore_path,
@@ -129,23 +129,17 @@ class cassandra_pfpt (
 # @summary Manages Java installation for Cassandra.
 class cassandra_pfpt::java inherits cassandra_pfpt {
 
-  if $java_version == '8' {
-    $actual_java_package = 'java-1.8.0-openjdk-headless'
-  } elsif $java_version == '11' {
-    $actual_java_package = 'java-11-openjdk-headless'
-  } elsif $java_version == '17' {
-    $actual_java_package = 'java-17-openjdk-headless'
-  } else {
-    fail("Unsupported Java version: \${java_version}")
+  $actual_java_package = $java_package_name ? {
+    ''      => $java_version ? {
+      '8'     => 'java-1.8.0-openjdk-headless',
+      '11'    => 'java-11-openjdk-headless',
+      '17'    => 'java-17-openjdk-headless',
+      default => "java-\${java_version}-openjdk-headless",
+    },
+    default => $java_package_name,
   }
 
-  $java_pkg_name = if $java_package_name and $java_package_name != '' {
-    $java_package_name
-  } else {
-    $actual_java_package
-  }
-
-  package { $java_pkg_name:
+  package { $actual_java_package:
     ensure  => 'present',
   }
 }
@@ -166,8 +160,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${cassandra_version} for EL\${facts['os']['release']['major']}",
+        descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -295,7 +290,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/bin/cat /proc/swaps | /bin/grep -q "^/dev" -v',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0\\$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -356,8 +351,8 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     }
 
     file { $truststore_path:
-      ensure => 'link',
-      target => $keystore_path,
+      ensure  => link,
+      target  => $keystore_path,
       require => File[$keystore_path],
     }
   }
