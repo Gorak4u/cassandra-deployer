@@ -1,11 +1,12 @@
 
 
 
+
 export const puppetCode = {
   cassandra_pfpt: {
     'metadata.json': `
 {
-  "name": "ggonda-cassandra_pfpt",
+  "name": "cassandra_pfpt",
   "version": "1.0.0",
   "author": "ggonda",
   "summary": "Puppet component module to manage Apache Cassandra.",
@@ -489,7 +490,7 @@ WantedBy=multi-user.target
   profile_cassandra_pfpt: {
     'metadata.json': `
 {
-  "name": "ggonda-profile_cassandra_pfpt",
+  "name": "profile_cassandra_pfpt",
   "version": "1.0.0",
   "author": "ggonda",
   "summary": "Puppet profile for managing Cassandra.",
@@ -498,7 +499,7 @@ WantedBy=multi-user.target
   "project_page": "",
   "issues_url": "",
   "dependencies": [
-    { "name": "ggonda-cassandra_pfpt", "version_requirement": ">= 1.0.0" }
+    { "name": "cassandra_pfpt", "version_requirement": ">= 1.0.0" }
   ],
   "operatingsystem_support": [
     { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
@@ -633,7 +634,7 @@ class profile_cassandra_pfpt {
   role_cassandra_pfpt: {
     'metadata.json': `
 {
-  "name": "ggonda-role_cassandra_pfpt",
+  "name": "role_cassandra_pfpt",
   "version": "1.0.0",
   "author": "ggonda",
   "summary": "Puppet role for a Cassandra server.",
@@ -642,7 +643,7 @@ class profile_cassandra_pfpt {
   "project_page": "",
   "issues_url": "",
   "dependencies": [
-    { "name": "ggonda-profile_cassandra_pfpt", "version_requirement": ">= 1.0.0" }
+    { "name": "profile_cassandra_pfpt", "version_requirement": ">= 1.0.0" }
   ],
   "operatingsystem_support": [
     { "operatingsystem": "RedHat", "operatingsystemrelease": [ "7", "8", "9" ] },
@@ -669,3 +670,4 @@ class role_cassandra_pfpt {
     
 
     
+
