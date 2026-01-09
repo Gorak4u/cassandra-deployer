@@ -536,13 +536,9 @@ role_manager: <%= @role_manager %>
 <% if @endpoint_snitch -%>
 endpoint_snitch: <%= @endpoint_snitch %>
 <% end -%>
-<% if @data_dir -%>
 data_file_directories:
     - <%= @data_dir %>
-<% end -%>
-<% if @commitlog_dir -%>
 commitlog_directory: <%= @commitlog_dir %>
-<% end -%>
 <% if @cdc_raw_directory -%>
 cdc_raw_directory: <%= @cdc_raw_directory %>
 <% end -%>
@@ -924,7 +920,7 @@ mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backu
 
 log_message "Creating tar.gz archive of snapshot data from $SNAPSHOT_ROOT_DIR to $BACKUP_TEMP_DIR/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz ..."
 # Find all snapshot directories for the current tag and tar them
-find "$SNAPSHOT_ROOT_DIR" -type d -name "$SNAPSHOT_TAG" -exec tar -czvf "\\\${BACKUP_TEMP_DIR}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz" -C {} . \\\\; 
+find "$SNAPSHOT_ROOT_DIR" -type d -name "$SNAPSHOT_TAG" -exec tar -czvf "\\\${BACKUP_TEMP_DIR}/\\\${HOSTNAME}_cassandra_snapshot_\\\${SNAPSHOT_TAG}.tar.gz" -C {} . \\\\;
 if [ $? -ne 0 ]; then
   log_message "ERROR: Failed to create tar.gz archive of snapshot data."
   cleanup_temp
@@ -1087,7 +1083,6 @@ class profile_cassandra_pfpt {
   $jmx_password_file_path           = lookup('profile_cassandra_pfpt::jmx_password_file_path', { 'default_value' => '/etc/cassandra/jmxremote.password' })
   $jmx_access_file_path             = lookup('profile_cassandra_pfpt::jmx_access_file_path', { 'default_value' => '/etc/cassandra/jmxremote.access' })
   $service_timeout_start_sec        = lookup('profile_cassandra_pfpt::service_timeout_start_sec', { 'default_value' => '400s' })
-  
   $authorizer                     = lookup('profile_cassandra_pfpt::authorizer', { 'default_value' => 'CassandraAuthorizer' })
   $authenticator                  = lookup('profile_cassandra_pfpt::authenticator', { 'default_value' => 'PasswordAuthenticator' })
   $num_tokens                     = lookup('profile_cassandra_pfpt::num_tokens', { 'default_value' => 256 })
@@ -1315,4 +1310,5 @@ exit $?
     
 
     
+
 
