@@ -94,6 +94,12 @@ class cassandra_pfpt (
   String $jmx_password_file_path,
   String $jmx_access_file_path,
   String $service_timeout_start_sec,
+  # New features
+  Boolean $enable_audit_logging,
+  Boolean $enable_full_query_logging,
+  Boolean $enable_user_defined_functions,
+  Boolean $enable_scripted_user_defined_functions,
+  Boolean $enable_virtual_tables,
   Optional[String] $authorizer,
   Optional[String] $authenticator,
   Optional[Integer] $num_tokens,
@@ -175,9 +181,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${$cassandra_version} for EL\${$os_release_major}",
+        descr               => "Apache Cassandra \${$cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -291,7 +297,8 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
     'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
-    'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh' ].each |$script| {
+    'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
+    'disk-health-check.sh' ].each |$script| {
     file { "\${$manage_bin_dir}/\${$script}":
       ensure  => 'file',
       source  => "puppet:///modules/cassandra_pfpt/scripts/\${$script}",
