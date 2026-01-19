@@ -94,8 +94,8 @@ class cassandra_pfpt (
   Optional[String] $authorizer,
   Optional[String] $authenticator,
   Optional[Integer] $num_tokens,
-  Optional[Integer] $native_transport_port,
   Optional[String] $endpoint_snitch,
+  Optional[String] $initial_token = undef,
   Optional[String] $listen_interface,
   Optional[String] $rpc_interface,
   Optional[String] $broadcast_address,
@@ -201,3 +201,4 @@ class cassandra_pfpt (
   -> Class['cassandra_pfpt::config']
   ~> Class['cassandra_pfpt::service']
 }
+        

@@ -98,7 +98,7 @@ class profile_cassandra_pfpt {
   $authorizer                       = lookup('profile_cassandra_pfpt::authorizer', { 'default_value' => 'CassandraAuthorizer' })
   $authenticator                    = lookup('profile_cassandra_pfpt::authenticator', { 'default_value' => 'PasswordAuthenticator' })
   $num_tokens                       = lookup('profile_cassandra_pfpt::num_tokens', { 'default_value' => 256 })
-  $native_transport_port            = lookup('profile_cassandra_pfpt::native_transport_port', { 'default_value' => 9042 })
+  $initial_token                    = lookup('profile_cassandra_pfpt::initial_token', { 'default_value' => undef })
   $endpoint_snitch                  = lookup('profile_cassandra_pfpt::endpoint_snitch', { 'default_value' => 'GossipingPropertyFileSnitch' })
   $listen_interface                 = lookup('profile_cassandra_pfpt::listen_interface', { 'default_value' => undef })
   $rpc_interface                    = lookup('profile_cassandra_pfpt::rpc_interface', { 'default_value' => undef })
@@ -239,7 +239,7 @@ class profile_cassandra_pfpt {
     authorizer                       => $authorizer,
     authenticator                    => $authenticator,
     num_tokens                       => $num_tokens,
-    native_transport_port            => $native_transport_port,
+    initial_token                    => $initial_token,
     endpoint_snitch                  => $endpoint_snitch,
     listen_interface                 => $listen_interface,
     rpc_interface                    => $rpc_interface,
