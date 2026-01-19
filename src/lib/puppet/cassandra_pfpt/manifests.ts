@@ -126,11 +126,11 @@ class cassandra_pfpt (
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
 
   if $cassandra_major_version >= '4' and $java_version.to_i < 11 {
-    fail("Cassandra version \${cassandra_version} requires Java 11 or newer, but Java \${java_version} was specified.")
+    fail("Cassandra version \\\${cassandra_version} requires Java 11 or newer, but Java \\\${java_version} was specified.")
   }
 
   if $cassandra_major_version <= '3' and $java_version.to_i > 11 {
-    fail("Cassandra version \${cassandra_version} is not compatible with Java versions newer than 11, but Java \${java_version} was specified.")
+    fail("Cassandra version \\\${cassandra_version} is not compatible with Java versions newer than 11, but Java \\\${java_version} was specified.")
   }
 
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
@@ -139,7 +139,7 @@ class cassandra_pfpt (
   } else {
     $seeds_list
   }
-
+  
   # Calculate default JVM args based on GC type and Java version
   $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
     {
@@ -163,7 +163,7 @@ class cassandra_pfpt (
   } else {
     {}
   }
-
+  
   # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
@@ -196,7 +196,7 @@ class cassandra_pfpt::java inherits cassandra_pfpt {
       '8'     => 'java-1.8.0-openjdk-headless',
       '11'    => 'java-11-openjdk-headless',
       '17'    => 'java-17-openjdk-headless',
-      default => "java-\${$java_version}-openjdk-headless",
+      default => "java-\\\${$java_version}-openjdk-headless",
     }
   }
 
@@ -601,7 +601,3 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
-
-
-
-
