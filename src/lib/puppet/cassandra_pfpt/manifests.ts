@@ -240,9 +240,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
+        descr               => "Apache Cassandra \\\${cassandra_version} for EL\\\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -346,9 +346,9 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh' ].each |$script| {
-    file { "\${manage_bin_dir}/\${script}":
+    file { "\\\${manage_bin_dir}/\\\${script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\${script}",
+      source  => "puppet:///modules/cassandra_pfpt/\\\${script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
