@@ -120,6 +120,7 @@ class cassandra_pfpt (
   Boolean $coralogix_logs_enabled,
   Boolean $coralogix_metrics_enabled,
   Boolean $enable_materialized_views,
+  Optional[String] $coralogix_baseurl = undef,
 ) {
 
   # Validate Java and Cassandra version compatibility
@@ -568,9 +569,14 @@ class cassandra_pfpt::firewall {
 class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 
   if $facts['os']['family'] == 'RedHat' {
+    $repo_url = $coralogix_baseurl ? {
+      undef   => 'https://yum.coralogix.com/coralogix-el8-x86_64',
+      default => $coralogix_baseurl,
+    }
+
     yumrepo { 'coralogix':
       ensure   => 'present',
-      baseurl  => 'https://yum.coralogix.com/coralogix-el8-x86_64',
+      baseurl  => $repo_url,
       descr    => 'coralogix repo',
       enabled  => 1,
       gpgcheck => 0,

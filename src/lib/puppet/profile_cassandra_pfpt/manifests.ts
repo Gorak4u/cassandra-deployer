@@ -123,6 +123,7 @@ class profile_cassandra_pfpt {
   $coralogix_region                 = lookup('profile_cassandra_pfpt::coralogix_region', { 'default_value' => 'US' })
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
+  $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -241,6 +242,7 @@ class profile_cassandra_pfpt {
     coralogix_region                 => $coralogix_region,
     coralogix_logs_enabled           => $coralogix_logs_enabled,
     coralogix_metrics_enabled        => $coralogix_metrics_enabled,
+    coralogix_baseurl                => $coralogix_baseurl,
   }
 }
         `.trim(),
@@ -250,4 +252,5 @@ class profile_cassandra_pfpt {
     
 
     
+
 
