@@ -49,6 +49,10 @@ const getPuppetFiles = (): PuppetFile[] => {
         files.push({ repo: repoName, group: 'root', name: 'metadata.json', lang: 'json' });
         continue;
       }
+      if (groupName === 'README.md') {
+        files.push({ repo: repoName, group: 'root', name: 'README.md', lang: 'markdown' });
+        continue;
+      }
       const group = repo[groupName];
       for (const fileName in group) {
         let lang = 'text';
@@ -58,6 +62,7 @@ const getPuppetFiles = (): PuppetFile[] => {
         if (fileName.endsWith('.sh')) lang = 'bash';
         if (fileName.endsWith('.py')) lang = 'python';
         if (fileName.endsWith('.jar')) lang = 'binary';
+        if (fileName.endsWith('.md')) lang = 'markdown';
         
         files.push({ repo: repoName, group: groupName, name: fileName, lang });
       }
@@ -103,8 +108,8 @@ export default function Home() {
       if (!repoFolder) return;
 
       Object.entries(repoData).forEach(([groupOrFileName, content]) => {
-        if (groupOrFileName === 'metadata.json') {
-          repoFolder.file('metadata.json', content as string);
+        if (groupOrFileName === 'metadata.json' || groupOrFileName === 'README.md') {
+          repoFolder.file(groupOrFileName, content as string);
         } else if (typeof content === 'object' && content !== null) {
           const groupFolder = repoFolder.folder(groupOrFileName);
           if (groupFolder) {
@@ -268,7 +273,7 @@ export default function Home() {
                 <CodeBlock
                   code={
                     selectedFile.group === 'root'
-                    ? (puppetCode as any)[selectedFile.repo]['metadata.json']
+                    ? (puppetCode as any)[selectedFile.repo][selectedFile.name]
                     : (puppetCode as any)[selectedFile.repo]?.[selectedFile.group]?.[selectedFile.name] ?? `// ${selectedFile.name} is not available in the preview.`
                   }
                 />
