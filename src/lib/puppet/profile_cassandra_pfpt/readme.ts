@@ -15,8 +15,10 @@ export const readme = `
     3.  [Disaster Recovery: Restoring to a Brand New Cluster (Cold Start)](#disaster-recovery-restoring-to-a-brand-new-cluster-cold-start)
 7.  [Compaction Management](#compaction-management)
 8.  [Garbage Collection](#garbage-collection)
-9.  [Limitations](#limitations)
-10. [Development](#development)
+9.  [SSTable Upgrades](#sstable-upgrades)
+10. [Node Cleanup](#node-cleanup)
+11. [Limitations](#limitations)
+12. [Development](#development)
 
 ## Description
 
@@ -407,6 +409,50 @@ You can customize its behavior with flags:
 
 ### Performing a Rolling Garbage Collection
 To perform a safe, rolling garbage collection across an entire datacenter or cluster, you should run the script sequentially on each node, similar to the process for compaction. Wait for the script to complete successfully on one node before moving to the next.
+
+## SSTable Upgrades
+
+After a major Cassandra version upgrade (e.g., from 3.x to 4.x), you must run \`nodetool upgradesstables\` on each node to rewrite the SSTables into the new version's format. This profile deploys \`/usr/local/bin/upgrade-sstables.sh\` to manage this process safely.
+
+### Why Use the Script?
+The upgrade process writes new SSTables before deleting the old ones, which can significantly increase disk usage. This script performs a pre-flight disk check to ensure there is enough space before starting, preventing potential failures.
+
+### Usage
+Run the script sequentially on each node in the cluster, waiting for one to finish before starting the next.
+
+**To upgrade SSTables on the entire node (most common):**
+\`\`\`bash
+sudo /usr/local/bin/upgrade-sstables.sh
+\`\`\`
+
+**To upgrade a specific keyspace:**
+\`\`\`bash
+sudo /usr/local/bin/upgrade-sstables.sh -k my_app_keyspace
+\`\`\`
+
+All output is logged to \`/var/log/cassandra/upgradesstables.log\`.
+
+## Node Cleanup
+
+When the token ring changes (e.g., a node is added to the cluster), you must run \`nodetool cleanup\` on existing nodes. This process removes data that no longer belongs to that node according to the new token assignments. This profile deploys \`/usr/local/bin/cleanup-node.sh\` to run this operation safely.
+
+### Why Use the Script?
+Running \`cleanup\` can be resource-intensive. This script provides a wrapper that adds pre-flight disk space checks to ensure the operation doesn't start on a node that is already low on space.
+
+### Usage
+\`cleanup\` should be run on a node *after* a new node has fully bootstrapped into the same datacenter. Run it sequentially on each existing node.
+
+**To clean up the entire node:**
+\`\`\`bash
+sudo /usr/local/bin/cleanup-node.sh
+\`\`\`
+
+**To clean up a specific keyspace:**
+\`\`\`bash
+sudo /usr/local/bin/cleanup-node.sh -k my_app_keyspace
+\`\`\`
+
+All output is logged to \`/var/log/cassandra/cleanup.log\`.
 
 ## Limitations
 
