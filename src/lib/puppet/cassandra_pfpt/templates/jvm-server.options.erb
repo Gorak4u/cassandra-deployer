@@ -1,0 +1,55 @@
+
+# JVM configuration for Cassandra
+-ea
+
+-da:net.openhft...
+
+# Heap size
+-Xms<%= @max_heap_size %>
+-Xmx<%= @max_heap_size %>
+
+# GC settings and other extra JVM arguments
+<% @extra_jvm_args.each do |arg| -%>
+<%= arg %>
+<% end -%>
+
+# GC logging
+<% if @java_version.to_i >= 11 %>
+-Xlog:gc*:/var/log/cassandra/gc.log:time,uptime,pid,tid,level,tags:filecount=10,filesize=100M
+<% else %>
+-Xloggc:/var/log/cassandra/gc.log
+-XX:+PrintGCDetails
+-XX:+PrintGCDateStamps
+-XX:+PrintHeapAtGC
+-XX:+PrintTenuringDistribution
+-XX:+PrintGCApplicationStoppedTime
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=10
+-XX:GCLogFileSize=100M
+<% end %>
+
+# JMX Settings
+-Dcassandra.jmx.local.port=7199
+-Djava.net.preferIPv4Stack=true
+<% if @manage_jmx_security %>
+-Dcom.sun.management.jmxremote.port=7199
+-Dcom.sun.management.jmxremote.rmi.port=7199
+-Dcom.sun.management.jmxremote.ssl=false
+-Dcom.sun.management.jmxremote.authenticate=true
+-Dcom.sun.management.jmxremote.password.file=<%= @jmx_password_file_path %>
+-Dcom.sun.management.jmxremote.access.file=<%= @jmx_access_file_path %>
+<% else %>
+-Dcom.sun.management.jmxremote.port=7199
+-Dcom.sun.management.jmxremote.rmi.port=7199
+-Dcom.sun.management.jmxremote.ssl=false
+-Dcom.sun.management.jmxremote.authenticate=false
+<% end %>
+
+# Other common options
+-Dlogback.configurationFile=logback.xml
+-Dlogback.defaultConfigurationFile=logback-default.xml
+
+<% if @replace_address && !@replace_address.empty? %>
+# Replace dead node at first boot (set by Hiera/Puppet)
+-Dcassandra.replace_address_first_boot=<%= @replace_address %>
+<% end %>
