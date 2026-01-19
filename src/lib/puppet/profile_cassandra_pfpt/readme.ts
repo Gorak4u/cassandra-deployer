@@ -253,18 +253,22 @@ Incremental backups are not a standalone solution. They are used with full snaps
 
 ## Restoring from a Backup
 
-A \`restore-from-s3.sh\` script is placed in \`/usr/local/bin\` on each node to perform restores. This is a manual, operator-driven process due to its destructive nature.
+A \`restore-from-s3.sh\` script is placed in \`/usr/local/bin\` on each node to perform restores. This script supports two primary modes: a **full, destructive node restore** and a **granular, non-destructive restore** of a specific keyspace or table.
 
-**WARNING:** Running this script will **WIPE ALL CASSANDRA DATA** on the target node before restoring the backup.
+### Mode 1: Full Node Restore (Disaster Recovery)
 
-### Usage
+This mode is for recovering a completely failed node or building a new node from a backup. It is a **destructive** operation.
+
+**WARNING:** Running a full restore will **WIPE ALL CASSANDRA DATA** on the target node before restoring the backup.
+
+#### Usage
 
 1.  SSH into the node you want to restore.
-2.  Identify the backup you want to restore from your S3 bucket. You will need the unique backup identifier, which is the timestamped part of the filename (e.g., \`full_snapshot_20231027120000\`).
-3.  Run the script with the backup ID as the argument:
+2.  Identify the backup you want to restore from your S3 bucket. You need the full backup identifier (e.g., \`full_snapshot_20231027120000\`).
+3.  Run the script with only the backup ID:
 
 \`\`\`bash
-sudo /usr/local/bin/restore-from-s3.sh <BACKUP_IDENTIFIER>
+sudo /usr/local/bin/restore-from-s3.sh <backup_identifier>
 \`\`\`
 
 **Example:**
@@ -272,7 +276,41 @@ sudo /usr/local/bin/restore-from-s3.sh <BACKUP_IDENTIFIER>
 sudo /usr/local/bin/restore-from-s3.sh full_snapshot_20231027120000
 \`\`\`
 
-The script will ask for a final confirmation before proceeding. It handles stopping Cassandra, cleaning directories, downloading and extracting the data, setting permissions, and restarting the service. If it detects an incremental backup, it will also automatically run \`nodetool refresh\` to load the restored data.
+The script will ask for a final confirmation before proceeding. It handles stopping Cassandra, cleaning directories, downloading and extracting the data from S3, setting permissions, and restarting the service.
+
+### Mode 2: Granular Restore (Table/Keyspace Recovery)
+
+This mode is for recovering a specific table or an entire keyspace from a backup without affecting the rest of the cluster. It is a **non-destructive** operation that uses Cassandra's \`sstableloader\` tool to stream the backed-up data into the live cluster. This is ideal for recovering from accidental data deletion.
+
+**Prerequisite:** The keyspace and table schema must already exist in the cluster before you can load data into it.
+
+#### Usage
+
+1.  SSH into any Cassandra node in the cluster.
+2.  Identify the backup (full or incremental) that contains the data you want to restore.
+3.  Run the script with the backup ID, keyspace name, and optionally the table name.
+
+**To restore a single table:**
+\`\`\`bash
+sudo /usr/local/bin/restore-from-s3.sh <backup_id> <keyspace_name> <table_name>
+\`\`\`
+**Example:**
+\`\`\`bash
+# Restores the 'users' table in the 'my_app' keyspace from a specific backup
+sudo /usr/local/bin/restore-from-s3.sh incremental_20231027160000 my_app users
+\`\`\`
+
+**To restore an entire keyspace:**
+\`\`\`bash
+sudo /usr/local/bin/restore-from-s3.sh <backup_id> <keyspace_name>
+\`\`\`
+**Example:**
+\`\`\`bash
+# Restores all tables in the 'my_app' keyspace from a full backup
+sudo /usr/local/bin/restore-from-s3.sh full_snapshot_20231027120000 my_app
+\`\`\`
+
+The script will download the backup to a temporary location, find the relevant data files, and stream them to the cluster nodes defined in your \`profile_cassandra_pfpt::seeds_list\`.
 
 ## Limitations
 
@@ -282,4 +320,5 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
+
 

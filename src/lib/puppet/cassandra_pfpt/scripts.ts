@@ -301,11 +301,27 @@ exit 0
       'robust_backup.sh': '#!/bin/bash\\necho "Robust Backup Script Placeholder"',
       'restore-from-s3.sh': `#!/bin/bash
 # Restores a Cassandra node from a specified backup in S3.
+# Supports full node restore, or granular keyspace/table restore using sstableloader.
 
 set -euo pipefail
 
 # --- Configuration & Input ---
-BACKUP_ID="\\${'$'}1"
+if [ -n "\\${'$'}1" ]; then
+    BACKUP_ID="\\${'$'}1"
+else
+    BACKUP_ID=""
+fi
+if [ -n "\\${'$'}2" ]; then
+    KEYSPACE_NAME="\\${'$'}2"
+else
+    KEYSPACE_NAME=""
+fi
+if [ -n "\\${'$'}3" ]; then
+    TABLE_NAME="\\${'$'}3"
+else
+    TABLE_NAME=""
+fi
+
 CONFIG_FILE="/etc/backup/config.json"
 HOSTNAME=\\${'$'}(hostname -s)
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
@@ -323,15 +339,17 @@ fi
 
 if [ -z "\\${'$'}BACKUP_ID" ]; then
     log_message "ERROR: No backup ID provided."
-    log_message "Usage: \\${'$'}0 <backup_id>"
-    log_message "Example: \\${'$'}0 full_snapshot_20231027120000"
+    log_message "Usage for full restore: \\${'$'}0 <backup_id>"
+    log_message "Usage for granular restore: \\${'$'}0 <backup_id> <keyspace_name> [table_name]"
     exit 1
 fi
 
-if ! command -v jq &>/dev/null; then
-    log_message "ERROR: jq is not installed. Please install jq to continue."
-    exit 1
-fi
+for tool in jq aws sstableloader; do
+    if ! command -v \\${'$'}tool &>/dev/null; then
+        log_message "ERROR: Required tool '\\${'$'}tool' is not installed or not in PATH."
+        exit 1
+    fi
+done
 
 if [ ! -f "\\${'$'}CONFIG_FILE" ]; then
     log_message "ERROR: Backup configuration file not found at \\${'$'}CONFIG_FILE"
@@ -343,75 +361,158 @@ S3_BUCKET_NAME=\\${'$'}(jq -r '.s3_bucket_name' "\\${'$'}CONFIG_FILE")
 CASSANDRA_DATA_DIR=\\${'$'}(jq -r '.cassandra_data_dir' "\\${'$'}CONFIG_FILE")
 CASSANDRA_COMMITLOG_DIR=\\${'$'}(jq -r '.commitlog_dir' "\\${'$'}CONFIG_FILE")
 CASSANDRA_CACHES_DIR=\\${'$'}(jq -r '.saved_caches_dir' "\\${'$'}CONFIG_FILE")
+LISTEN_ADDRESS=\\${'$'}(jq -r '.listen_address' "\\${'$'}CONFIG_FILE")
+SEEDS=\\${'$'}(jq -r '.seeds_list | join(",")' "\\${'$'}CONFIG_FILE")
 CASSANDRA_USER="cassandra" # Usually static
 
-log_message "--- Starting Cassandra Restore Process for Backup ID: \\${'$'}BACKUP_ID ---"
+# Determine node list for sstableloader. Use seeds if available, otherwise localhost.
+if [ -n "\\${'$'}SEEDS" ]; then
+    LOADER_NODES="\\${'$'}SEEDS"
+else
+    LOADER_NODES="\\${'$'}LISTEN_ADDRESS"
+fi
 
-# Determine if it's a full or incremental backup to find the right S3 path
+
+# --- Function for Full Node Restore ---
+do_full_restore() {
+    log_message "--- Starting FULL DESTRUCTIVE Node Restore for Backup ID: \\${'$'}BACKUP_ID ---"
+    
+    log_message "This is a DESTRUCTIVE operation. It will:"
+    log_message "1. STOP the Cassandra service."
+    log_message "2. DELETE all existing data, commitlogs, and caches."
+    log_message "3. DOWNLOAD and extract backup from S3."
+    log_message "4. RESTART the Cassandra service."
+    read -p "Are you absolutely sure you want to continue with a full restore? Type 'yes': " confirmation
+    if [[ "\\${'$'}confirmation" != "yes" ]]; then
+        log_message "Restore aborted by user."
+        exit 0
+    fi
+
+    log_message "1. Stopping Cassandra service..."
+    systemctl stop cassandra
+
+    log_message "2. Cleaning old directories..."
+    rm -rf "\\${'$'}{CASSANDRA_DATA_DIR}"/*
+    rm -rf "\\${'$'}{CASSANDRA_COMMITLOG_DIR}"/*
+    rm -rf "\\${'$'}{CASSANDRA_CACHES_DIR}"/*
+    log_message "Old directories cleaned."
+
+    log_message "3. Downloading and extracting backup..."
+    # The -P flag is crucial here as the archive was created with absolute paths.
+    # In a real environment: aws s3 cp "\\${'$'}S3_PATH" - | tar -xzf - -P
+    aws s3 cp "\\${'$'}S3_PATH" - | tar -xzf - -P
+    log_message "Backup extracted."
+
+    log_message "4. Setting permissions..."
+    chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_DATA_DIR}"
+    chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_COMMITLOG_DIR}"
+    chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_CACHES_DIR}"
+    log_message "Permissions set."
+
+    log_message "5. Starting Cassandra service..."
+    systemctl start cassandra
+    log_message "Service started. It may take several minutes to initialize."
+    
+    log_message "--- Full Restore Process Finished Successfully ---"
+}
+
+# --- Function for Granular Restore using sstableloader ---
+do_granular_restore() {
+    local restore_path
+    local restore_type
+    
+    if [ -n "\\${'$'}TABLE_NAME" ]; then
+        restore_type="Table '\\${'$'}TABLE_NAME' in Keyspace '\\${'$'}KEYSPACE_NAME'"
+    else
+        restore_type="Keyspace '\\${'$'}KEYSPACE_NAME'"
+    fi
+
+    log_message "--- Starting GRANULAR Restore for \\${'$'}restore_type from Backup ID: \\${'$'}BACKUP_ID ---"
+    log_message "This will stream data into the LIVE cluster using sstableloader."
+
+    local RESTORE_TEMP_DIR="/tmp/restore_\\${'$'}{BACKUP_ID}_\\${'$'}{KEYSPACE_NAME}"
+    trap 'rm -rf "\\${'$'}RESTORE_TEMP_DIR"' EXIT
+    mkdir -p "\\${'$'}RESTORE_TEMP_DIR"
+
+    log_message "1. Downloading backup to temporary location..."
+    aws s3 cp "\\${'$'}S3_PATH" "\\${'$'}{RESTORE_TEMP_DIR}/\\${'$'}{TARBALL_NAME}"
+    
+    log_message "2. Extracting backup..."
+    tar -xzf "\\${'$'}{RESTORE_TEMP_DIR}/\\${'$'}{TARBALL_NAME}" -C "\\${'$'}RESTORE_TEMP_DIR"
+    
+    # sstableloader needs the path to be .../keyspace/table/
+    # The backup preserves the full path, so we can find it.
+    local extracted_data_path="\\${'$'}{RESTORE_TEMP_DIR}\\${'$'}{CASSANDRA_DATA_DIR}"
+    
+    if [ -n "\\${'$'}TABLE_NAME" ]; then
+        # Find the specific table directory (it has a UUID suffix)
+        restore_path=\\${'$'}(find "\\${'$'}{extracted_data_path}/\\${'$'}{KEYSPACE_NAME}" -maxdepth 1 -type d -name "\\${'$'}{TABLE_NAME}-*")
+        if [ -z "\\${'$'}restore_path" ] || [ ! -d "\\${'$'}restore_path" ]; then
+            log_message "ERROR: Could not find table '\\${'$'}TABLE_NAME' in the backup for keyspace '\\${'$'}KEYSPACE_NAME'."
+            exit 1
+        fi
+    else
+        restore_path="\\${'$'}{extracted_data_path}/\\${'$'}{KEYSPACE_NAME}"
+        if [ ! -d "\\${'$'}restore_path" ]; then
+            log_message "ERROR: Could not find keyspace '\\${'$'}KEYSPACE_NAME' in the backup."
+            exit 1
+        fi
+    fi
+
+    log_message "3. Found data to restore at: \\${'$'}restore_path"
+    log_message "4. Streaming data to cluster nodes (\\${'$'}LOADER_NODES) with sstableloader..."
+
+    # Ensure the schema exists before loading data
+    log_message "Verifying schema exists..."
+    if ! cqlsh -e "DESCRIBE KEYSPACE \\${'$'}{KEYSPACE_NAME};" &>/dev/null; then
+        log_message "ERROR: Keyspace '\\${'$'}{KEYSPACE_NAME}' does not exist in the cluster."
+        log_message "Please create the schema before running the restore."
+        # Optionally, we could try to restore schema from backup if present
+        local schema_cql="\\${'$'}{RESTORE_TEMP_DIR}/schema.cql"
+        if [ -f "\\${'$'}schema_cql" ]; then
+            log_message "Found schema.cql in backup. You may be able to apply it with: cqlsh -f \\${'$'}schema_cql"
+        fi
+        exit 1
+    fi
+
+    # Run the loader
+    if sstableloader -d "\\${'$'}LOADER_NODES" "\\${'$'}restore_path"; then
+        log_message "sstableloader completed successfully."
+    else
+        log_message "ERROR: sstableloader failed. Check its output above for details."
+        exit 1
+    fi
+
+    log_message "5. Cleaning up temporary files..."
+    rm -rf "\\${'$'}RESTORE_TEMP_DIR"
+    trap - EXIT
+
+    log_message "--- Granular Restore Process Finished Successfully ---"
+}
+
+
+# --- Main Logic ---
+
+# Determine backup type to find the right S3 path
 BACKUP_TYPE=\\${'$'}(echo "\\${'$'}BACKUP_ID" | cut -d'_' -f1)
+if [[ "\\${'$'}BACKUP_TYPE" != "full" && "\\${'$'}BACKUP_TYPE" != "incremental" ]]; then
+    log_message "ERROR: Backup ID must start with 'full_' or 'incremental_'. Invalid ID: \\${'$'}BACKUP_ID"
+    exit 1
+fi
+
 TARBALL_NAME="\\${'$'}{HOSTNAME}_\\${'$'}{BACKUP_ID}.tar.gz"
 S3_PATH="s3://\\${'$'}{S3_BUCKET_NAME}/cassandra/\\${'$'}{HOSTNAME}/\\${'$'}{BACKUP_TYPE}/\\${'$'}{TARBALL_NAME}"
-LOCAL_TARBALL="/tmp/\\${'$'}{TARBALL_NAME}"
 
-# --- Safety Confirmation ---
-log_message "This is a DESTRUCTIVE operation. It will:"
-log_message "1. STOP the Cassandra service."
-log_message "2. DELETE all existing data, commitlogs, and caches."
-log_message "3. DOWNLOAD and extract backup from \\${'$'}{S3_PATH}"
-log_message "4. RESTART the Cassandra service."
-read -p "Are you absolutely sure you want to continue? Type 'yes': " confirmation
-if [[ "\\${'$'}confirmation" != "yes" ]]; then
-    log_message "Restore aborted by user."
-    exit 0
+log_message "Preparing to restore from S3 path: \\${'$'}S3_PATH"
+
+if [ -z "\\${'$'}KEYSPACE_NAME" ]; then
+    # No keyspace specified, perform full restore
+    do_full_restore
+else
+    # Keyspace (and maybe table) specified, perform granular restore
+    do_granular_restore
 fi
 
-# --- Execution ---
-log_message "1. Stopping Cassandra service..."
-systemctl stop cassandra
-
-log_message "2. Cleaning old directories..."
-rm -rf "\\${'$'}{CASSANDRA_DATA_DIR}"/*
-rm -rf "\\${'$'}{CASSANDRA_COMMITLOG_DIR}"/*
-rm -rf "\\${'$'}{CASSANDRA_CACHES_DIR}"/*
-log_message "Old directories cleaned."
-
-log_message "3. Downloading backup from \\${'$'}{S3_PATH}..."
-# In a real environment, you would use: aws s3 cp "\\${'$'}{S3_PATH}" "\\${'$'}{LOCAL_TARBALL}"
-# For this simulation, we'll create a dummy file.
-touch "\\${'$'}{LOCAL_TARBALL}"
-log_message "Simulated download of \\${'$'}{LOCAL_TARBALL} complete."
-
-log_message "4. Extracting backup..."
-# The -P flag is crucial here as the archive was created with absolute paths.
-tar -xzf "\\${'$'}{LOCAL_TARBALL}" -P
-log_message "Backup extracted."
-
-log_message "5. Setting permissions..."
-chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_DATA_DIR}"
-chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_COMMITLOG_DIR}"
-chown -R \\${'$'}{CASSANDRA_USER}:\\${'$'}{CASSANDRA_USER} "\\${'$'}{CASSANDRA_CACHES_DIR}"
-log_message "Permissions set."
-
-log_message "6. Starting Cassandra service..."
-systemctl start cassandra
-log_message "Service started. Waiting for it to initialize..."
-sleep 60 # Give Cassandra time to start up
-
-# 7. Refresh keyspaces if it was an incremental backup
-if tar -tf "\\${'$'}{LOCAL_TARBALL}" | grep -q "incremental_backup_contents.txt"; then
-    log_message "Incremental backup detected. Refreshing keyspaces..."
-    # Get a list of non-system keyspaces
-    KEYSPACES=\\${'$'}(cqlsh -e "DESCRIBE KEYSPACES;" | grep -vE "(system\\_auth|system\\_schema|system\\_traces|system\\_distributed|system)")
-    for ks in \\${'$'}KEYSPACES; do
-        log_message "Refreshing keyspace: \\${'$'}ks"
-        nodetool refresh "\\${'$'}ks"
-    done
-    log_message "Keyspace refresh complete."
-fi
-
-# 8. Final cleanup
-rm -f "\\${'$'}{LOCAL_TARBALL}"
-log_message "--- Restore Process Finished Successfully ---"
 exit 0
 `,
       'node_health_check.sh': '#!/bin/bash\\necho "Node Health Check Script Placeholder"',
@@ -521,18 +622,24 @@ function get_free_disk_space {
 #   fi
 
 function has_enough_free_disk_space {
-  local mountpoint="\\${'$'}1"
-  if [ -z "\\${'$'}mountpoint" ]; then
+  local mountpoint
+  if [ -n "\\${'$'}1" ]; then
+    mountpoint="\\${'$'}1"
+  else
     mountpoint="/"
   fi
 
-  local warn_threshold="\\${'$'}2"
-  if [ -z "\\${'$'}warn_threshold" ]; then
+  local warn_threshold
+  if [ -n "\\${'$'}2" ]; then
+    warn_threshold="\\${'$'}2"
+  else
     warn_threshold="30"
   fi
-
-  local crit_threshold="\\${'$'}3"
-  if [ -z "\\${'$'}crit_threshold" ]; then
+  
+  local crit_threshold
+  if [ -n "\\${'$'}3" ]; then
+    crit_threshold="\\${'$'}3"
+  else
     crit_threshold="80"
   fi
 
@@ -599,4 +706,5 @@ fi
 exit "\\${'$'}exit_code"
 `,
     };
+
 
