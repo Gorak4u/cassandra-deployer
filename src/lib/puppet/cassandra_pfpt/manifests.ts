@@ -237,7 +237,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     owner   => 'root',
     group   => 'root',
     mode    => '0644',
-    content => '',
+    source  => $jamm_source,
     require => Package['cassandra'],
   }
 
@@ -445,7 +445,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
   }
 
   file { $change_password_cql:
-    ensure  => file,
+    ensure  => 'file',
     content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';",
     owner   => 'root',
     group   => 'root',
@@ -556,6 +556,7 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
 
 
 

@@ -9,9 +9,9 @@ class profile_cassandra_pfpt {
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
-  $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'ggonda-cass-cluster' })
-  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
   $use_java11                       = lookup('profile_cassandra_pfpt::use_java11', { 'default_value' => true })
+  $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'pfpt-cassandra-cluster' })
+  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
@@ -20,14 +20,14 @@ class profile_cassandra_pfpt {
   $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
   $gc_type                          = lookup('profile_cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
   $data_dir                         = lookup('profile_cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
-  $saved_caches_dir                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { 'default_value' => '/var/lib/cassandra/saved_caches' })
   $commitlog_dir                    = lookup('profile_cassandra_pfpt::commitlog_dir', { 'default_value' => '/var/lib/cassandra/commitlog' })
+  $saved_caches_dir                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { 'default_value' => '/var/lib/cassandra/saved_caches' })
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
   $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => false })
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
   $enable_range_repair              = lookup('profile_cassandra_pfpt::enable_range_repair', { 'default_value' => false })
   $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
-  $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => true })
+  $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => false })
   $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
   $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/etc/pki/tls/certs' })
   $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
@@ -53,8 +53,8 @@ class profile_cassandra_pfpt {
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
   $user                             = lookup('profile_cassandra_pfpt::user', { 'default_value' => 'cassandra' })
   $group                            = lookup('profile_cassandra_pfpt::group', { 'default_value' => 'cassandra' })
-  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => "https://downloads.apache.org/cassandra/redhat/\${facts['os']['release']['major']}/" })
-  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://downloads.apache.org/cassandra/KEYS' })
+  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra/' })
+  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra-gpg-keys/KEYS' })
   $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
@@ -64,7 +64,7 @@ class profile_cassandra_pfpt {
   $change_password_cql              = lookup('profile_cassandra_pfpt::change_password_cql', { 'default_value' => '/tmp/change_password.cql' })
   $cqlsh_path_env                   = lookup('profile_cassandra_pfpt::cqlsh_path_env', { 'default_value' => '/usr/bin/' })
   $jamm_target                      = lookup('profile_cassandra_pfpt::jamm_target', { 'default_value' => '/usr/share/cassandra/lib/jamm-0.3.2.jar' })
-  $jamm_source                      = lookup('profile_cassandra_pfpt::jamm_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/files/jamm-0.3.2.jar' })
+  $jamm_source                      = lookup('profile_cassandra_pfpt::jamm_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jamm-0.3.2.jar' })
   $dynamic_snitch                   = lookup('profile_cassandra_pfpt::dynamic_snitch', { 'default_value' => true })
   $start_native_transport           = lookup('profile_cassandra_pfpt::start_native_transport', { 'default_value' => true })
   $role_manager                     = lookup('profile_cassandra_pfpt::role_manager', { 'default_value' => 'CassandraRoleManager' })
@@ -144,8 +144,8 @@ class profile_cassandra_pfpt {
     datacenter                       => $datacenter,
     rack                             => $rack,
     data_dir                         => $data_dir,
-    saved_caches_dir                 => $saved_caches_dir,
     commitlog_dir                    => $commitlog_dir,
+    saved_caches_dir                 => $saved_caches_dir,
     hints_directory                  => $hints_directory,
     max_heap_size                    => $max_heap_size,
     gc_type                          => $gc_type,
@@ -244,5 +244,6 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
 
 
