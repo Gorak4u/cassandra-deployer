@@ -158,7 +158,7 @@ This profile provides a fully automated, S3-based backup solution using `systemd
 1.  **Configuration:** You enable and configure backups through Hiera.
 2.  **Puppet Setup:** Puppet creates `systemd` timer and service units on each Cassandra node.
 3.  **Scheduling:** `systemd` automatically triggers the backup scripts based on the `OnCalendar` schedule you define.
-4.  **Execution:** The scripts create a snapshot, archive the data, and upload it to your specified S3 bucket.
+4.  **Execution & Metadata Capture:** The scripts first generate a `backup_manifest.json` file containing critical metadata like the cluster name, node IP, datacenter, rack, and the node's token ranges. They then create a data snapshot, archive everything (data, schema, and manifest), and upload it to your specified S3 bucket.
 
 #### Configuration Examples
 
@@ -219,7 +219,7 @@ profile_cassandra_pfpt::incremental_backup_schedule:
 
 ### Restoring from a Backup
 
-A `restore-from-s3.sh` script is placed in `/usr/local/bin` on each node to perform restores. This script supports three primary modes.
+A `restore-from-s3.sh` script is placed in `/usr/local/bin` on each node to perform restores. This script supports three primary modes. Before performing any action, the script will display the `backup_manifest.json` from the archive and require operator confirmation, which is a critical safety check.
 
 #### Mode 1: Full Node Restore (Destructive)
 This mode is for recovering a completely failed node. It is a **destructive** operation.
@@ -235,7 +235,7 @@ This mode is for recovering a completely failed node. It is a **destructive** op
     \`\`\`
 
 #### Mode 2: Granular Restore (Keyspace or Table)
-This mode is for recovering a specific table or an entire keyspace from a backup without affecting the rest of the cluster. It is a **non-destructive** operation that uses Cassandra's `sstableloader` tool to stream the backed-up data into the live cluster.
+This mode is for recovering a specific table or an entire keyspace from a backup without affecting the rest of the cluster. It is a **non-destructive** operation that uses Cassandra's `sstableloader` tool to stream the backed-up data into the live cluster without downtime or affecting other data.
 
 **Prerequisite:** The keyspace and table schema must already exist in the cluster before you can load data into it.
 
