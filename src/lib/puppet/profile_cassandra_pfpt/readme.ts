@@ -14,8 +14,9 @@ export const readme = `
     2.  [Restoring from a Backup](#restoring-from-a-backup)
     3.  [Disaster Recovery: Restoring to a Brand New Cluster (Cold Start)](#disaster-recovery-restoring-to-a-brand-new-cluster-cold-start)
 7.  [Compaction Management](#compaction-management)
-8.  [Limitations](#limitations)
-9.  [Development](#development)
+8.  [Garbage Collection](#garbage-collection)
+9.  [Limitations](#limitations)
+10. [Development](#development)
 
 ## Description
 
@@ -373,6 +374,40 @@ The \`compaction-manager.sh\` script operates on a single node. To perform a saf
 4.  Move to the next node in the datacenter and repeat steps 2-3.
 5.  Continue this process until all nodes in the target group have been compacted.
 
+## Garbage Collection
+
+Similar to compaction, running a manual garbage collection can be managed safely using the \`/usr/local/bin/garbage-collect.sh\` script. This script is a wrapper around \`nodetool garbagecollect\` that provides important safety checks and targeting options.
+
+### Why Use the Garbage Collection Script?
+While less disk-intensive than a full compaction, running garbage collection still benefits from a pre-flight check to ensure the node has sufficient disk space before starting. The script prevents you from initiating the operation on a disk that is already nearing capacity.
+
+### Usage
+The script allows you to target the entire node, a specific keyspace, or one or more tables.
+
+**To run garbage collection on the entire node:**
+\`\`\`bash
+sudo /usr/local/bin/garbage-collect.sh
+\`\`\`
+
+**To run on a specific keyspace:**
+\`\`\`bash
+sudo /usr/local/bin/garbage-collect.sh -k my_keyspace
+\`\`\`
+
+**To run on multiple tables within a keyspace:**
+\`\`\`bash
+sudo /usr/local/bin/garbage-collect.sh -k my_app -t users -t audit_log
+\`\`\`
+
+You can customize its behavior with flags:
+*   \`-g, --granularity <CELL|ROW>\`: Sets the granularity of tombstones to remove (Default: \`ROW\`).
+*   \`-j, --jobs <num>\`: Sets the number of concurrent sstable garbage collection jobs (Default: 0 for auto).
+*   \`-w, --warning <percent>\`: Sets the warning free space percentage to abort at (Default: 30).
+*   \`-c, --critical <percent>\`: Sets the critical free space percentage to abort at (Default: 20).
+
+### Performing a Rolling Garbage Collection
+To perform a safe, rolling garbage collection across an entire datacenter or cluster, you should run the script sequentially on each node, similar to the process for compaction. Wait for the script to complete successfully on one node before moving to the next.
+
 ## Limitations
 
 This profile is primarily tested and supported on Red Hat Enterprise Linux and its derivatives (like CentOS, Rocky Linux). Support for other operating systems may require adjustments.
@@ -381,4 +416,3 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
-
