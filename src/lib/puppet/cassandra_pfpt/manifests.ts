@@ -128,11 +128,11 @@ class cassandra_pfpt (
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
 
   if $cassandra_major_version.to_i >= 4 and $java_version.to_i < 11 {
-    fail("Cassandra version \\${cassandra_version} requires Java 11 or newer, but Java \\${java_version} was specified.")
+    fail("Cassandra version \${cassandra_version} requires Java 11 or newer, but Java \${java_version} was specified.")
   }
 
   if $cassandra_major_version.to_i <= 3 and $java_version.to_i > 11 {
-    fail("Cassandra version \\${cassandra_version} is not compatible with Java versions newer than 11, but Java \\${java_version} was specified.")
+    fail("Cassandra version \${cassandra_version} is not compatible with Java versions newer than 11, but Java \${java_version} was specified.")
   }
 
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
@@ -224,9 +224,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\d+).*$', '\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \\${$cassandra_version} for EL\\${$os_release_major}",
+        descr               => "Apache Cassandra \${$cassandra_version} for EL\${$os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -342,9 +342,9 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
-    file { "\\${$manage_bin_dir}/\\${$script}":
+    file { "\${$manage_bin_dir}/\${$script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\\${$script}",
+      source  => "puppet:///modules/cassandra_pfpt/scripts/\${$script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
@@ -355,7 +355,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0\\\\s*$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\s+partition\s+0\s+0\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -392,37 +392,37 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
 
   if $ssl_enabled {
     exec { 'create the certs dir':
-      command => "mkdir -p \\${$target_dir}/etc",
+      command => "mkdir -p \${$target_dir}/etc",
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
-      unless  => "test -d \\${$target_dir}/etc",
+      unless  => "test -d \${$target_dir}/etc",
     }
     # Custom type that generates cert/key files for the domain
-    ssl_certificate { "\\${$target_dir}/etc/keystore":
+    ssl_certificate { "\${$target_dir}/etc/keystore":
       domain  => $https_domain,
       require => Exec['create the certs dir'],
     }
     # Java keystore creation: JKS from PEM + KEY
-    java_ks { "host:\\${$target_dir}/etc/keystore.jks":
+    java_ks { "host:\${$target_dir}/etc/keystore.jks":
       ensure      => latest,
-      certificate => "\\${$target_dir}/etc/keystore.pem",
-      private_key => "\\${$target_dir}/etc/keystore.key",
+      certificate => "\${$target_dir}/etc/keystore.pem",
+      private_key => "\${$target_dir}/etc/keystore.key",
       password    => $keystore_password,
       require     => [
-        File["\\${$target_dir}/etc/keystore.jks"],
-        Ssl_certificate["\\${$target_dir}/etc/keystore"], # ensure certs exist first
+        File["\${$target_dir}/etc/keystore.jks"],
+        Ssl_certificate["\${$target_dir}/etc/keystore"], # ensure certs exist first
       ],
     }
-    file { "\\${$target_dir}/etc/keystore.jks":
+    file { "\${$target_dir}/etc/keystore.jks":
       ensure  => file,
       owner   => 'root',
       group   => 'root',
       mode    => '0444',
-      require => Ssl_certificate["\\${$target_dir}/etc/keystore"],
+      require => Ssl_certificate["\${$target_dir}/etc/keystore"],
     }
-    file { "\\${$target_dir}/etc/truststore.jks":
+    file { "\${$target_dir}/etc/truststore.jks":
       ensure  => link,
-      target  => "\\${$target_dir}/etc/keystore.jks",
-      require => File["\\${$target_dir}/etc/keystore.jks"],
+      target  => "\${$target_dir}/etc/keystore.jks",
+      require => File["\${$target_dir}/etc/keystore.jks"],
     }
   }
 
@@ -494,7 +494,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => 'file',
-    content => "ALTER USER cassandra WITH PASSWORD '\\${cassandra_password}';",
+    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
@@ -507,14 +507,14 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   # Change only if new password isn't already active
   exec { 'change_cassandra_password':
-    command     => "cqlsh \\${cqlsh_ssl_opt} -u cassandra -p cassandra -f \\${change_password_cql} \\${listen_address}",
+    command     => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p cassandra -f \${change_password_cql} \${listen_address}",
     path        => ['/bin', '/usr/bin', $cqlsh_path_env],
     timeout     => 60,
     tries       => 2,
     try_sleep   => 10,
     logoutput   => on_failure,
     # If we can connect with the *new* password, skip running the ALTER
-    unless      => "cqlsh \\${cqlsh_ssl_opt} -u cassandra -p '\\${cassandra_password}' -e \\"SELECT cluster_name FROM system.local;\\" \\${listen_address} >/dev/null 2>&1",
+    unless      => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \"SELECT cluster_name FROM system.local;\" \${listen_address} >/dev/null 2>&1",
     require     => [ Service['cassandra'], File[$change_password_cql] ],
   }
 
@@ -530,7 +530,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\\${$manage_bin_dir}/range-repair.sh"],
+      require => File["\${$manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -616,23 +616,23 @@ class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
   if !empty($system_keyspaces_replication) {
     # The system_keyspaces_replication is a hash like {'dc1' => 3, 'dc2' => 3}
     # We need to convert it to a string like "'dc1': '3', 'dc2': '3'"
-    $replication_map_parts = $system_keyspaces_replication.map |\\$dc, \\$rf| {
-      "'\\${$dc}': '\\${$rf}'"
+    $replication_map_parts = $system_keyspaces_replication.map |\$dc, \$rf| {
+      "'\${$dc}': '\${$rf}'"
     }
     $replication_map_string = join($replication_map_parts, ', ')
-    $replication_cql_string = "{'class': 'NetworkTopologyStrategy', \\${replication_map_string}}"
+    $replication_cql_string = "{'class': 'NetworkTopologyStrategy', \${replication_map_string}}"
 
     # Define the command to alter keyspaces
-    $alter_auth_cql = "ALTER KEYSPACE system_auth WITH replication = \\${replication_cql_string}"
-    $alter_dist_cql = "ALTER KEYSPACE system_distributed WITH replication = \\${replication_cql_string}"
-    $alter_traces_cql = "ALTER KEYSPACE system_traces WITH replication = \\${replication_cql_string}"
+    $alter_auth_cql = "ALTER KEYSPACE system_auth WITH replication = \${replication_cql_string}"
+    $alter_dist_cql = "ALTER KEYSPACE system_distributed WITH replication = \${replication_cql_string}"
+    $alter_traces_cql = "ALTER KEYSPACE system_traces WITH replication = \${replication_cql_string}"
 
     # Use a single check for idempotency. This isn't perfect but is simpler.
     # It checks if the string for system_auth's replication is what we expect.
-    $check_command = "cqlsh \\${cqlsh_ssl_opt} -u cassandra -p '\\${cassandra_password}' \\${listen_address} -e \\"DESCRIBE KEYSPACE system_auth;\\" | grep -q \\"replication = \\${replication_cql_string}\\""
+    $check_command = "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' \${listen_address} -e \"DESCRIBE KEYSPACE system_auth;\" | grep -q \"replication = \${replication_cql_string}\""
 
     exec { 'update_system_keyspace_replication':
-      command   => "cqlsh \\${cqlsh_ssl_opt} -u cassandra -p '\\${cassandra_password}' \\${listen_address} -e \\"\\${alter_auth_cql}; \\${alter_dist_cql}; \\${alter_traces_cql};\\"",
+      command   => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' \${listen_address} -e \"\${alter_auth_cql}; \${alter_dist_cql}; \${alter_traces_cql};\"",
       path      => ['/bin', '/usr/bin', $cqlsh_path_env],
       unless    => $check_command,
       logoutput => on_failure,
