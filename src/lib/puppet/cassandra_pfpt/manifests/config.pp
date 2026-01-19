@@ -68,11 +68,11 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
     'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
-    'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
+    'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
-    file { "\${manage_bin_dir}/\${script}":
+    file { "${manage_bin_dir}/${script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\${script}",
+      source  => "puppet:///modules/cassandra_pfpt/scripts/${script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
@@ -115,37 +115,37 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   }
   if $ssl_enabled {
     exec { 'create the certs dir':
-      command => "mkdir -p \${target_dir}/etc",
+      command => "mkdir -p ${target_dir}/etc",
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
-      unless  => "test -d \${target_dir}/etc",
+      unless  => "test -d ${target_dir}/etc",
     }
     # Custom type that generates cert/key files for the domain
-    ssl_certificate { "\${target_dir}/etc/keystore":
+    ssl_certificate { "${target_dir}/etc/keystore":
       domain  => $https_domain,
       require => Exec['create the certs dir'],
     }
     # Java keystore creation: JKS from PEM + KEY
-    java_ks { "host:\${target_dir}/etc/keystore.jks":
+    java_ks { "host:${target_dir}/etc/keystore.jks":
       ensure      => latest,
-      certificate => "\${target_dir}/etc/keystore.pem",
-      private_key => "\${target_dir}/etc/keystore.key",
+      certificate => "${target_dir}/etc/keystore.pem",
+      private_key => "${target_dir}/etc/keystore.key",
       password    => $keystore_password,
       require     => [
-        File["\${target_dir}/etc/keystore.jks"],
-        Ssl_certificate["\${target_dir}/etc/keystore"], # ensure certs exist first
+        File["${target_dir}/etc/keystore.jks"],
+        Ssl_certificate["${target_dir}/etc/keystore"], # ensure certs exist first
       ],
     }
-    file { "\${target_dir}/etc/keystore.jks":
+    file { "${target_dir}/etc/keystore.jks":
       ensure  => file,
       owner   => 'root',
       group   => 'root',
       mode    => '0444',
-      require => Ssl_certificate["\${target_dir}/etc/keystore"],
+      require => Ssl_certificate["${target_dir}/etc/keystore"],
     }
-    file { "\${target_dir}/etc/truststore.jks":
+    file { "${target_dir}/etc/truststore.jks":
       ensure  => link,
-      target  => "\${target_dir}/etc/keystore.jks",
-      require => File["\${target_dir}/etc/keystore.jks"],
+      target  => "${target_dir}/etc/keystore.jks",
+      require => File["${target_dir}/etc/keystore.jks"],
     }
   }
   if $manage_jmx_security {
