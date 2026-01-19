@@ -147,15 +147,30 @@ This section documents every available Hiera key for this profile.
 ### JMX & Monitoring
 
 *   \`profile_cassandra_pfpt::manage_jmx_security\` (Boolean): Whether to manage and enable JMX authentication. Default: \`true\`.
-*   \`profile_cassandra_pfpt::manage_jmx_exporter\` (Boolean): Whether to enable the Prometheus JMX Exporter agent. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_jmx_exporter\` (Boolean): Whether to enable the Prometheus JMX Exporter agent. **Default: \`false\`**.
 *   \`profile_cassandra_pfpt::jmx_exporter_port\` (Integer): The port for the JMX Exporter to listen on. Default: \`9404\`.
 *   \`profile_cassandra_pfpt::jmx_exporter_version\` (String): The version of the JMX Exporter JAR to use. Default: \`'0.20.0'\`.
 
 ### Automated Backup (DIY Script)
 
-*   \`profile_cassandra_pfpt::manage_backups\` (Boolean): Master switch to enable automated backups. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_backups\` (Boolean): Master switch to enable automated backups using the DIY script. Default: \`false\`.
 *   \`profile_cassandra_pfpt::backup_schedule\` (String): The \`systemd\` OnCalendar schedule for backups. Default: \`'daily'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
+
+#### Managing Incremental Backups
+
+*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): If set to \`true\`, enables Cassandra's native incremental backup feature. When enabled, Cassandra creates a hard link to every new SSTable (data file) in a \`backups\` subdirectory within each table's data directory. This provides a continuous record of data changes between full snapshots. Default: \`false\`.
+
+**Strategy for Incremental Backups:**
+
+Incremental backups are not a standalone solution. They are used with full snapshots for point-in-time recovery. The recovery process is:
+1.  Restore the most recent full snapshot.
+2.  Copy all incremental backup files created *after* that snapshot was taken into the table's data directory.
+3.  Run \`nodetool refresh\` on the node to load the new data.
+
+**Important Considerations:**
+*   **Disk Space:** This feature can consume significant disk space over time. You must have a strategy to periodically clean up the incremental backup files (e.g., after a new full snapshot is successfully uploaded).
+*   **Script Integration:** The provided \`backup-to-s3.sh\` script is snapshot-based and **does not** manage the archival or cleanup of these incremental files. A complete strategy would require enhancing the scripts to handle this.
 
 ### System & OS Tuning
 
