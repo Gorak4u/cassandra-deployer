@@ -138,6 +138,12 @@ fi
 
 trap cleanup_temp_dir EXIT
 
+# Check for global backup disable flag
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
+
 log_message "--- Starting Full Cassandra Snapshot Backup Process ---"
 log_message "S3 Bucket: \${S3_BUCKET_NAME}"
 log_message "Snapshot Tag: \${SNAPSHOT_TAG}"
@@ -224,16 +230,27 @@ else
   log_message "Schema appended to archive."
 fi
 
-# 7. Upload to S3 (mocked)
-UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/full/\${SNAPSHOT_TAG}.tar.gz"
-log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
-# In a real environment: aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"
-log_message "S3 upload simulated successfully."
+# 7. Upload to S3 and Cleanup
+if [ -f "/var/lib/upload-disabled" ]; then
+    log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
+    log_message "Backup archive is available at: \${TARBALL_PATH}"
+    log_message "Snapshot is available with tag: \${SNAPSHOT_TAG}"
+    log_message "Skipping S3 upload and local cleanup."
+else
+    UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/full/\${SNAPSHOT_TAG}.tar.gz"
+    log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
+    # In a real environment, the following line would be active:
+    # if ! aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"; then
+    #   log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
+    #   exit 1
+    # fi
+    log_message "S3 upload simulated successfully."
 
-# 8. Cleanup (only after successful "upload")
-log_message "Cleaning up local snapshot and archive file..."
-nodetool clearsnapshot -t "\${SNAPSHOT_TAG}"
-rm -f "\${TARBALL_PATH}"
+    # 8. Cleanup (only after successful upload)
+    log_message "Cleaning up local snapshot and archive file..."
+    nodetool clearsnapshot -t "\${SNAPSHOT_TAG}"
+    rm -f "\${TARBALL_PATH}"
+fi
 
 log_message "--- Full Cassandra Snapshot Backup Process Finished Successfully ---"
 
@@ -299,6 +316,12 @@ if [ "\\$(id -u)" -ne 0 ]; then
 fi
 
 trap cleanup_temp_dir EXIT
+
+# Check for global backup disable flag
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
 
 log_message "--- Starting Incremental Cassandra Backup Process ---"
 log_message "S3 Bucket: \${S3_BUCKET_NAME}"
@@ -367,18 +390,24 @@ tar -czf "\${TARBALL_PATH}" -P -T "\${BACKUP_TEMP_DIR}/incremental_files.list"
 tar -rf "\${TARBALL_PATH}" -C "\${BACKUP_TEMP_DIR}" "backup_manifest.json"
 log_message "Backup manifest appended to archive."
 
-# 6. Upload to S3 (mocked)
-UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/incremental/\${BACKUP_TAG}.tar.gz"
-log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
-# In a real environment: aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"
-log_message "S3 upload simulated successfully."
+# 6. Upload to S3 and Cleanup
+if [ -f "/var/lib/upload-disabled" ]; then
+    log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
+    log_message "Backup archive is available at: \${TARBALL_PATH}"
+    log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
+else
+    UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/incremental/\${BACKUP_TAG}.tar.gz"
+    log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
+    # In a real environment: aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"
+    log_message "S3 upload simulated successfully."
 
-# 7. Cleanup (only after successful "upload")
-log_message "Cleaning up archived incremental backup files and local tarball..."
-xargs -a "\${BACKUP_TEMP_DIR}/incremental_files.list" rm -f
-log_message "Source incremental files deleted."
-rm -f "\${TARBALL_PATH}"
-log_message "Local tarball deleted."
+    # 7. Cleanup (only after successful upload)
+    log_message "Cleaning up archived incremental backup files and local tarball..."
+    xargs -a "\${BACKUP_TEMP_DIR}/incremental_files.list" rm -f
+    log_message "Source incremental files deleted."
+    rm -f "\${TARBALL_PATH}"
+    log_message "Local tarball deleted."
+fi
 
 log_message "--- Incremental Cassandra Backup Process Finished Successfully ---"
 
@@ -875,6 +904,7 @@ printf "OK: Free disk space for '\${CASSANDRA_DATADIR}' is \${free_space}%%, whi
 exit 0
 `,
     };
+
 
 
 
