@@ -1,5 +1,4 @@
 
-
 export const manifests = {
       'init.pp': `
 # @summary Profile for configuring a Cassandra node.
@@ -147,8 +146,11 @@ class profile_cassandra_pfpt {
     []
   }
 
-  $extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', { 'default_value' => $default_extra_jvm_args })
+  # Look up any user-defined extra_jvm_args from Hiera. Defaults to an empty array.
+  $hiera_extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', { 'default_value' => [] })
 
+  # Combine the defaults with the Hiera-provided args, ensuring no duplicates.
+  $extra_jvm_args = unique($default_extra_jvm_args + $hiera_extra_jvm_args)
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
