@@ -157,9 +157,9 @@ This profile provides a fully automated, S3-based backup solution using `systemd
 
 #### How It Works
 1.  **Configuration:** You enable and configure backups through Hiera.
-2.  **Puppet Setup:** Puppet creates `systemd` timer and service units on each Cassandra node.
-3.  **Scheduling:** `systemd` automatically triggers the backup scripts based on the `OnCalendar` schedule you define.
-4.  **Execution & Metadata Capture:** The scripts first generate a `backup_manifest.json` file containing critical metadata like the cluster name, node IP, datacenter, rack, and the node's token ranges. They then create a data snapshot, archive everything (data, schema, and manifest), and upload it to your specified S3 bucket.
+2.  **Puppet Setup:** Puppet creates \`systemd\` timer and service units on each Cassandra node.
+3.  **Scheduling:** \`systemd\` automatically triggers the backup scripts based on the \`OnCalendar\` schedule you define.
+4.  **Execution & Metadata Capture:** The scripts first generate a \`backup_manifest.json\` file containing critical metadata like the cluster name, node IP, datacenter, rack, and the node's token ranges. They then create a data snapshot, archive everything (data, schema, and manifest), and upload it to your specified S3 bucket.
 
 #### Configuration Examples
 
@@ -208,14 +208,14 @@ profile_cassandra_pfpt::incremental_backup_schedule:
 
 #### Hiera Parameters for Backups
 
-*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): **Required for incremental backups.** Enables Cassandra's built-in feature to create hard links to new SSTables. Default: `false`.
-*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Enables the scheduled `full-backup-to-s3.sh` script. Default: `false`.
-*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Enables the scheduled `incremental-backup-to-s3.sh` script. Default: `false`.
-*   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The `systemd` OnCalendar schedule for full snapshot backups. Default: `'daily'`.
-*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The `systemd` OnCalendar schedule(s) for incremental backups. Default: `'0 */4 * * *'`.
-*   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: `'puppet-cassandra-backups'`.
-*   \`profile_cassandra_pfpt::full_backup_log_file\` (String): Log file path for the full backup script. Default: `'/var/log/cassandra/full_backup.log'`.
-*   \`profile_cassandra_pfpt::incremental_backup_log_file\` (String): Log file path for the incremental backup script. Default: `'/var/log/cassandra/incremental_backup.log'`.
+*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): **Required for incremental backups.** Enables Cassandra's built-in feature to create hard links to new SSTables. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Enables the scheduled \`full-backup-to-s3.sh\` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Enables the scheduled \`incremental-backup-to-s3.sh\` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
+*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The \`systemd\` OnCalendar schedule(s) for incremental backups. Default: \`'0 */4 * * *'\`.
+*   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
+*   \`profile_cassandra_pfpt::full_backup_log_file\` (String): Log file path for the full backup script. Default: \`'/var/log/cassandra/full_backup.log'\`.
+*   \`profile_cassandra_pfpt::incremental_backup_log_file\` (String): Log file path for the incremental backup script. Default: \`'/var/log/cassandra/incremental_backup.log'\`.
 
 
 ### Restoring from a Backup
@@ -268,67 +268,57 @@ This mode is the first step for a full cluster disaster recovery. It extracts th
 
 ### Disaster Recovery: Restoring to a Brand New Cluster (Cold Start)
 
-This procedure outlines how to restore a full cluster from S3 backups onto a set of brand-new machines where the old cluster is completely lost. This is the most complex recovery scenario.
+This procedure outlines how to restore a full cluster from S3 backups onto a set of brand-new machines where the old cluster is completely lost. Thanks to the intelligent restore script, this process is now almost fully automated.
 
-**The Challenge:** When bootstrapping a brand-new cluster from backups, the first node has no other nodes to talk to. The standard \`-Dcassandra.replace_address_first_boot\` flag will not work because there is no existing cluster to join. The first node must be manually "forced" to start with the token ranges from its backup. Once this first node is live, all subsequent nodes can be restored using the simpler \`replace_address\` method.
+**The Strategy:** The script automatically detects if it's the first node being restored in an empty cluster.
+-   **For the First Node:** It will use the \`initial_token\` property in \`cassandra.yaml\` to force the node to bootstrap with the correct identity and token ranges from the backup.
+-   **For All Subsequent Nodes:** It will use the standard \`-Dcassandra.replace_address_first_boot\` method to join the now-live cluster.
 
 **Prerequisites:**
 *   You have a set of full backups for each node from the old cluster in S3.
-*   You have provisioned a new set of machines for the new cluster, with Puppet applied but with Cassandra services potentially stopped.
+*   You have provisioned a new set of machines for the new cluster. Puppet should be applied, and the \`cassandra\` service should be stopped on all new nodes.
 
 #### Step 1: Restore the Schema
+
 The schema (definitions of keyspaces and tables) must be restored first.
 
-1.  Provision your new cluster with Puppet. A basic, empty Cassandra cluster should form.
-2.  Choose **one node** in the new cluster to act as a temporary "coordinator" for the schema restore.
-3.  SSH into that coordinator node.
-4.  Choose a **full backup** from any of your old nodes to source the schema from. Run the \`restore-from-s3.sh\` script in schema-only mode:
+1.  Choose **one node** in the new cluster to act as a temporary coordinator. Start the \`cassandra\` service on this node only. A single-node, empty cluster will form.
+2.  SSH into that coordinator node.
+3.  Choose a **full backup** from any of your old nodes to source the schema from. Run the \`restore-from-s3.sh\` script in schema-only mode:
     \`\`\`bash
     sudo /usr/local/bin/restore-from-s3.sh --schema-only <backup_id_of_any_old_node>
     \`\`\`
-5.  This extracts \`schema.cql\` to \`/tmp/schema.cql\`. **Crucially, apply the schema to the new cluster.**
+4.  This extracts \`schema.cql\` to \`/tmp/schema.cql\`. **Apply the schema to the new cluster:**
     \`\`\`bash
     cqlsh -u cassandra -p 'YourPassword' -f /tmp/schema.cql
     \`\`\`
-    Once this command finishes, the schema is replicated across all nodes in the new, empty cluster.
+5.  Once the schema is applied, **stop the cassandra service** on this coordinator node. The entire new cluster should now be offline, but all nodes will have the correct schema on disk.
 
-#### Step 2: Restore the First Node (The "Seed" Restore)
-This step uses the \`initial_token\` parameter to force the first node to adopt the identity of its backed-up counterpart.
+#### Step 2: Perform a Rolling Restore of All Nodes
 
-1.  **Choose a "first node"** in your new cluster to restore. This node will become the seed for the restored cluster. Let's say you choose \`new-cassandra-1.example.com\`.
-2.  **Find its corresponding backup.** Identify the backup ID for the old node that \`new-cassandra-1\` is replacing (e.g., \`old-cassandra-1\`). Run the \`restore-from-s3.sh\` script with the \`--schema-only\` flag just to safely view the manifest:
-    \`\`\`bash
-    sudo /usr/local/bin/restore-from-s3.sh --schema-only <backup_id_for_old_cassandra_1>
-    \`\`\`
-3.  From the manifest output, copy the **comma-separated list of tokens**.
-4.  **Configure Hiera for the first node.** In your Hiera data for \`new-cassandra-1.example.com\`, set the following two parameters:
-    \`\`\`yaml
-    # In hiera data for new-cassandra-1.example.com
-    profile_cassandra_pfpt::num_tokens: 1
-    profile_cassandra_pfpt::initial_token: '<paste_the_comma_separated_tokens_here>'
-    \`\`\`
-5.  **Run Puppet** on \`new-cassandra-1.example.com\`. This will update its \`cassandra.yaml\` with the \`initial_token\` and \`num_tokens: 1\` settings.
-6.  **Run the full restore** on \`new-cassandra-1.example.com\`:
-    \`\`\`bash
-    sudo /usr/local/bin/restore-from-s3.sh <backup_id_for_old_cassandra_1>
-    \`\`\`
-    The script will stop Cassandra, wipe the data, restore from the backup, and start Cassandra. Since \`initial_token\` is set, it will start up correctly with the old node's identity without needing to talk to other nodes.
+Now, simply restore each node, one at a time. The script handles the complexity.
 
-#### Step 3: Restore Remaining Nodes
-Once the first node is up and running (verify with \`nodetool status\`), you can restore the rest of the nodes using the standard, automated replacement process.
-
-1.  **Revert Hiera changes.** Remove the \`num_tokens\` and \`initial_token\` overrides from Hiera for \`new-cassandra-1.example.com\`. Run Puppet again on that node to bring its configuration back to normal.
-2.  For **each remaining node** (e.g., \`new-cassandra-2\`, \`new-cassandra-3\`, etc.):
+1.  **On the first node** (e.g., \`new-cassandra-1.example.com\`):
     *   SSH into the node.
     *   Identify the backup ID of the old node it is replacing.
     *   Run the restore script in full restore mode:
         \`\`\`bash
-        # On new-cassandra-2, run:
+        sudo /usr/local/bin/restore-from-s3.sh <backup_id_for_old_cassandra_1>
+        \`\`\`
+    *   The script will detect it's the first node, use \`initial_token\` to start, and wait for it to come online.
+
+2.  **On the second node** (e.g., \`new-cassandra-2.example.com\`):
+    *   Wait for the first node to be fully up (check with \`nodetool status\` from the first node).
+    *   SSH into the second node.
+    *   Run the restore script:
+        \`\`\`bash
         sudo /usr/local/bin/restore-from-s3.sh <backup_id_for_old_cassandra_2>
         \`\`\`
-    *   The script will automatically detect it's a DR scenario, use the \`-Dcassandra.replace_address_first_boot\` flag, connect to the already-restored first node, and correctly assume its identity and tokens.
+    *   The script will detect a live seed node, so it will automatically use the \`replace_address\` method to join the cluster.
 
-Once all nodes have been restored, your cluster is fully recovered.
+3.  **Repeat for all remaining nodes.** Continue the process, restoring one node at a time, until the entire cluster is back online.
+
+Once all nodes have been restored, your cluster is fully recovered. The restore script automatically cleans up any temporary configuration changes (\`initial_token\` or \`replace_address\` flags) after each successful node start.
 
 ## Limitations
 
@@ -338,5 +328,6 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
+
 
 
