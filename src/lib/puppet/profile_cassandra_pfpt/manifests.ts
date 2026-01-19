@@ -124,6 +124,7 @@ class profile_cassandra_pfpt {
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
   $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
+  $system_keyspaces_replication     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { 'default_value' => {} })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -243,6 +244,7 @@ class profile_cassandra_pfpt {
     coralogix_logs_enabled           => $coralogix_logs_enabled,
     coralogix_metrics_enabled        => $coralogix_metrics_enabled,
     coralogix_baseurl                => $coralogix_baseurl,
+    system_keyspaces_replication     => $system_keyspaces_replication,
   }
 }
         `.trim(),
@@ -252,5 +254,6 @@ class profile_cassandra_pfpt {
     
 
     
+
 
 
