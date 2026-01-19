@@ -122,6 +122,17 @@ class cassandra_pfpt (
   Boolean $enable_materialized_views,
 ) {
 
+  # Validate Java and Cassandra version compatibility
+  $cassandra_major_version = split($cassandra_version, '[.-]')[0]
+
+  if $cassandra_major_version >= '4' and $java_version.to_i < 11 {
+    fail("Cassandra version \${cassandra_version} requires Java 11 or newer, but Java \${java_version} was specified.")
+  }
+
+  if $cassandra_major_version <= '3' and $java_version.to_i > 11 {
+    fail("Cassandra version \${cassandra_version} is not compatible with Java versions newer than 11, but Java \${java_version} was specified.")
+  }
+
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
   $seeds = if empty($seeds_list) {
     [$facts['networking']['ip']]
@@ -210,9 +221,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${$cassandra_version} for EL\${$os_release_major}",
+        descr               => "Apache Cassandra \\\${$cassandra_version} for EL\\\${$os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -328,9 +339,9 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh' ].each |$script| {
-    file { "\${$manage_bin_dir}/\${$script}":
+    file { "\\\${$manage_bin_dir}/\\\${$script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\${$script}",
+      source  => "puppet:///modules/cassandra_pfpt/scripts/\\\${$script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
@@ -341,7 +352,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s+0\\s*$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s+0\\\\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -378,37 +389,37 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
 
   if $ssl_enabled {
     exec { 'create the certs dir':
-      command => "mkdir -p \${$target_dir}/etc",
+      command => "mkdir -p \\\${$target_dir}/etc",
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
-      unless  => "test -d \${$target_dir}/etc",
+      unless  => "test -d \\\${$target_dir}/etc",
     }
     # Custom type that generates cert/key files for the domain
-    ssl_certificate { "\${$target_dir}/etc/keystore":
+    ssl_certificate { "\\\${$target_dir}/etc/keystore":
       domain  => $https_domain,
       require => Exec['create the certs dir'],
     }
     # Java keystore creation: JKS from PEM + KEY
-    java_ks { "host:\${$target_dir}/etc/keystore.jks":
+    java_ks { "host:\\\${$target_dir}/etc/keystore.jks":
       ensure      => latest,
-      certificate => "\${$target_dir}/etc/keystore.pem",
-      private_key => "\${$target_dir}/etc/keystore.key",
+      certificate => "\\\${$target_dir}/etc/keystore.pem",
+      private_key => "\\\${$target_dir}/etc/keystore.key",
       password    => $keystore_password,
       require     => [
-        File["\${$target_dir}/etc/keystore.jks"],
-        Ssl_certificate["\${$target_dir}/etc/keystore"], # ensure certs exist first
+        File["\\\${$target_dir}/etc/keystore.jks"],
+        Ssl_certificate["\\\${$target_dir}/etc/keystore"], # ensure certs exist first
       ],
     }
-    file { "\${$target_dir}/etc/keystore.jks":
+    file { "\\\${$target_dir}/etc/keystore.jks":
       ensure  => file,
       owner   => 'root',
       group   => 'root',
       mode    => '0444',
-      require => Ssl_certificate["\${$target_dir}/etc/keystore"],
+      require => Ssl_certificate["\\\${$target_dir}/etc/keystore"],
     }
-    file { "\${$target_dir}/etc/truststore.jks":
+    file { "\\\${$target_dir}/etc/truststore.jks":
       ensure  => link,
-      target  => "\${$target_dir}/etc/keystore.jks",
-      require => File["\${$target_dir}/etc/keystore.jks"],
+      target  => "\\\${$target_dir}/etc/keystore.jks",
+      require => File["\\\${$target_dir}/etc/keystore.jks"],
     }
   }
 
@@ -516,7 +527,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\\\${\\$manage_bin_dir}/range-repair.sh"],
+      require => File["\\\${$manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -590,6 +601,7 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
 
 
 
