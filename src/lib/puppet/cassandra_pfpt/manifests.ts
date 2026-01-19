@@ -96,7 +96,7 @@ class cassandra_pfpt (
   Optional[String] $authorizer,
   Optional[String] $authenticator,
   Optional[Integer] $num_tokens,
-  Optional[Integer] $native_transport_port,
+  Optional[String] $initial_token,
   Optional[String] $endpoint_snitch,
   Optional[String] $listen_interface,
   Optional[String] $rpc_interface,
@@ -138,6 +138,7 @@ class cassandra_pfpt (
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
   String $full_backup_log_file = '/var/log/cassandra/full_backup.log',
   String $incremental_backup_log_file = '/var/log/cassandra/incremental_backup.log',
+  Optional[String] $puppet_cron_schedule = undef,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -198,6 +199,10 @@ class cassandra_pfpt (
   if $manage_full_backups or $manage_incremental_backups {
     contain cassandra_pfpt::backup
   }
+  
+  # Manage the puppet agent itself
+  contain cassandra_pfpt::puppet
+
   Class['cassandra_pfpt::java']
   -> Class['cassandra_pfpt::install']
   -> Class['cassandra_pfpt::config']
@@ -353,7 +358,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s*$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\s+partition\s+0\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -755,7 +760,32 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
     refreshonly => true,
   }
 }
+`.trim(),
+    'puppet.pp': `
+# @summary Manages the Puppet agent itself, including scheduled runs.
+class cassandra_pfpt::puppet inherits cassandra_pfpt {
+  # Stagger the cron job across the hour to avoid all nodes running at once.
+  $cron_minute_1 = fqdn_rand(30)
+  $cron_minute_2 = $cron_minute_1 + 30
+  
+  # Default schedule: runs twice an hour, staggered.
+  $default_schedule = "\\\${cron_minute_1},\\\${cron_minute_2} * * * *"
+  
+  # Use the schedule from the parameter if provided, otherwise use the staggered default.
+  $final_schedule = pick($puppet_cron_schedule, $default_schedule)
+
+  cron { 'scheduled_puppet_run':
+    command  => '[ ! -f /var/lib/puppet-disabled ] && /opt/puppetlabs/bin/puppet agent -v --onetime',
+    user     => 'root',
+    minute   => split($final_schedule, ' ')[0],
+    hour     => split($final_schedule, ' ')[1],
+    monthday => split($final_schedule, ' ')[2],
+    month    => split($final_schedule, ' ')[3],
+    weekday  => split($final_schedule, ' ')[4],
+  }
+}
 `.trim()
     };
 
 
+    

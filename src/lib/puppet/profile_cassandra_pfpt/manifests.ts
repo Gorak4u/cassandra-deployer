@@ -144,9 +144,7 @@ class profile_cassandra_pfpt {
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
   $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
-
-  # Include the Puppet agent management class
-  include profile_cassandra_pfpt::puppet
+  $puppet_cron_schedule             = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => undef })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -284,29 +282,8 @@ class profile_cassandra_pfpt {
     incremental_backup_script_path   => $incremental_backup_script_path,
     full_backup_log_file             => $full_backup_log_file,
     incremental_backup_log_file      => $incremental_backup_log_file,
+    puppet_cron_schedule             => $puppet_cron_schedule,
   }
 }
         `.trim(),
-      'puppet.pp': `
-# @summary Manages the Puppet agent itself, including scheduled runs.
-class profile_cassandra_pfpt::puppet {
-  # Stagger the cron job across the hour to avoid all nodes running at once.
-  $cron_minute_1 = fqdn_rand(30)
-  $cron_minute_2 = $cron_minute_1 + 30
-  
-  # Default schedule: runs twice an hour, staggered.
-  $schedule = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => "\\\${cron_minute_1},\\\${cron_minute_2} * * * *" })
-
-  cron { 'scheduled_puppet_run':
-    command  => '[ ! -f /var/lib/puppet-disabled ] && /opt/puppetlabs/bin/puppet agent -v --onetime',
-    user     => 'root',
-    minute   => split($schedule, ' ')[0],
-    hour     => split($schedule, ' ')[1],
-    monthday => split($schedule, ' ')[2],
-    month    => split($schedule, ' ')[3],
-    weekday  => split($schedule, ' ')[4],
-  }
-}
-      `.trim(),
     };
-

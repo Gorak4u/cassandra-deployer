@@ -151,7 +151,7 @@ This section documents every available Hiera key for this profile.
 
 ## Puppet Agent Management
 
-This profile also manages the Puppet agent itself by ensuring a scheduled run is in place via cron.
+The base \`cassandra_pfpt\` component module includes logic to manage the Puppet agent itself by ensuring a scheduled run is in place via cron. This profile exposes the configuration for that feature.
 
 *   **Scheduled Runs:** By default, the Puppet agent will run twice per hour at a staggered minute (e.g., at 15 and 45 minutes past the hour) to distribute the load on the Puppet primary server.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at \`/var/lib/puppet-disabled\`. Creating this file is the standard way to temporarily disable Puppet runs on a node during maintenance.
@@ -160,7 +160,7 @@ This profile also manages the Puppet agent itself by ensuring a scheduled run is
 
 ## Backup and Restore
 
-This profile provides a fully automated, S3-based backup solution using `systemd` timers and a collection of helper scripts. It also includes a powerful restore script to handle various recovery scenarios.
+This profile provides a fully automated, S3-based backup solution using \`systemd\` timers and a collection of helper scripts. It also includes a powerful restore script to handle various recovery scenarios.
 
 ### Automated Backups
 
@@ -337,7 +337,3 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
-
-
-
-
