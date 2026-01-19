@@ -132,7 +132,7 @@ class cassandra_pfpt (
   Boolean $manage_full_backups = false,
   Boolean $manage_incremental_backups = false,
   String $full_backup_schedule = 'daily',
-  String $incremental_backup_schedule = '0 */4 * * *',
+  Variant[String, Array[String]] $incremental_backup_schedule = '0 */4 * * *',
   String $backup_s3_bucket = 'your-s3-backup-bucket',
   String $full_backup_script_path = '/usr/local/bin/full-backup-to-s3.sh',
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
@@ -233,7 +233,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
@@ -632,7 +632,7 @@ class cassandra_pfpt::roles inherits cassandra_pfpt {
         path    => ['/bin', '/usr/bin', $cqlsh_path_env],
         # Only run if the role doesn't exist. This isn't perfect for password updates but prevents rerunning CREATE ROLE.
         # A more robust check might query system_auth.roles.
-        unless  => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\\\"\\"\${role_name}\\\\\\"\\";\\" \${listen_address}",
+        unless  => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\"\\"\${role_name}\\\\"\\";\\" \${listen_address}",
         require => [Exec['change_cassandra_password'], File[$cql_file_path]],
       }
     }

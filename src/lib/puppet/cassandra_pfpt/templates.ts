@@ -383,7 +383,13 @@ ExecStart=<%= @incremental_backup_script_path %> <%= @backup_s3_bucket %>
 Description=Timer to schedule Cassandra node incremental backups
 
 [Timer]
+<% if @incremental_backup_schedule.is_a?(Array) -%>
+<% @incremental_backup_schedule.each do |schedule| -%>
+OnCalendar=<%= schedule %>
+<% end -%>
+<% else -%>
 OnCalendar=<%= @incremental_backup_schedule %>
+<% end -%>
 Persistent=true
 Unit=cassandra-incremental-backup.service
 

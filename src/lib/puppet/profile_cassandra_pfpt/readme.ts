@@ -103,6 +103,19 @@ profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # Runs every 
 profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 \`\`\`
 
+#### Scenario 4: Incremental Backups with Multiple Schedules
+
+You can define multiple schedules for incremental backups by providing an array of schedule strings. This is useful for running backups more frequently during peak hours.
+
+\`\`\`yaml
+# --- Hiera Configuration ---
+profile_cassandra_pfpt::manage_incremental_backups: true
+profile_cassandra_pfpt::backup_s3_bucket: 'my-critical-cassandra-backups'
+profile_cassandra_pfpt::incremental_backup_schedule:
+  - '0 */2 * * *'  # Every 2 hours
+  - '*/30 9-17 * * 1-5' # Every 30 minutes during business hours on weekdays
+\`\`\`
+
 
 ### Managing Cassandra Roles
 
@@ -193,10 +206,10 @@ This section documents every available Hiera key for this profile.
 
 ### Automated Backup (DIY Script)
 
-*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Set to \`true\` to enable the scheduled `full-backup-to-s3.sh` script. Default: \`false\`.
-*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Set to \`true\` to enable the scheduled `incremental-backup-to-s3.sh` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Set to \`true\` to enable the scheduled \`full-backup-to-s3.sh\` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Set to \`true\` to enable the scheduled \`incremental-backup-to-s3.sh\` script. Default: \`false\`.
 *   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
-*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for incremental backups. Default: \`'0 */4 * * *'\`.
+*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The \`systemd\` OnCalendar schedule for incremental backups. You can provide a single string or an array of strings for multiple schedules. Default: \`'0 */4 * * *'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
 
 ### Incremental Backups
@@ -222,7 +235,7 @@ Incremental backups are not a standalone solution. They are used with full snaps
 3.  Run \`nodetool refresh\` on the node to load the new data.
 
 **Important Considerations:**
-*   **Disk Space:** This feature can consume significant disk space over time. The provided `incremental-backup-to-s3.sh` script **deletes** the incremental files after a successful upload to manage this.
+*   **Disk Space:** This feature can consume significant disk space over time. The provided \`incremental-backup-to-s3.sh\` script **deletes** the incremental files after a successful upload to manage this.
 
 ### System & OS Tuning
 
