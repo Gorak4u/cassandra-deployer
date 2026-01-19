@@ -1,18 +1,20 @@
 #!/bin/bash
-# Performs a snapshot and mocks S3 upload.
+# Performs a cluster-aware backup including a full snapshot and any existing
+# incremental backup files, then uploads to a simulated S3 bucket.
 
 set -euo pipefail
 
 # --- Configuration ---
-# The S3 bucket name is passed as the first argument to the script.
-S3_BUCKET_NAME="${1:-your-s3-backup-bucket}" # Default if no arg is provided
+S3_BUCKET_NAME="${1:-your-s3-backup-bucket}"
 CASSANDRA_DATA_DIR="/var/lib/cassandra/data"
-SNAPSHOT_TAG="backup_$(date +%Y%m%d%H%M%S)"
+SNAPSHOT_TAG="snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="${BACKUP_ROOT_DIR}/${SNAPSHOT_TAG}"
+BACKUP_TEMP_DIR="${BACKUP_ROOT_DIR}/${HOSTNAME}_${SNAPSHOT_TAG}"
 LOG_FILE="/var/log/cassandra/backup.log"
-SNAPSHOT_CLEANUP_THRESHOLD=3 # Number of recent snapshots to keep
+# This script will now also look for and back up incremental backup files.
+# The presence of this file indicates that incremental backups were included.
+INCREMENTAL_MARKER="incremental_backup_contents.txt"
 
 # --- Logging ---
 log_message() {
@@ -28,84 +30,104 @@ cleanup_temp_dir() {
 }
 
 # --- Main Logic ---
-# Ensure we run as root, as nodetool might be restricted.
 if [ "$(id -u)" -ne 0 ]; then
   log_message "ERROR: This script must be run as root."
   exit 1
 fi
 
-# Trap to ensure cleanup happens on script exit or interruption.
 trap cleanup_temp_dir EXIT
 
-log_message "--- Starting Cassandra Backup Process ---"
+log_message "--- Starting Combined Cassandra Backup Process ---"
 log_message "S3 Bucket: ${S3_BUCKET_NAME}"
 log_message "Snapshot Tag: ${SNAPSHOT_TAG}"
 
-# 1. Take a node-local snapshot
-log_message "Taking Cassandra snapshot..."
+# 1. Create temporary directory structure
+mkdir -p "${BACKUP_TEMP_DIR}/snapshot" "${BACKUP_TEMP_DIR}/incremental" || { log_message "ERROR: Failed to create temp backup directories."; exit 1; }
+
+# 2. Take a node-local snapshot
+log_message "Taking full snapshot..."
 if ! nodetool snapshot -t "${SNAPSHOT_TAG}"; then
-  log_message "ERROR: Failed to take Cassandra snapshot."
+  log_message "ERROR: Failed to take Cassandra snapshot. Aborting backup."
   exit 1
 fi
-log_message "Snapshot taken successfully."
+log_message "Full snapshot taken successfully."
 
-# 2. Prepare temporary directory for tarball
-mkdir -p "${BACKUP_TEMP_DIR}" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
+# 3. Collect snapshot and incremental file paths
+# Use find to create lists of files to be archived. This is safer than globbing.
+# Collect full snapshot files
+find "${CASSANDRA_DATA_DIR}" -type f -path "*/snapshots/${SNAPSHOT_TAG}/*" > "${BACKUP_TEMP_DIR}/snapshot_files.list"
 
-# 3. Archive the snapshot data and schema
-TARBALL_PATH="${BACKUP_TEMP_DIR}/${HOSTNAME}_${SNAPSHOT_TAG}.tar.gz"
-log_message "Archiving snapshot data to ${TARBALL_PATH}..."
+# Collect incremental backup files
+find "${CASSANDRA_DATA_DIR}" -type f -path "*/backups/*" > "${BACKUP_TEMP_DIR}/incremental_files.list"
 
-# Find all snapshot directories for the current tag and tar them
-# The structure is /path/to/data/<keyspace>/<table>/snapshots/<tag>
-SNAPSHOT_DIRS=$(find "${CASSANDRA_DATA_DIR}" -type d -name "${SNAPSHOT_TAG}")
+# 4. Archive the files
+TARBALL_PATH="${BACKUP_ROOT_DIR}/${HOSTNAME}_${SNAPSHOT_TAG}.tar.gz"
+log_message "Archiving data to ${TARBALL_PATH}..."
 
-if [ -z "${SNAPSHOT_DIRS}" ]; then
-  log_message "WARNING: No snapshot directories found. Nothing to back up."
+# Archive the snapshot files. The `-P` flag preserves the full path from root.
+if [ -s "${BACKUP_TEMP_DIR}/snapshot_files.list" ]; then
+    tar -czf "${TARBALL_PATH}" -P -T "${BACKUP_TEMP_DIR}/snapshot_files.list"
+    log_message "Archived full snapshot files."
 else
-  # Using tar's -T option to read file list from stdin for safety with many files
-  echo "${SNAPSHOT_DIRS}" | tar -czvf "${TARBALL_PATH}" --no-recursion -T -
-  if [ $? -ne 0 ]; then
-    log_message "ERROR: Failed to create tar.gz archive of snapshot data."
-    exit 1
-  fi
+    log_message "WARNING: No snapshot files found. Creating an empty archive for consistency."
+    # Create an empty tarball to which we can append other files
+    tar -czf "${TARBALL_PATH}" --files-from /dev/null
 fi
 
-# Also back up the schema for this node
+
+# Append incremental backup files to the same archive.
+if [ -s "${BACKUP_TEMP_DIR}/incremental_files.list" ]; then
+    log_message "Archiving incremental backup files..."
+    # Use -r (append) to add incremental files to the existing tarball.
+    tar -rf "${TARBALL_PATH}" -P -T "${BACKUP_TEMP_DIR}/incremental_files.list"
+    touch "${BACKUP_TEMP_DIR}/${INCREMENTAL_MARKER}"
+    # Append the marker file to the archive so we know it contains incrementals
+    tar -rf "${TARBALL_PATH}" -C "${BACKUP_TEMP_DIR}" "${INCREMENTAL_MARKER}"
+    log_message "Appended incremental backup files to the archive."
+else
+    log_message "No incremental backup files found to archive."
+fi
+
+# 5. Archive the schema
 log_message "Backing up schema..."
-SCHEMA_FILE="${BACKUP_TEMP_DIR}/schema_${HOSTNAME}.cql"
-cqlsh -e "DESCRIBE SCHEMA;" > "${SCHEMA_FILE}"
+SCHEMA_FILE="${BACKUP_TEMP_DIR}/schema.cql"
+# Use timeout to prevent hanging if the node is struggling
+timeout 30 cqlsh -e "DESCRIBE SCHEMA;" > "${SCHEMA_FILE}"
 if [ $? -ne 0 ]; then
   log_message "WARNING: Failed to dump schema. Backup will continue without it."
 else
   # Add schema to the existing tarball
-  tar -rzvf "${TARBALL_PATH}" -C "${BACKUP_TEMP_DIR}" "schema_${HOSTNAME}.cql"
+  tar -rf "${TARBALL_PATH}" -C "${BACKUP_TEMP_DIR}" "schema.cql"
+  log_message "Schema appended to archive."
 fi
 
-log_message "Snapshot data and schema archived successfully."
-
-# 4. Upload to S3 (mocked for this environment)
-UPLOAD_PATH="s3://${S3_BUCKET_NAME}/cassandra/${HOSTNAME}/${SNAPSHOT_TAG}/${HOSTNAME}_${SNAPSHOT_TAG}.tar.gz"
+# 6. Upload to S3 (mocked)
+UPLOAD_PATH="s3://${S3_BUCKET_NAME}/cassandra/${HOSTNAME}/${SNAPSHOT_TAG}.tar.gz"
 log_message "Simulating S3 upload to: ${UPLOAD_PATH}"
-log_message "Mock command: aws s3 cp ${TARBALL_PATH} ${UPLOAD_PATH}"
-# In a real environment, you would uncomment the following lines:
+# In a real environment, the following line would be active:
 # if ! aws s3 cp "${TARBALL_PATH}" "${UPLOAD_PATH}"; then
-#   log_message "ERROR: Failed to upload backup to S3."
+#   log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
 #   exit 1
 # fi
 log_message "S3 upload simulated successfully."
 
-# 5. Clean up local snapshots
-log_message "Cleaning up old snapshots, keeping the latest ${SNAPSHOT_CLEANUP_THRESHOLD}..."
-# This is a safer way to clean up than just clearing the latest tag.
-# It finds all backup snapshots and removes all but the N most recent ones.
-find "${CASSANDRA_DATA_DIR}" -type d -name 'snapshots' | while read -r snapshot_dir; do
-  cd "${snapshot_dir}" || continue
-  # List backup snapshots, sort by time, skip the newest N, and pipe to nodetool to clear
-  ls -t backup_* 2>/dev/null | tail -n +$((SNAPSHOT_CLEANUP_THRESHOLD + 1)) | xargs -r nodetool clearsnapshot -t
-  cd - >/dev/null
-done
-log_message "Snapshot cleanup complete."
+# 7. Cleanup (only after successful "upload")
+log_message "Cleaning up local snapshot and incremental files..."
+
+# Clear the full snapshot we just took
+log_message "Clearing snapshot: ${SNAPSHOT_TAG}"
+nodetool clearsnapshot -t "${SNAPSHOT_TAG}"
+
+# IMPORTANT: Delete the incremental backup files that were just archived.
+# This prevents them from being backed up again and filling the disk.
+if [ -s "${BACKUP_TEMP_DIR}/incremental_files.list" ]; then
+    log_message "Deleting archived incremental backup files from disk..."
+    xargs -a "${BACKUP_TEMP_DIR}/incremental_files.list" rm -f
+    log_message "Incremental file cleanup complete."
+fi
+
+# Clean up the final tarball from the root backup dir
+rm -f "${TARBALL_PATH}"
 
 log_message "--- Cassandra Backup Process Finished Successfully ---"
 

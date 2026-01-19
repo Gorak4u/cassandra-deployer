@@ -64,6 +64,20 @@ profile_cassandra_pfpt::backup_s3_bucket: 'my-cassandra-backup-bucket'
 profile_cassandra_pfpt::backup_schedule: '*-*-* 02:00:00'
 \`\`\`
 
+#### Combined Backup Strategy: Snapshots and Incrementals
+
+The provided \`backup-to-s3.sh\` script implements a robust, combined backup strategy. When a backup is triggered (either by the schedule or manually), it performs the following steps on each node:
+
+1.  **Takes a Full Snapshot:** It creates a new, temporary full snapshot of all keyspaces on the node.
+2.  **Archives Incremental Backups:** If you have enabled \`profile_cassandra_pfpt::incremental_backups\`, the script finds all existing incremental backup files (the hard links in the \`/backups\` subdirectories) and adds them to the archive.
+3.  **Archives Schema:** It dumps the current schema definition.
+4.  **Creates a Single Archive:** All three components (snapshot, incrementals, schema) are combined into a single \`.tar.gz\` file.
+5.  **Uploads to S3:** The archive is uploaded to your configured S3 bucket (this is a mocked step in the lab).
+6.  **Cleans Up:** After a successful upload, the script cleans up **both** the temporary snapshot and the incremental backup files that were just archived. This is critical for managing disk space.
+
+This combined strategy provides the benefits of a full snapshot for a solid recovery base, plus the incremental files needed for point-in-time recovery up to the moment of the backup.
+
+
 ### Managing Cassandra Roles
 
 You can declaratively manage Cassandra user roles.
