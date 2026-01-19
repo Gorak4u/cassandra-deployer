@@ -18,7 +18,7 @@ class cassandra_pfpt (
   Boolean $repo_sslverify,
   Array[String] $package_dependencies,
   String $cluster_name,
-  Array[String] $seeds,
+  Array[String] $seeds_list = [],
   String $listen_address,
   String $datacenter,
   String $rack,
@@ -28,7 +28,7 @@ class cassandra_pfpt (
   String $hints_directory,
   String $max_heap_size,
   String $gc_type,
-  Hash $extra_jvm_args_override,
+  Hash $extra_jvm_args_override = {},
   String $cassandra_password,
   String $replace_address,
   Boolean $disable_swap,
@@ -122,6 +122,12 @@ class cassandra_pfpt (
   Boolean $enable_materialized_views,
 ) {
 
+  $seeds = if empty($seeds_list) {
+    [$facts['networking']['ip']]
+  } else {
+    $seeds_list
+  }
+
   # Calculate extra JVM args based on GC type and Java version
   $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
     {
@@ -204,7 +210,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
     if $facts['os']['family'] == 'RedHat' {
       $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${$cassandra_version} for EL\${os_release_major}",
+        descr               => "Apache Cassandra \${$cassandra_version} for EL\${$os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -470,36 +476,36 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     ],
   }
 
-  file { $change_password_cql:
+  file { \\$change_password_cql:
     ensure  => 'file',
-    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';",
+    content => "ALTER USER cassandra WITH PASSWORD '\\\${cassandra_password}';",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
   }
 
-  $cqlsh_ssl_opt = $ssl_enabled ? {
+  \\$cqlsh_ssl_opt = \\$ssl_enabled ? {
     true  => '--ssl',
     false => '',
   }
 
   # Change only if new password isn't already active
   exec { 'change_cassandra_password':
-    command     => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p cassandra -f \${change_password_cql} \${listen_address}",
-    path        => ['/bin', '/usr/bin', $cqlsh_path_env],
+    command     => "cqlsh \\\${cqlsh_ssl_opt} -u cassandra -p cassandra -f \\\${change_password_cql} \\\${listen_address}",
+    path        => ['/bin', '/usr/bin', \\$cqlsh_path_env],
     timeout     => 60,
     tries       => 2,
     try_sleep   => 10,
     logoutput   => on_failure,
     # If we can connect with the *new* password, skip running the ALTER
-    unless      => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"SELECT cluster_name FROM system.local;\\" \${listen_address} >/dev/null 2>&1",
-    require     => [ Service['cassandra'], File[$change_password_cql] ],
+    unless      => "cqlsh \\\${cqlsh_ssl_opt} -u cassandra -p '\\\${cassandra_password}' -e \\"SELECT cluster_name FROM system.local;\\" \\\${listen_address} >/dev/null 2>&1",
+    require     => [ Service['cassandra'], File[\\$change_password_cql] ],
   }
 
 
-  if $enable_range_repair {
-    $range_repair_ensure = $enable_range_repair ? { true => 'running', default => 'stopped' }
-    $range_repair_enable = $enable_range_repair ? { true => true, default => false }
+  if \\$enable_range_repair {
+    \\$range_repair_ensure = \\$enable_range_repair ? { true => 'running', default => 'stopped' }
+    \\$range_repair_enable = \\$enable_range_repair ? { true => true, default => false }
 
     file { '/etc/systemd/system/range-repair.service':
       ensure  => 'file',
@@ -508,7 +514,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\${manage_bin_dir}/range-repair.sh"],
+      require => File["\\\${\\$manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -518,8 +524,8 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     }
 
     service { 'range-repair':
-      ensure    => $range_repair_ensure,
-      enable    => $range_repair_enable,
+      ensure    => \\$range_repair_ensure,
+      enable    => \\$range_repair_enable,
       hasstatus => true,
       subscribe => File['/etc/systemd/system/range-repair.service'],
     }
@@ -548,7 +554,7 @@ class cassandra_pfpt::firewall {
 # @summary Manages Coralogix agent installation and configuration.
 class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 
-  if $facts['os']['family'] == 'RedHat' {
+  if \\$facts['os']['family'] == 'RedHat' {
     yumrepo { 'coralogix':
       ensure   => 'present',
       baseurl  => 'https://yum.coralogix.com/coralogix-el8-x86_64',
@@ -582,4 +588,5 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
 
