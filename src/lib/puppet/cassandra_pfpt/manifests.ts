@@ -29,6 +29,7 @@ class cassandra_pfpt (
   String $hints_directory,
   String $max_heap_size,
   String $gc_type,
+  Array[String] $extra_jvm_args,
   String $cassandra_password,
   String $replace_address,
   Boolean $disable_swap,
@@ -556,6 +557,7 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
 
 
 

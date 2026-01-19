@@ -1,4 +1,5 @@
 
+
 export const templates = {
       'cassandra.yaml.erb': `
 cluster_name: '<%= @cluster_name %>'
@@ -207,23 +208,12 @@ rack=<%= @rack %>
 # GC type
 <% if @gc_type == 'G1GC' %>
 -XX:+UseG1GC
-<% if @java_version.to_i < 14 %>
--XX:G1HeapRegionSize=16M
--XX:MaxGCPauseMillis=500
--XX:InitiatingHeapOccupancyPercent=75
--XX:+ParallelRefProcEnabled
--XX:+AggressiveOpts
 <% end %>
-<% elsif @gc_type == 'CMS' && @java_version.to_i < 14 %>
--XX:+UseConcMarkSweepGC
--XX:+CMSParallelRemarkEnabled
--XX:SurvivorRatio=8
--XX:MaxTenuringThreshold=1
--XX:CMSInitiatingOccupancyFraction=75
--XX:+UseCMSInitiatingOccupancyOnly
--XX:+CMSClassUnloadingEnabled
--XX:+AlwaysPreTouch
-<% end %>
+
+# Extra JVM arguments from Hiera
+<% @extra_jvm_args.each do |arg| -%>
+<%= arg %>
+<% end -%>
 
 # GC logging
 <% if @java_version.to_i >= 11 %>
@@ -339,4 +329,5 @@ metrics:
 <% end %>
 `.trim(),
     };
+
 

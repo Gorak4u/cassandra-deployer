@@ -124,6 +124,33 @@ class profile_cassandra_pfpt {
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
 
+  # Calculate extra JVM args based on GC type and Java version
+  $default_extra_jvm_args = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
+    [
+      '-XX:G1HeapRegionSize=16M',
+      '-XX:MaxGCPauseMillis=500',
+      '-XX:InitiatingHeapOccupancyPercent=75',
+      '-XX:+ParallelRefProcEnabled',
+      '-XX:+AggressiveOpts',
+    ]
+  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
+    [
+      '-XX:+UseConcMarkSweepGC',
+      '-XX:+CMSParallelRemarkEnabled',
+      '-XX:SurvivorRatio=8',
+      '-XX:MaxTenuringThreshold=1',
+      '-XX:CMSInitiatingOccupancyFraction=75',
+      '-XX:+UseCMSInitiatingOccupancyOnly',
+      '-XX:+CMSClassUnloadingEnabled',
+      '-XX:+AlwaysPreTouch',
+    ]
+  } else {
+    []
+  }
+
+  $extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', { 'default_value' => $default_extra_jvm_args })
+
+
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
     java_version                     => $java_version,
@@ -149,6 +176,7 @@ class profile_cassandra_pfpt {
     hints_directory                  => $hints_directory,
     max_heap_size                    => $max_heap_size,
     gc_type                          => $gc_type,
+    extra_jvm_args                   => $extra_jvm_args,
     cassandra_password               => $cassandra_password,
     replace_address                  => $replace_address,
     disable_swap                     => $disable_swap,
@@ -244,6 +272,7 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
 
 
 
