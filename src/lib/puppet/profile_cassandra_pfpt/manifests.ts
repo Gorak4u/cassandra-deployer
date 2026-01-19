@@ -135,7 +135,8 @@ class profile_cassandra_pfpt {
   $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
   $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
   # DIY Backup Settings
-  $manage_backups                   = lookup('profile_cassandra_pfpt::manage_backups', { 'default_value' => false })
+  $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => false })
+  $manage_incremental_backups       = lookup('profile_cassandra_pfpt::manage_incremental_backups', { 'default_value' => false })
   $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
   $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
   $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
@@ -269,7 +270,8 @@ class profile_cassandra_pfpt {
     jmx_exporter_config_source       => $jmx_exporter_config_source,
     jmx_exporter_config_target       => $jmx_exporter_config_target,
     jmx_exporter_port                => $jmx_exporter_port,
-    manage_backups                   => $manage_backups,
+    manage_full_backups              => $manage_full_backups,
+    manage_incremental_backups       => $manage_incremental_backups,
     full_backup_schedule             => $full_backup_schedule,
     incremental_backup_schedule      => $incremental_backup_schedule,
     backup_s3_bucket                 => $backup_s3_bucket,

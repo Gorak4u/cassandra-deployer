@@ -129,10 +129,13 @@ class cassandra_pfpt (
   String $jmx_exporter_config_source,
   String $jmx_exporter_config_target,
   Integer $jmx_exporter_port,
-  Boolean $manage_backups = false,
-  String $backup_schedule = 'daily',
+  Boolean $manage_full_backups = false,
+  Boolean $manage_incremental_backups = false,
+  String $full_backup_schedule = 'daily',
+  String $incremental_backup_schedule = '0 */4 * * *',
   String $backup_s3_bucket = 'your-s3-backup-bucket',
-  String $backup_script_path = '/usr/local/bin/backup-to-s3.sh',
+  String $full_backup_script_path = '/usr/local/bin/full-backup-to-s3.sh',
+  String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -190,7 +193,7 @@ class cassandra_pfpt (
     contain cassandra_pfpt::coralogix
     Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
   }
-  if $manage_backups {
+  if $manage_full_backups or $manage_incremental_backups {
     contain cassandra_pfpt::backup
   }
   Class['cassandra_pfpt::java']
@@ -332,7 +335,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh', 'repair-node.sh',
     'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
-    'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
+    'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
@@ -661,38 +664,72 @@ class cassandra_pfpt::jmx_exporter inherits cassandra_pfpt {
     'backup.pp': `
 # @summary Manages scheduled backups for Cassandra using a DIY script.
 class cassandra_pfpt::backup inherits cassandra_pfpt {
-  # This class assumes the backup script itself is managed by the main config class.
-  # This class is responsible for scheduling the execution of that script.
-  file { '/etc/systemd/system/cassandra-backup.service':
-    ensure  => 'file',
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0644',
-    content => template('cassandra_pfpt/cassandra-backup.service.erb'),
-    notify  => Exec['cassandra-backup-systemd-reload'],
+  # This class is responsible for scheduling the execution of the backup scripts.
+  # The backup scripts themselves are managed by the main config class.
+
+  if $manage_full_backups {
+    # Full Backup Service and Timer
+    file { '/etc/systemd/system/cassandra-full-backup.service':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => template('cassandra_pfpt/cassandra-full-backup.service.erb'),
+      notify  => Exec['cassandra-backup-systemd-reload'],
+    }
+    file { '/etc/systemd/system/cassandra-full-backup.timer':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => template('cassandra_pfpt/cassandra-full-backup.timer.erb'),
+      notify  => Service['cassandra-full-backup.timer'],
+    }
+    service { 'cassandra-full-backup.timer':
+      ensure  => 'running',
+      enable  => true,
+      require => [
+        File['/etc/systemd/system/cassandra-full-backup.service'],
+        File['/etc/systemd/system/cassandra-full-backup.timer'],
+      ],
+    }
   }
-  file { '/etc/systemd/system/cassandra-backup.timer':
-    ensure  => 'file',
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0644',
-    content => template('cassandra_pfpt/cassandra-backup.timer.erb'),
-    notify  => Service['cassandra-backup.timer'],
+
+  if $manage_incremental_backups {
+    # Incremental Backup Service and Timer
+    file { '/etc/systemd/system/cassandra-incremental-backup.service':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => template('cassandra_pfpt/cassandra-incremental-backup.service.erb'),
+      notify  => Exec['cassandra-backup-systemd-reload'],
+    }
+    file { '/etc/systemd/system/cassandra-incremental-backup.timer':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => template('cassandra_pfpt/cassandra-incremental-backup.timer.erb'),
+      notify  => Service['cassandra-incremental-backup.timer'],
+    }
+    service { 'cassandra-incremental-backup.timer':
+      ensure  => 'running',
+      enable  => true,
+      require => [
+        File['/etc/systemd/system/cassandra-incremental-backup.service'],
+        File['/etc/systemd/system/cassandra-incremental-backup.timer'],
+      ],
+    }
   }
+
+  # Common daemon-reload exec, triggered by any service file change.
+  # This only runs if at least one of the backup types is enabled.
   exec { 'cassandra-backup-systemd-reload':
     command     => 'systemctl daemon-reload',
     path        => ['/bin', '/usr/bin'],
     refreshonly => true,
   }
-  service { 'cassandra-backup.timer':
-    ensure  => 'running',
-    enable  => true,
-    require => [
-      File['/etc/systemd/system/cassandra-backup.service'],
-      File['/etc/systemd/system/cassandra-backup.timer'],
-    ],
-  }
 }
 `.trim()
     };
-

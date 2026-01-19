@@ -54,33 +54,54 @@ profile_cassandra_pfpt::seeds_list:
 
 ### Enabling Automated Backups (DIY Method)
 
-To enable backups with separate schedules for full and incremental backups:
+The DIY backup solution offers granular control, allowing you to enable full backups, incremental backups, or both, with independent schedules for each.
+
+#### Scenario 1: Full Backups Only
+
+This is ideal for development environments or clusters where a daily recovery point is sufficient.
 
 \`\`\`yaml
-profile_cassandra_pfpt::manage_backups: true
-profile_cassandra_pfpt::incremental_backups: true # IMPORTANT: This must be enabled in Cassandra itself
-profile_cassandra_pfpt::backup_s3_bucket: 'my-cassandra-backup-bucket'
-
-# Run a full snapshot backup daily at 2 AM
+# Enable full backups, running daily at 2 AM
+profile_cassandra_pfpt::manage_full_backups: true
+profile_cassandra_pfpt::backup_s3_bucket: 'my-dev-cassandra-backups'
 profile_cassandra_pfpt::full_backup_schedule: '*-*-* 02:00:00'
-
-# Run an incremental backup every 4 hours
-profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *'
 \`\`\`
 
-#### Backup Strategy: Full + Incremental
+#### Scenario 2: Incremental Backups Only
 
-The DIY backup solution now uses two separate scripts and schedules to implement a robust, two-stage backup strategy.
+This is an unusual configuration but is supported. It's useful if you have another process for creating baseline snapshots and only want Puppet to manage the uploading of incremental files.
 
-1.  **Full Backups (`full-backup-to-s3.sh`):**
-    *   **What it does:** Takes a full `nodetool snapshot`, archives the data and schema, uploads it to S3, and cleans up the snapshot from the local disk.
-    *   **When it runs:** Governed by the `profile_cassandra_pfpt::full_backup_schedule`. This should be less frequent (e.g., daily). This provides a solid, complete recovery point.
+\`\`\`yaml
+# Enable Cassandra's incremental backup creation
+profile_cassandra_pfpt::incremental_backups: true
 
-2.  **Incremental Backups (`incremental-backup-to-s3.sh`):**
-    *   **What it does:** Scans for any new incremental backup files (hard links) created by Cassandra since the last backup. It archives these files, uploads them to a separate prefix in S3, and then **deletes the source incremental files from the local disk**. This cleanup is critical to prevent disk space from filling up.
-    *   **When it runs:** Governed by the `profile_cassandra_pfpt::incremental_backup_schedule`. This should be more frequent (e.g., hourly) to minimize potential data loss (RPO).
+# Enable and schedule the incremental backup script to run every hour
+profile_cassandra_pfpt::manage_incremental_backups: true
+profile_cassandra_pfpt::backup_s3_bucket: 'my-cassandra-backups'
+profile_cassandra_pfpt::incremental_backup_schedule: '0 * * * *'
+\`\`\`
 
-This combined strategy provides the benefits of a full snapshot for a solid recovery base, plus the incremental files needed for point-in-time recovery up to the moment of the last incremental backup.
+#### Scenario 3: Both Full and Incremental Backups (Recommended for Production)
+
+This is the most robust strategy, providing a daily full snapshot and frequent incremental backups for point-in-time recovery.
+
+\`\`\`yaml
+# --- Hiera Configuration ---
+
+# Enable Cassandra's internal mechanism for creating incremental backup files
+profile_cassandra_pfpt::incremental_backups: true
+
+# Enable the full backup process via Puppet
+profile_cassandra_pfpt::manage_full_backups: true
+profile_cassandra_pfpt::full_backup_schedule: 'daily' # Runs at midnight
+
+# Enable the incremental backup process via Puppet
+profile_cassandra_pfpt::manage_incremental_backups: true
+profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # Runs every 4 hours
+
+# Define the S3 bucket for all backups
+profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
+\`\`\`
 
 
 ### Managing Cassandra Roles
@@ -172,13 +193,14 @@ This section documents every available Hiera key for this profile.
 
 ### Automated Backup (DIY Script)
 
-*   \`profile_cassandra_pfpt::manage_backups\` (Boolean): Master switch to enable automated backups using the DIY script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Set to \`true\` to enable the scheduled `full-backup-to-s3.sh` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Set to \`true\` to enable the scheduled `incremental-backup-to-s3.sh` script. Default: \`false\`.
 *   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
-*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for incremental backups. Default: \`'0 */4 * * *'\` (every 4 hours).
+*   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for incremental backups. Default: \`'0 */4 * * *'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
 
 ### Incremental Backups
-*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): Set to \`true\` to enable Cassandra's built-in incremental backup feature. This is **required** for the incremental backup script to find any files.
+*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): Set to \`true\` to enable Cassandra's built-in incremental backup feature. This is **required** for the incremental backup script to find any files to back up.
 
 #### How Incremental Backups Work
 When you set \`profile_cassandra_pfpt::incremental_backups\` to \`true\`, you enable a powerful, low-overhead feature inside Cassandra. Here’s a breakdown of the process:
