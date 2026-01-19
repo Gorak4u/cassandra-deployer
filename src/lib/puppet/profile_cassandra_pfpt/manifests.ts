@@ -1,4 +1,5 @@
 
+
 export const manifests = {
       'init.pp': `
 # @summary Profile for configuring a Cassandra node.
@@ -9,9 +10,8 @@ class profile_cassandra_pfpt {
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'ggonda-cass-cluster' })
-  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => '10.93.16.206,10.93.16.127,10.93.17.191' })
+  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
   $use_java11                       = lookup('profile_cassandra_pfpt::use_java11', { 'default_value' => true })
-  $use_g1_gc                        = lookup('profile_cassandra_pfpt::use_g1_gc', { 'default_value' => true })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
@@ -20,6 +20,7 @@ class profile_cassandra_pfpt {
   $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
   $gc_type                          = lookup('profile_cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
   $data_dir                         = lookup('profile_cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
+  $saved_caches_dir                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { 'default_value' => '/var/lib/cassandra/saved_caches' })
   $commitlog_dir                    = lookup('profile_cassandra_pfpt::commitlog_dir', { 'default_value' => '/var/lib/cassandra/commitlog' })
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
   $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => false })
@@ -89,8 +90,8 @@ class profile_cassandra_pfpt {
   $thrift_framed_transport_size_in_mb = lookup('profile_cassandra_pfpt::thrift_framed_transport_size_in_mb', { 'default_value' => 15 })
   $enable_transient_replication     = lookup('profile_cassandra_pfpt::enable_transient_replication', { 'default_value' => false })
   $manage_jmx_security              = lookup('profile_cassandra_pfpt::manage_jmx_security', { 'default_value' => true })
-  $jmx_password_file_content        = lookup('profile_cassandra_pfpt::jmx_password_file_content', { 'default_value' => "monitorRole QED\\\\ncontrolRole R&D" })
-  $jmx_access_file_content          = lookup('profile_cassandra_pfpt::jmx_access_file_content', { 'default_value' => "monitorRole readonly\\\\ncontrolRole readwrite" })
+  $jmx_password_file_content        = lookup('profile_cassandra_pfpt::jmx_password_file_content', { 'default_value' => "monitorRole QED\\ncontrolRole R&D" })
+  $jmx_access_file_content          = lookup('profile_cassandra_pfpt::jmx_access_file_content', { 'default_value' => "monitorRole readonly\\ncontrolRole readwrite" })
   $jmx_password_file_path           = lookup('profile_cassandra_pfpt::jmx_password_file_path', { 'default_value' => '/etc/cassandra/jmxremote.password' })
   $jmx_access_file_path             = lookup('profile_cassandra_pfpt::jmx_access_file_path', { 'default_value' => '/etc/cassandra/jmxremote.access' })
   $service_timeout_start_sec        = lookup('profile_cassandra_pfpt::service_timeout_start_sec', { 'default_value' => '400s' })
@@ -114,6 +115,7 @@ class profile_cassandra_pfpt {
   $memtable_allocation_type         = lookup('profile_cassandra_pfpt::memtable_allocation_type', { 'default_value' => 'heap_buffers' })
   $index_summary_capacity_in_mb     = lookup('profile_cassandra_pfpt::index_summary_capacity_in_mb', { 'default_value' => undef })
   $file_cache_size_in_mb            = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
+  $enable_materialized_views        = lookup('profile_cassandra_pfpt::enable_materialized_views', { 'default_value' => false })
 
   # Coralogix Settings
   $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
@@ -142,6 +144,7 @@ class profile_cassandra_pfpt {
     datacenter                       => $datacenter,
     rack                             => $rack,
     data_dir                         => $data_dir,
+    saved_caches_dir                 => $saved_caches_dir,
     commitlog_dir                    => $commitlog_dir,
     hints_directory                  => $hints_directory,
     max_heap_size                    => $max_heap_size,
@@ -156,7 +159,6 @@ class profile_cassandra_pfpt {
     jamm_target                      => $jamm_target,
     enable_range_repair              => $enable_range_repair,
     use_java11                       => $use_java11,
-    use_g1_gc                        => $use_g1_gc,
     use_shenandoah_gc                => $use_shenandoah_gc,
     racks                            => $racks,
     ssl_enabled                      => $ssl_enabled,
@@ -232,6 +234,7 @@ class profile_cassandra_pfpt {
     memtable_allocation_type         => $memtable_allocation_type,
     index_summary_capacity_in_mb     => $index_summary_capacity_in_mb,
     file_cache_size_in_mb            => $file_cache_size_in_mb,
+    enable_materialized_views        => $enable_materialized_views,
     manage_coralogix_agent           => $manage_coralogix_agent,
     coralogix_api_key                => $coralogix_api_key,
     coralogix_region                 => $coralogix_region,
@@ -241,3 +244,5 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
+

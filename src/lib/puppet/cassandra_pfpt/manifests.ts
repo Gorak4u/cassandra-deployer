@@ -19,11 +19,12 @@ class cassandra_pfpt (
   Boolean $repo_sslverify,
   Array[String] $package_dependencies,
   String $cluster_name,
-  String $seeds,
+  Array[String] $seeds,
   String $listen_address,
   String $datacenter,
   String $rack,
   String $data_dir,
+  String $saved_caches_dir,
   String $commitlog_dir,
   String $hints_directory,
   String $max_heap_size,
@@ -38,7 +39,6 @@ class cassandra_pfpt (
   String $jamm_target,
   Boolean $enable_range_repair,
   Boolean $use_java11,
-  Boolean $use_g1_gc,
   Boolean $use_shenandoah_gc,
   Hash $racks,
   Boolean $ssl_enabled,
@@ -94,12 +94,6 @@ class cassandra_pfpt (
   String $jmx_password_file_path,
   String $jmx_access_file_path,
   String $service_timeout_start_sec,
-  # New features
-  Boolean $enable_audit_logging,
-  Boolean $enable_full_query_logging,
-  Boolean $enable_user_defined_functions,
-  Boolean $enable_scripted_user_defined_functions,
-  Boolean $enable_virtual_tables,
   Optional[String] $authorizer,
   Optional[String] $authenticator,
   Optional[Integer] $num_tokens,
@@ -125,7 +119,8 @@ class cassandra_pfpt (
   String $coralogix_api_key,
   String $coralogix_region,
   Boolean $coralogix_logs_enabled,
-  Boolean $coralogix_metrics_enabled
+  Boolean $coralogix_metrics_enabled,
+  Boolean $enable_materialized_views,
 ) {
 
   contain cassandra_pfpt::java
@@ -181,7 +176,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${$cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
@@ -222,7 +217,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
       'config.pp': `
 # @summary Manages Cassandra configuration files and OS tuning.
 class cassandra_pfpt::config inherits cassandra_pfpt {
-  file { [$data_dir, $commitlog_dir, $hints_directory, $cdc_raw_directory]:
+  file { [$data_dir, $commitlog_dir, $saved_caches_dir, $hints_directory, $cdc_raw_directory]:
     ensure  => 'directory',
     owner   => $user,
     group   => $group,
@@ -451,20 +446,30 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
 
   file { $change_password_cql:
     ensure  => file,
-    content => "ALTER USER cassandra WITH PASSWORD '\${$cassandra_password}';\\n",
+    content => "ALTER USER cassandra WITH PASSWORD '\${cassandra_password}';",
     owner   => 'root',
     group   => 'root',
     mode    => '0600',
   }
 
-  exec { 'change_cassandra_password':
-    command   => "cqlsh -u cassandra -p cassandra -f \${$change_password_cql}",
-    path      => ['/bin/', $cqlsh_path_env],
-    tries     => 12,
-    try_sleep => 10,
-    unless    => "cqlsh -u cassandra -p '\${$cassandra_password}' -e 'SELECT cluster_name FROM system.local;' \${$listen_address} >/dev/null 2>&1",
-    require   => [Service['cassandra'], File[$change_password_cql]],
+  $cqlsh_ssl_opt = $ssl_enabled ? {
+    true  => '--ssl',
+    false => '',
   }
+
+  # Change only if new password isn't already active
+  exec { 'change_cassandra_password':
+    command     => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p cassandra -f \${change_password_cql} \${listen_address}",
+    path        => ['/bin', '/usr/bin', $cqlsh_path_env],
+    timeout     => 60,
+    tries       => 2,
+    try_sleep   => 10,
+    logoutput   => on_failure,
+    # If we can connect with the *new* password, skip running the ALTER
+    unless      => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"SELECT cluster_name FROM system.local;\\" \${listen_address} >/dev/null 2>&1",
+    require     => [ Service['cassandra'], File[$change_password_cql] ],
+  }
+
 
   if $enable_range_repair {
     $range_repair_ensure = $enable_range_repair ? { true => 'running', default => 'stopped' }
@@ -477,7 +482,7 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
       group   => 'root',
       mode    => '0644',
       notify  => Exec['systemctl_daemon_reload_range_repair'],
-      require => File["\${$manage_bin_dir}/range-repair.sh"],
+      require => File["\${manage_bin_dir}/range-repair.sh"],
     }
 
     exec { 'systemctl_daemon_reload_range_repair':
@@ -551,5 +556,7 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
+
 
 

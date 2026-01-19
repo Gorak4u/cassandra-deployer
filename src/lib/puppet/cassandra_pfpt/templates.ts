@@ -23,6 +23,7 @@ endpoint_snitch: <%= @endpoint_snitch %>
 data_file_directories:
     - <%= @data_dir %>
 commitlog_directory: <%= @commitlog_dir %>
+saved_caches_directory: <%= @saved_caches_dir %>
 <% if @cdc_raw_directory -%>
 cdc_raw_directory: <%= @cdc_raw_directory %>
 <% end -%>
@@ -30,7 +31,7 @@ cdc_raw_directory: <%= @cdc_raw_directory %>
 seed_provider:
     - class_name: org.apache.cassandra.locator.SimpleSeedProvider
       parameters:
-          - seeds: "<%= @seeds %>"
+          - seeds: "<%= @seeds.join(',') %>"
 
 <% if @listen_address -%>
 listen_address: '<%= @listen_address %>'
@@ -151,7 +152,7 @@ concurrent_compactors: <%= @concurrent_compactors %>
 <% if @enable_transient_replication -%>
 enable_transient_replication: <%= @enable_transient_replication %>
 <% end -%>
-
+enable_materialized_views: <%= @enable_materialized_views %>
 <% if @ssl_enabled -%>
 server_encryption_options:
   internode_encryption: <%= @internode_encryption %>
@@ -338,3 +339,4 @@ metrics:
 <% end %>
 `.trim(),
     };
+
