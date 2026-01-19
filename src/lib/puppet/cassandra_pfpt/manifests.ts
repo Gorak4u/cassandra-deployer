@@ -136,6 +136,8 @@ class cassandra_pfpt (
   String $backup_s3_bucket = 'your-s3-backup-bucket',
   String $full_backup_script_path = '/usr/local/bin/full-backup-to-s3.sh',
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
+  String $full_backup_log_file = '/var/log/cassandra/full_backup.log',
+  String $incremental_backup_log_file = '/var/log/cassandra/incremental_backup.log',
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -233,7 +235,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
@@ -337,7 +339,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
     'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
-    'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
+    'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
     file { "\${manage_bin_dir}/\${script}":
       ensure  => 'file',
@@ -632,7 +634,7 @@ class cassandra_pfpt::roles inherits cassandra_pfpt {
         path    => ['/bin', '/usr/bin', $cqlsh_path_env],
         # Only run if the role doesn't exist. This isn't perfect for password updates but prevents rerunning CREATE ROLE.
         # A more robust check might query system_auth.roles.
-        unless  => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\"\\"\${role_name}\\\\"\\";\\" \${listen_address}",
+        unless  => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p '\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\"\\"\\"\${role_name}\\\\"\\";\\" \${listen_address}",
         require => [Exec['change_cassandra_password'], File[$cql_file_path]],
       }
     }
@@ -667,6 +669,26 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
   # This class is responsible for scheduling the execution of the backup scripts.
   # The backup scripts themselves are managed by the main config class.
 
+  if $manage_full_backups or $manage_incremental_backups {
+    # Ensure the backup config directory exists
+    file { '/etc/backup':
+      ensure => 'directory',
+      owner  => 'root',
+      group  => 'root',
+      mode   => '0755',
+    }
+    
+    # Manage the backup configuration file
+    file { '/etc/backup/config.json':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => template('cassandra_pfpt/backup.config.json.erb'),
+      require => File['/etc/backup'],
+    }
+  }
+
   if $manage_full_backups {
     # Full Backup Service and Timer
     file { '/etc/systemd/system/cassandra-full-backup.service':
@@ -691,6 +713,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
       require => [
         File['/etc/systemd/system/cassandra-full-backup.service'],
         File['/etc/systemd/system/cassandra-full-backup.timer'],
+        File['/etc/backup/config.json'],
       ],
     }
   }
@@ -719,6 +742,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
       require => [
         File['/etc/systemd/system/cassandra-incremental-backup.service'],
         File['/etc/systemd/system/cassandra-incremental-backup.timer'],
+        File['/etc/backup/config.json'],
       ],
     }
   }
@@ -733,3 +757,5 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
 }
 `.trim()
     };
+
+

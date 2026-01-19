@@ -8,8 +8,9 @@ export const readme = `
 2.  [Setup](#setup)
 3.  [Usage Examples](#usage-examples)
 4.  [Hiera Parameter Reference](#hiera-parameter-reference)
-5.  [Limitations](#limitations)
-6.  [Development](#development)
+5.  [Restoring from a Backup](#restoring-from-a-backup)
+6.  [Limitations](#limitations)
+7.  [Development](#development)
 
 ## Description
 
@@ -26,7 +27,7 @@ class role::cassandra {
 }
 \`\`\`
 
-All configuration for the node should be provided via your Hiera data source (e.g., in your \`common.yaml\` or node-specific YAML files). The backup scripts require the \`jq\` package, which this profile will install by default.
+All configuration for the node should be provided via your Hiera data source (e.g., in your \`common.yaml\` or node-specific YAML files). The backup scripts require the \`jq\` and \`awscli\` packages, which this profile will install by default.
 
 ## Usage Examples
 
@@ -248,7 +249,30 @@ Incremental backups are not a standalone solution. They are used with full snaps
 ### Package Management
 
 *   \`profile_cassandra_pfpt::manage_repo\` (Boolean): Whether Puppet should manage the Cassandra YUM repository. Default: \`true\`.
-*   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq']\`.
+*   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli']\`.
+
+## Restoring from a Backup
+
+A \`restore-from-s3.sh\` script is placed in \`/usr/local/bin\` on each node to perform restores. This is a manual, operator-driven process due to its destructive nature.
+
+**WARNING:** Running this script will **WIPE ALL CASSANDRA DATA** on the target node before restoring the backup.
+
+### Usage
+
+1.  SSH into the node you want to restore.
+2.  Identify the backup you want to restore from your S3 bucket. You will need the unique backup identifier, which is the timestamped part of the filename (e.g., \`full_snapshot_20231027120000\`).
+3.  Run the script with the backup ID as the argument:
+
+\`\`\`bash
+sudo /usr/local/bin/restore-from-s3.sh <BACKUP_IDENTIFIER>
+\`\`\`
+
+**Example:**
+\`\`\`bash
+sudo /usr/local/bin/restore-from-s3.sh full_snapshot_20231027120000
+\`\`\`
+
+The script will ask for a final confirmation before proceeding. It handles stopping Cassandra, cleaning directories, downloading and extracting the data, setting permissions, and restarting the service. If it detects an incremental backup, it will also automatically run \`nodetool refresh\` to load the restored data.
 
 ## Limitations
 
@@ -258,3 +282,4 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
+

@@ -59,7 +59,7 @@ class profile_cassandra_pfpt {
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
   $repo_sslverify                   = lookup('profile_cassandra_pfpt::repo_sslverify', { 'default_value' => true })
-  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl'] })
+  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli'] })
   $manage_bin_dir                   = lookup('profile_cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/bin' })
   $change_password_cql              = lookup('profile_cassandra_pfpt::change_password_cql', { 'default_value' => '/tmp/change_password.cql' })
   $cqlsh_path_env                   = lookup('profile_cassandra_pfpt::cqlsh_path_env', { 'default_value' => '/usr/bin/' })
@@ -142,6 +142,8 @@ class profile_cassandra_pfpt {
   $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
   $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
+  $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
+  $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -277,6 +279,8 @@ class profile_cassandra_pfpt {
     backup_s3_bucket                 => $backup_s3_bucket,
     full_backup_script_path          => $full_backup_script_path,
     incremental_backup_script_path   => $incremental_backup_script_path,
+    full_backup_log_file             => $full_backup_log_file,
+    incremental_backup_log_file      => $incremental_backup_log_file,
   }
 }
         `.trim(),
