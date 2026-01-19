@@ -3,12 +3,13 @@
 # This class wraps the cassandra_pfpt component module and provides
 # configuration data via Hiera.
 class profile_cassandra_pfpt {
+  # Hiera Lookups for Cassandra Configuration
+  # This section gathers all configuration from Hiera, providing sensible defaults.
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
-  $use_java11                       = lookup('profile_cassandra_pfpt::use_java11', { 'default_value' => true })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'pfpt-cassandra-cluster' })
-  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
+  $seeds_from_hiera                 = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [] })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
@@ -56,7 +57,7 @@ class profile_cassandra_pfpt {
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
   $repo_sslverify                   = lookup('profile_cassandra_pfpt::repo_sslverify', { 'default_value' => true })
-  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl'] })
+  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq'] })
   $manage_bin_dir                   = lookup('profile_cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/bin' })
   $change_password_cql              = lookup('profile_cassandra_pfpt::change_password_cql', { 'default_value' => '/tmp/change_password.cql' })
   $cqlsh_path_env                   = lookup('profile_cassandra_pfpt::cqlsh_path_env', { 'default_value' => '/usr/bin/' })
@@ -113,53 +114,36 @@ class profile_cassandra_pfpt {
   $index_summary_capacity_in_mb     = lookup('profile_cassandra_pfpt::index_summary_capacity_in_mb', { 'default_value' => undef })
   $file_cache_size_in_mb            = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
   $enable_materialized_views        = lookup('profile_cassandra_pfpt::enable_materialized_views', { 'default_value' => false })
-
+  $jvm_overrides_from_hiera         = lookup('profile_cassandra_pfpt::extra_jvm_args_override', { 'default_value' => {} })
+  $cassandra_roles                  = lookup('profile_cassandra_pfpt::cassandra_roles', { 'default_value' => {} })
   # Coralogix Settings
   $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
   $coralogix_api_key                = lookup('profile_cassandra_pfpt::coralogix_api_key', { 'default_value' => '' })
   $coralogix_region                 = lookup('profile_cassandra_pfpt::coralogix_region', { 'default_value' => 'US' })
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
+  $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
+  $system_keyspaces_replication     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { 'default_value' => {} })
+  # JMX Exporter Settings
+  $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
+  $jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
+  $jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-${jmx_exporter_version}.jar" })
+  $jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-${jmx_exporter_version}.jar" })
+  $jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
+  $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
+  $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
+  # DIY Backup Settings
+  $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => false })
+  $manage_incremental_backups       = lookup('profile_cassandra_pfpt::manage_incremental_backups', { 'default_value' => false })
+  $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
+  $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
+  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
+  $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
+  $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
+  $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
+  $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
 
-  # Determine default extra JVM args based on GC type and Java version
-  if versioncmp($java_version, '14') < 0 {
-    if $gc_type == 'G1GC' {
-      $default_extra_jvm_args = [
-        '-XX:+UseG1GC',
-        '-XX:G1HeapRegionSize=16M',
-        '-XX:MaxGCPauseMillis=500',
-        '-XX:InitiatingHeapOccupancyPercent=75',
-        '-XX:+ParallelRefProcEnabled',
-        '-XX:+AggressiveOpts',
-      ]
-    }
-    elsif $gc_type == 'CMS' {
-      $default_extra_jvm_args = [
-        '-XX:+UseConcMarkSweepGC',
-        '-XX:+CMSParallelRemarkEnabled',
-        '-XX:SurvivorRatio=8',
-        '-XX:MaxTenuringThreshold=1',
-        '-XX:CMSInitiatingOccupancyFraction=75',
-        '-XX:+UseCMSInitiatingOccupancyOnly',
-        '-XX:+CMSClassUnloadingEnabled',
-        '-XX:+AlwaysPreTouch',
-      ]
-    }
-    else {
-      $default_extra_jvm_args = []
-    }
-  }
-  else {
-    if $gc_type == 'G1GC' {
-      $default_extra_jvm_args = ['-XX:+UseG1GC']
-    } else {
-      $default_extra_jvm_args = []
-    }
-  }
-
-  $extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', { 'default_value' => $default_extra_jvm_args })
-
-
+  # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
     java_version                     => $java_version,
@@ -175,7 +159,7 @@ class profile_cassandra_pfpt {
     repo_sslverify                   => $repo_sslverify,
     package_dependencies             => $package_dependencies,
     cluster_name                     => $cluster_name,
-    seeds                            => $seeds,
+    seeds_list                       => $seeds_from_hiera,
     listen_address                   => $listen_address,
     datacenter                       => $datacenter,
     rack                             => $rack,
@@ -185,7 +169,7 @@ class profile_cassandra_pfpt {
     hints_directory                  => $hints_directory,
     max_heap_size                    => $max_heap_size,
     gc_type                          => $gc_type,
-    extra_jvm_args                   => $extra_jvm_args,
+    extra_jvm_args_override          => $jvm_overrides_from_hiera,
     cassandra_password               => $cassandra_password,
     replace_address                  => $replace_address,
     disable_swap                     => $disable_swap,
@@ -195,7 +179,6 @@ class profile_cassandra_pfpt {
     jamm_source                      => $jamm_source,
     jamm_target                      => $jamm_target,
     enable_range_repair              => $enable_range_repair,
-    use_java11                       => $use_java11,
     use_shenandoah_gc                => $use_shenandoah_gc,
     racks                            => $racks,
     ssl_enabled                      => $ssl_enabled,
@@ -277,5 +260,24 @@ class profile_cassandra_pfpt {
     coralogix_region                 => $coralogix_region,
     coralogix_logs_enabled           => $coralogix_logs_enabled,
     coralogix_metrics_enabled        => $coralogix_metrics_enabled,
+    coralogix_baseurl                => $coralogix_baseurl,
+    system_keyspaces_replication     => $system_keyspaces_replication,
+    cassandra_roles                  => $cassandra_roles,
+    manage_jmx_exporter              => $manage_jmx_exporter,
+    jmx_exporter_version             => $jmx_exporter_version,
+    jmx_exporter_jar_source          => $jmx_exporter_jar_source,
+    jmx_exporter_jar_target          => $jmx_exporter_jar_target,
+    jmx_exporter_config_source       => $jmx_exporter_config_source,
+    jmx_exporter_config_target       => $jmx_exporter_config_target,
+    jmx_exporter_port                => $jmx_exporter_port,
+    manage_full_backups              => $manage_full_backups,
+    manage_incremental_backups       => $manage_incremental_backups,
+    full_backup_schedule             => $full_backup_schedule,
+    incremental_backup_schedule      => $incremental_backup_schedule,
+    backup_s3_bucket                 => $backup_s3_bucket,
+    full_backup_script_path          => $full_backup_script_path,
+    incremental_backup_script_path   => $incremental_backup_script_path,
+    full_backup_log_file             => $full_backup_log_file,
+    incremental_backup_log_file      => $incremental_backup_log_file,
   }
 }

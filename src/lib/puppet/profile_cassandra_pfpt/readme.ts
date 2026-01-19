@@ -26,7 +26,7 @@ class role::cassandra {
 }
 \`\`\`
 
-All configuration for the node should be provided via your Hiera data source (e.g., in your \`common.yaml\` or node-specific YAML files).
+All configuration for the node should be provided via your Hiera data source (e.g., in your \`common.yaml\` or node-specific YAML files). The backup scripts require the \`jq\` package, which this profile will install by default.
 
 ## Usage Examples
 
@@ -211,6 +211,8 @@ This section documents every available Hiera key for this profile.
 *   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
 *   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The \`systemd\` OnCalendar schedule for incremental backups. You can provide a single string or an array of strings for multiple schedules. Default: \`'0 */4 * * *'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
+*   \`profile_cassandra_pfpt::full_backup_log_file\` (String): Absolute path for the full backup script's log file. Default: \`'/var/log/cassandra/full_backup.log'\`.
+*   \`profile_cassandra_pfpt::incremental_backup_log_file\` (String): Absolute path for the incremental backup script's log file. Default: \`'/var/log/cassandra/incremental_backup.log'\`.
 
 ### Incremental Backups
 *   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): Set to \`true\` to enable Cassandra's built-in incremental backup feature. This is **required** for the incremental backup script to find any files to back up.
@@ -246,7 +248,7 @@ Incremental backups are not a standalone solution. They are used with full snaps
 ### Package Management
 
 *   \`profile_cassandra_pfpt::manage_repo\` (Boolean): Whether Puppet should manage the Cassandra YUM repository. Default: \`true\`.
-*   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl']\`.
+*   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq']\`.
 
 ## Limitations
 

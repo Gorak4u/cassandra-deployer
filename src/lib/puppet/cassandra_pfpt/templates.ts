@@ -343,7 +343,7 @@ After=cassandra.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=<%= @full_backup_script_path %> <%= @backup_s3_bucket %>
+ExecStart=<%= @full_backup_script_path %>
 `.trim(),
     'cassandra-full-backup.timer.erb': `
 # /etc/systemd/system/cassandra-full-backup.timer
@@ -373,7 +373,7 @@ After=cassandra.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=<%= @incremental_backup_script_path %> <%= @backup_s3_bucket %>
+ExecStart=<%= @incremental_backup_script_path %>
 `.trim(),
     'cassandra-incremental-backup.timer.erb': `
 # /etc/systemd/system/cassandra-incremental-backup.timer
@@ -395,5 +395,13 @@ Unit=cassandra-incremental-backup.service
 
 [Install]
 WantedBy=timers.target
+`.trim(),
+    'backup.config.json.erb': `
+{
+  "s3_bucket_name": "<%= @backup_s3_bucket %>",
+  "cassandra_data_dir": "<%= @data_dir %>",
+  "full_backup_log_file": "<%= @full_backup_log_file %>",
+  "incremental_backup_log_file": "<%= @incremental_backup_log_file %>"
+}
 `.trim()
     };
