@@ -146,11 +146,9 @@ class profile_cassandra_pfpt {
     []
   }
 
-  # Look up any user-defined extra_jvm_args from Hiera. Defaults to an empty array.
-  $hiera_extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', { 'default_value' => [] })
-
-  # Combine the defaults with the Hiera-provided args, ensuring no duplicates.
-  $extra_jvm_args = unique($default_extra_jvm_args + $hiera_extra_jvm_args)
+  $extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', {
+    'default_value' => $default_extra_jvm_args
+  })
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
@@ -209,7 +207,7 @@ class profile_cassandra_pfpt {
     concurrent_compactors            => $concurrent_compactors,
     compaction_throughput_mb_per_sec => $compaction_throughput_mb_per_sec,
     tombstone_warn_threshold         => $tombstone_warn_threshold,
-    tombstone_failure_threshold      => $tombstone_failure_threshold,
+tombstone_failure_threshold      => $tombstone_failure_threshold,
     change_password_cql              => $change_password_cql,
     cqlsh_path_env                   => $cqlsh_path_env,
     dynamic_snitch                   => $dynamic_snitch,
@@ -272,3 +270,6 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
+
+    
