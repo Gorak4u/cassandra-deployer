@@ -136,9 +136,11 @@ class profile_cassandra_pfpt {
   $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
   # DIY Backup Settings
   $manage_backups                   = lookup('profile_cassandra_pfpt::manage_backups', { 'default_value' => false })
-  $backup_schedule                  = lookup('profile_cassandra_pfpt::backup_schedule', { 'default_value' => 'daily' })
+  $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
+  $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
   $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
-  $backup_script_path               = lookup('profile_cassandra_pfpt::backup_script_path', { 'default_value' => '/usr/local/bin/backup-to-s3.sh' })
+  $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
+  $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -268,20 +270,12 @@ class profile_cassandra_pfpt {
     jmx_exporter_config_target       => $jmx_exporter_config_target,
     jmx_exporter_port                => $jmx_exporter_port,
     manage_backups                   => $manage_backups,
-    backup_schedule                  => $backup_schedule,
+    full_backup_schedule             => $full_backup_schedule,
+    incremental_backup_schedule      => $incremental_backup_schedule,
     backup_s3_bucket                 => $backup_s3_bucket,
-    backup_script_path               => $backup_script_path,
+    full_backup_script_path          => $full_backup_script_path,
+    incremental_backup_script_path   => $incremental_backup_script_path,
   }
 }
         `.trim(),
     };
-
-
-    
-
-    
-
-
-
-
-

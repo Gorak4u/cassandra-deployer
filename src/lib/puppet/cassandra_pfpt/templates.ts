@@ -130,9 +130,7 @@ write_request_timeout_in_ms: <%= @write_request_timeout_in_ms %>
 truncate_request_timeout_in_ms: <%= @truncate_request_timeout_in_ms %>
 <% end -%>
 
-<% if @incremental_backups -%>
 incremental_backups: <%= @incremental_backups %>
-<% end -%>
 <% if @auto_snapshot -%>
 auto_snapshot: <%= @auto_snapshot %>
 <% end -%>
@@ -332,12 +330,12 @@ metrics:
     #   - "org.apache.cassandra.metrics:type=Storage,name=Load"
 <% end %>
 `.trim(),
-    'cassandra-backup.service.erb': `
-# /etc/systemd/system/cassandra-backup.service
+    'cassandra-full-backup.service.erb': `
+# /etc/systemd/system/cassandra-full-backup.service
 # Managed by Puppet
 
 [Unit]
-Description=Cassandra Node Backup Service
+Description=Cassandra Node Full Backup Service
 Wants=cassandra.service
 After=cassandra.service
 
@@ -345,24 +343,51 @@ After=cassandra.service
 Type=oneshot
 User=root
 Group=root
-ExecStart=<%= @backup_script_path %> <%= @backup_s3_bucket %>
+ExecStart=<%= @full_backup_script_path %> <%= @backup_s3_bucket %>
 `.trim(),
-    'cassandra-backup.timer.erb': `
-# /etc/systemd/system/cassandra-backup.timer
+    'cassandra-full-backup.timer.erb': `
+# /etc/systemd/system/cassandra-full-backup.timer
 # Managed by Puppet
 
 [Unit]
-Description=Timer to schedule Cassandra node backups
+Description=Timer to schedule Cassandra node full backups
 
 [Timer]
-OnCalendar=<%= @backup_schedule %>
+OnCalendar=<%= @full_backup_schedule %>
 Persistent=true
-Unit=cassandra-backup.service
+Unit=cassandra-full-backup.service
+
+[Install]
+WantedBy=timers.target
+`.trim(),
+    'cassandra-incremental-backup.service.erb': `
+# /etc/systemd/system/cassandra-incremental-backup.service
+# Managed by Puppet
+
+[Unit]
+Description=Cassandra Node Incremental Backup Service
+Wants=cassandra.service
+After=cassandra.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=<%= @incremental_backup_script_path %> <%= @backup_s3_bucket %>
+`.trim(),
+    'cassandra-incremental-backup.timer.erb': `
+# /etc/systemd/system/cassandra-incremental-backup.timer
+# Managed by Puppet
+
+[Unit]
+Description=Timer to schedule Cassandra node incremental backups
+
+[Timer]
+OnCalendar=<%= @incremental_backup_schedule %>
+Persistent=true
+Unit=cassandra-incremental-backup.service
 
 [Install]
 WantedBy=timers.target
 `.trim()
     };
-
-
-

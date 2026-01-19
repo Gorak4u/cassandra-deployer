@@ -78,78 +78,172 @@ else
 fi
 `,
       'upgrade-sstables.sh': '#!/bin/bash\\necho "Upgrade SSTables Script"',
-      'backup-to-s3.sh': `#!/bin/bash
-# Performs a snapshot and mocks S3 upload.
+      'full-backup-to-s3.sh': `#!/bin/bash
+# Performs a full snapshot backup and uploads it to a simulated S3 bucket.
 
-log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
-}
+set -euo pipefail
 
 # --- Configuration ---
-BUCKET_NAME="your-s3-backup-bucket"
-CASSANDRA_DATA_DIR="/var/lib/cassandra/data" # Ensure this is correct
-CASSANDRA_COMMITLOG_DIR="/var/lib/cassandra/commitlog" # Optional, usually not backed up with data
-SNAPSHOT_TAG="backup_$(date +%Y%m%d%H%M%S)"
+S3_BUCKET_NAME="\${1:-your-s3-backup-bucket}"
+CASSANDRA_DATA_DIR="/var/lib/cassandra/data"
+SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
-BACKUP_TEMP_DIR="/tmp/cassandra_backup_\${SNAPSHOT_TAG}"
+BACKUP_ROOT_DIR="/tmp/cassandra_backups"
+BACKUP_TEMP_DIR="\${BACKUP_ROOT_DIR}/\${HOSTNAME}_\${SNAPSHOT_TAG}"
+LOG_FILE="/var/log/cassandra/full_backup.log"
 
-# --- Functions ---
-cleanup_temp() {
-  log_message "Cleaning up temporary directory: \${BACKUP_TEMP_DIR}"
-  rm -rf "\${BACKUP_TEMP_DIR}"
+# --- Logging ---
+log_message() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "\${LOG_FILE}"
+}
+
+# --- Cleanup Functions ---
+cleanup_temp_dir() {
+  if [ -d "\${BACKUP_TEMP_DIR}" ]; then
+    log_message "Cleaning up temporary directory: \${BACKUP_TEMP_DIR}"
+    rm -rf "\${BACKUP_TEMP_DIR}"
+  fi
 }
 
 # --- Main Logic ---
-log_message "Starting Cassandra backup to S3 process..."
-
-# 1. Take a snapshot
-log_message "Taking Cassandra snapshot with tag: \${SNAPSHOT_TAG}..."
-nodetool snapshot -t "\${SNAPSHOT_TAG}"
-if [ $? -ne 0 ]; then
-  log_message "ERROR: Failed to take Cassandra snapshot."
+if [ "$(id -u)" -ne 0 ]; then
+  log_message "ERROR: This script must be run as root."
   exit 1
 fi
-log_message "Snapshot taken successfully."
 
-# Find snapshot directory. This path might vary.
-# Example: /var/lib/cassandra/data/keyspace/table/snapshots/TAG
-SNAPSHOT_ROOT_DIR="\${CASSANDRA_DATA_DIR}"
+trap cleanup_temp_dir EXIT
 
-# Prepare temporary directory for tarball
+log_message "--- Starting Full Cassandra Snapshot Backup Process ---"
+log_message "S3 Bucket: \${S3_BUCKET_NAME}"
+log_message "Snapshot Tag: \${SNAPSHOT_TAG}"
+
+# 1. Create temporary directory structure
+mkdir -p "\${BACKUP_TEMP_DIR}" || { log_message "ERROR: Failed to create temp backup directories."; exit 1; }
+
+# 2. Take a node-local snapshot
+log_message "Taking full snapshot with tag: \${SNAPSHOT_TAG}..."
+if ! nodetool snapshot -t "\${SNAPSHOT_TAG}"; then
+  log_message "ERROR: Failed to take Cassandra snapshot. Aborting backup."
+  exit 1
+fi
+log_message "Full snapshot taken successfully."
+
+# 3. Collect snapshot file paths
+find "\${CASSANDRA_DATA_DIR}" -type f -path "*/snapshots/\${SNAPSHOT_TAG}/*" > "\${BACKUP_TEMP_DIR}/snapshot_files.list"
+
+# 4. Archive the files
+TARBALL_PATH="\${BACKUP_ROOT_DIR}/\${HOSTNAME}_\${SNAPSHOT_TAG}.tar.gz"
+log_message "Archiving snapshot data to \${TARBALL_PATH}..."
+
+if [ ! -s "\${BACKUP_TEMP_DIR}/snapshot_files.list" ]; then
+    log_message "WARNING: No snapshot files found. The cluster may be empty. Aborting backup."
+    nodetool clearsnapshot -t "\${SNAPSHOT_TAG}"
+    exit 0
+fi
+
+tar -czf "\${TARBALL_PATH}" -P -T "\${BACKUP_TEMP_DIR}/snapshot_files.list"
+
+# 5. Archive the schema
+log_message "Backing up schema..."
+SCHEMA_FILE="\${BACKUP_TEMP_DIR}/schema.cql"
+timeout 30 cqlsh -e "DESCRIBE SCHEMA;" > "\${SCHEMA_FILE}"
+if [ $? -ne 0 ]; then
+  log_message "WARNING: Failed to dump schema. Backup will continue without it."
+else
+  # Add schema to the existing tarball
+  tar -rf "\${TARBALL_PATH}" -C "\${BACKUP_TEMP_DIR}" "schema.cql"
+  log_message "Schema appended to archive."
+fi
+
+# 6. Upload to S3 (mocked)
+UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/full/\${SNAPSHOT_TAG}.tar.gz"
+log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
+# In a real environment: aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"
+log_message "S3 upload simulated successfully."
+
+# 7. Cleanup (only after successful "upload")
+log_message "Cleaning up local snapshot and archive file..."
+nodetool clearsnapshot -t "\${SNAPSHOT_TAG}"
+rm -f "\${TARBALL_PATH}"
+
+log_message "--- Full Cassandra Snapshot Backup Process Finished Successfully ---"
+
+exit 0
+`,
+      'incremental-backup-to-s3.sh': `#!/bin/bash
+# Archives and uploads existing incremental backup files to a simulated S3 bucket.
+
+set -euo pipefail
+
+# --- Configuration ---
+S3_BUCKET_NAME="\${1:-your-s3-backup-bucket}"
+CASSANDRA_DATA_DIR="/var/lib/cassandra/data"
+BACKUP_TAG="incremental_$(date +%Y%m%d%H%M%S)"
+HOSTNAME=$(hostname -s)
+BACKUP_ROOT_DIR="/tmp/cassandra_backups"
+BACKUP_TEMP_DIR="\${BACKUP_ROOT_DIR}/\${HOSTNAME}_\${BACKUP_TAG}"
+LOG_FILE="/var/log/cassandra/incremental_backup.log"
+INCREMENTAL_MARKER="incremental_backup_contents.txt"
+
+# --- Logging ---
+log_message() {
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "\${LOG_FILE}"
+}
+
+# --- Cleanup Functions ---
+cleanup_temp_dir() {
+  if [ -d "\${BACKUP_TEMP_DIR}" ]; then
+    log_message "Cleaning up temporary directory: \${BACKUP_TEMP_DIR}"
+    rm -rf "\${BACKUP_TEMP_DIR}"
+  fi
+}
+
+# --- Main Logic ---
+if [ "$(id -u)" -ne 0 ]; then
+  log_message "ERROR: This script must be run as root."
+  exit 1
+fi
+
+trap cleanup_temp_dir EXIT
+
+log_message "--- Starting Incremental Cassandra Backup Process ---"
+log_message "S3 Bucket: \${S3_BUCKET_NAME}"
+log_message "Backup Tag: \${BACKUP_TAG}"
+
+# 1. Create temporary directory structure
 mkdir -p "\${BACKUP_TEMP_DIR}" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
 
-log_message "Creating tar.gz archive of snapshot data from \${SNAPSHOT_ROOT_DIR} to \${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz ..."
-# Find all snapshot directories for the current tag and tar them
-find "\${SNAPSHOT_ROOT_DIR}" -type d -name "\${SNAPSHOT_TAG}" -exec tar -czvf "\${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz" -C {} . \\;
-if [ $? -ne 0 ]; then
-  log_message "ERROR: Failed to create tar.gz archive of snapshot data."
-  cleanup_temp
-  exit 1
+# 2. Collect incremental backup file paths
+find "\${CASSANDRA_DATA_DIR}" -type f -path "*/backups/*" > "\${BACKUP_TEMP_DIR}/incremental_files.list"
+
+# 3. Archive the files
+if [ ! -s "\${BACKUP_TEMP_DIR}/incremental_files.list" ]; then
+    log_message "No new incremental backup files found. Nothing to do."
+    exit 0
 fi
-log_message "Snapshot data archived successfully."
 
-# 3. Upload to S3 (mocked command)
-UPLOAD_PATH="s3://\${BUCKET_NAME}/cassandra/\${HOSTNAME}/\${SNAPSHOT_TAG}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz"
-log_message "Mocking S3 upload command:"
-echo "aws s3 cp \${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz \${UPLOAD_PATH}"
-# In a real scenario, you'd run:
-# aws s3 cp "\${BACKUP_TEMP_DIR}/\${HOSTNAME}_cassandra_snapshot_\${SNAPSHOT_TAG}.tar.gz" "\${UPLOAD_PATH}"
-# if [ $? -ne 0 ]; then
-#   log_message "ERROR: Failed to upload backup to S3."
-#   cleanup_temp
-#   exit 1
-# # fi
-log_message "S3 upload mocked successfully. In a real scenario, this would be uploaded."
+TARBALL_PATH="\${BACKUP_ROOT_DIR}/\${HOSTNAME}_\${BACKUP_TAG}.tar.gz"
+log_message "Archiving incremental data to \${TARBALL_PATH}..."
 
-# 4. Clear snapshots (optional, do AFTER successful upload)
-# log_message "Clearing snapshots with tag: \${SNAPSHOT_TAG}..."
-# nodetool clearsnapshot -t "\${SNAPSHOT_TAG}"
-# if [ $? -ne 0 ]; then
-# #   log_message "WARNING: Failed to clear snapshot \${SNAPSHOT_TAG}."
-# fi
+tar -czf "\${TARBALL_PATH}" -P -T "\${BACKUP_TEMP_DIR}/incremental_files.list"
+touch "\${BACKUP_TEMP_DIR}/\${INCREMENTAL_MARKER}"
+tar -rf "\${TARBALL_PATH}" -C "\${BACKUP_TEMP_DIR}" "\${INCREMENTAL_MARKER}"
 
-cleanup_temp
-log_message "Cassandra backup to S3 process completed."
+# 4. Upload to S3 (mocked)
+UPLOAD_PATH="s3://\${S3_BUCKET_NAME}/cassandra/\${HOSTNAME}/incremental/\${BACKUP_TAG}.tar.gz"
+log_message "Simulating S3 upload to: \${UPLOAD_PATH}"
+# In a real environment: aws s3 cp "\${TARBALL_PATH}" "\${UPLOAD_PATH}"
+log_message "S3 upload simulated successfully."
+
+# 5. Cleanup (only after successful "upload")
+log_message "Cleaning up archived incremental backup files and local tarball..."
+xargs -a "\${BACKUP_TEMP_DIR}/incremental_files.list" rm -f
+log_message "Source incremental files deleted."
+rm -f "\${TARBALL_PATH}"
+log_message "Local tarball deleted."
+
+log_message "--- Incremental Cassandra Backup Process Finished Successfully ---"
+
 exit 0
 `,
       'prepare-replacement.sh': '#!/bin/bash\\necho "Prepare Replacement Script"',

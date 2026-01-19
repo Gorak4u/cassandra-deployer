@@ -8,14 +8,12 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     mode    => '0700',
     require => Package['cassandra'],
   }
-
   file { '/root/.cassandra':
     ensure => 'directory',
     owner  => 'root',
     group  => 'root',
     mode   => '0700',
   }
-
   file { $jamm_target:
     ensure  => 'file',
     owner   => 'root',
@@ -24,7 +22,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     source  => $jamm_source,
     require => Package['cassandra'],
   }
-
   file { '/etc/cassandra/conf/cassandra.yaml':
     ensure  => 'file',
     content => template('cassandra_pfpt/cassandra.yaml.erb'),
@@ -34,7 +31,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
-
   file { '/etc/cassandra/conf/cassandra-rackdc.properties':
     ensure  => 'file',
     content => template('cassandra_pfpt/cassandra-rackdc.properties.erb'),
@@ -44,7 +40,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
-
   file { '/etc/cassandra/conf/jvm-server.options':
     ensure  => 'file',
     content => template('cassandra_pfpt/jvm-server.options.erb'),
@@ -54,7 +49,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
-
   file { '/root/.cassandra/cqlshrc':
     ensure  => 'file',
     content => template('cassandra_pfpt/cqlshrc.erb'),
@@ -63,35 +57,32 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     mode    => '0600',
     require => File['/root/.cassandra'],
   }
-
   file { $manage_bin_dir:
     ensure => 'directory',
     owner  => 'root',
     group  => 'root',
     mode   => '0755',
   }
-
   [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh', 'repair-node.sh',
     'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
-    'backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
+    'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore_from_backup.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
-    file { "\${$manage_bin_dir}/\${$script}":
+    file { "\${manage_bin_dir}/\${script}":
       ensure  => 'file',
-      source  => "puppet:///modules/cassandra_pfpt/scripts/\${$script}",
+      source  => "puppet:///modules/cassandra_pfpt/scripts/\${script}",
       owner   => 'root',
       group   => 'root',
       mode    => '0755',
       require => File[$manage_bin_dir],
     }
   }
-
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s+0\\s*$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\s+partition\\s+0\\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -104,65 +95,59 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   } else {
     $merged_sysctl = $sysctl_settings
   }
-
   if !empty($merged_sysctl) {
     file { '/etc/sysctl.d/99-cassandra.conf':
       ensure  => 'file',
       content => template('cassandra_pfpt/sysctl.conf.erb'),
       notify  => Exec['apply_sysctl_cassandra'],
     }
-
     exec { 'apply_sysctl_cassandra':
       command     => '/sbin/sysctl -p /etc/sysctl.d/99-cassandra.conf',
       path        => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
       refreshonly => true,
     }
   }
-
   if !empty($limits_settings) {
     file { '/etc/security/limits.d/cassandra.conf':
       ensure  => 'file',
       content => template('cassandra_pfpt/cassandra_limits.conf.erb'),
     }
   }
-
   if $ssl_enabled {
     exec { 'create the certs dir':
-      command => "mkdir -p \${$target_dir}/etc",
+      command => "mkdir -p \${target_dir}/etc",
       path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
-      unless  => "test -d \${$target_dir}/etc",
+      unless  => "test -d \${target_dir}/etc",
     }
     # Custom type that generates cert/key files for the domain
-    ssl_certificate { "\${$target_dir}/etc/keystore":
+    ssl_certificate { "\${target_dir}/etc/keystore":
       domain  => $https_domain,
       require => Exec['create the certs dir'],
     }
     # Java keystore creation: JKS from PEM + KEY
-    java_ks { "host:\${$target_dir}/etc/keystore.jks":
+    java_ks { "host:\${target_dir}/etc/keystore.jks":
       ensure      => latest,
-      certificate => "\${$target_dir}/etc/keystore.pem",
-      private_key => "\${$target_dir}/etc/keystore.key",
+      certificate => "\${target_dir}/etc/keystore.pem",
+      private_key => "\${target_dir}/etc/keystore.key",
       password    => $keystore_password,
       require     => [
-        File["\${$target_dir}/etc/keystore.jks"],
-        Ssl_certificate["\${$target_dir}/etc/keystore"], # ensure certs exist first
+        File["\${target_dir}/etc/keystore.jks"],
+        Ssl_certificate["\${target_dir}/etc/keystore"], # ensure certs exist first
       ],
     }
-    file { "\${$target_dir}/etc/keystore.jks":
+    file { "\${target_dir}/etc/keystore.jks":
       ensure  => file,
       owner   => 'root',
       group   => 'root',
       mode    => '0444',
-      require => Ssl_certificate["\${$target_dir}/etc/keystore"],
+      require => Ssl_certificate["\${target_dir}/etc/keystore"],
     }
-    file { "\${$target_dir}/etc/truststore.jks":
+    file { "\${target_dir}/etc/truststore.jks":
       ensure  => link,
-      target  => "\${$target_dir}/etc/keystore.jks",
-      require => File["\${$target_dir}/etc/keystore.jks"],
+      target  => "\${target_dir}/etc/keystore.jks",
+      require => File["\${target_dir}/etc/keystore.jks"],
     }
   }
-
-
   if $manage_jmx_security {
     file { $jmx_password_file_path:
       ensure  => 'file',
@@ -173,7 +158,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       require => Package['cassandra'],
       notify  => Class['cassandra_pfpt::service'],
     }
-
     file { $jmx_access_file_path:
       ensure  => 'file',
       content => $jmx_access_file_content,
@@ -184,15 +168,13 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       notify  => Class['cassandra_pfpt::service'],
     }
   }
-
-  if $facts['os']['family'] == 'RedHat' and $facts['os']['release']['major'] >= '7' {
+  if $facts['os']['family'] == 'RedHat' and Integer($facts['os']['release']['major']) >= 7 {
     file { '/etc/systemd/system/cassandra.service.d':
       ensure => 'directory',
       owner  => 'root',
       group  => 'root',
       mode   => '0755',
     }
-
     file { '/etc/systemd/system/cassandra.service.d/override.conf':
       ensure  => 'file',
       content => template('cassandra_pfpt/cassandra.service.d.erb'),
@@ -202,7 +184,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       notify  => Exec['cassandra-systemd-reload'],
       require => File['/etc/systemd/system/cassandra.service.d'],
     }
-
     exec { 'cassandra-systemd-reload':
       command     => 'systemctl daemon-reload',
       path        => ['/bin', '/usr/bin'],
@@ -211,3 +192,4 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     }
   }
 }
+        

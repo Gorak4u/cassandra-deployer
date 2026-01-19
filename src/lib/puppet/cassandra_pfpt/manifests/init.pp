@@ -16,7 +16,7 @@ class cassandra_pfpt (
   Boolean $repo_sslverify,
   Array[String] $package_dependencies,
   String $cluster_name,
-  Array[String] $seeds,
+  Array[String] $seeds_list = [],
   String $listen_address,
   String $datacenter,
   String $rack,
@@ -26,7 +26,7 @@ class cassandra_pfpt (
   String $hints_directory,
   String $max_heap_size,
   String $gc_type,
-  Array[String] $extra_jvm_args,
+  Hash $extra_jvm_args_override = {},
   String $cassandra_password,
   String $replace_address,
   Boolean $disable_swap,
@@ -36,7 +36,6 @@ class cassandra_pfpt (
   String $jamm_source,
   String $jamm_target,
   Boolean $enable_range_repair,
-  Boolean $use_java11,
   Boolean $use_shenandoah_gc,
   Hash $racks,
   Boolean $ssl_enabled,
@@ -112,28 +111,97 @@ class cassandra_pfpt (
   Optional[String] $memtable_allocation_type,
   Optional[Integer] $index_summary_capacity_in_mb,
   Optional[Integer] $file_cache_size_in_mb,
-  # Coralogix Settings
   Boolean $manage_coralogix_agent,
   String $coralogix_api_key,
   String $coralogix_region,
   Boolean $coralogix_logs_enabled,
   Boolean $coralogix_metrics_enabled,
   Boolean $enable_materialized_views,
+  Optional[String] $coralogix_baseurl = undef,
+  Hash $system_keyspaces_replication = {},
+  Hash $cassandra_roles = {},
+  Boolean $manage_jmx_exporter,
+  String $jmx_exporter_version,
+  String $jmx_exporter_jar_source,
+  String $jmx_exporter_jar_target,
+  String $jmx_exporter_config_source,
+  String $jmx_exporter_config_target,
+  Integer $jmx_exporter_port,
+  Boolean $manage_backups,
+  String $full_backup_schedule,
+  String $incremental_backup_schedule,
+  String $backup_s3_bucket,
+  String $full_backup_script_path,
+  String $incremental_backup_script_path,
 ) {
-
+  # Validate Java and Cassandra version compatibility
+  $cassandra_major_version = split($cassandra_version, '[.-]')[0]
+  if Integer($cassandra_major_version) >= 4 and Integer($java_version) < 11 {
+    fail("Cassandra version \${cassandra_version} requires Java 11 or newer, but Java \${java_version} was specified.")
+  }
+  if Integer($cassandra_major_version) <= 3 and Integer($java_version) > 11 {
+    fail("Cassandra version \${cassandra_version} is not compatible with Java versions newer than 11, but Java \${java_version} was specified.")
+  }
+  # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
+  $seeds = if empty($seeds_list) {
+    [$facts['networking']['ip']]
+  } else {
+    $seeds_list
+  }
+  
+  # Calculate default JVM args based on GC type and Java version
+  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
+    {
+      'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
+      'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
+      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=75',
+      'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
+      'AggressiveOpts'               => '-XX:+AggressiveOpts',
+    }
+  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
+    {
+      'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
+      'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
+      'SurvivorRatio'               => '-XX:SurvivorRatio=8',
+      'MaxTenuringThreshold'        => '-XX:MaxTenuringThreshold=1',
+      'CMSInitiatingOccupancyFraction' => '-XX:CMSInitiatingOccupancyFraction=75',
+      'UseCMSInitiatingOccupancyOnly' => '-XX:+UseCMSInitiatingOccupancyOnly',
+      'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
+      'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
+    }
+  } else {
+    {}
+  }
+  
+  # Merge the default arguments with any overrides from Hiera. Hiera wins.
+  $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
+  $extra_jvm_args = $merged_jvm_args_hash.values
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
   contain cassandra_pfpt::config
   contain cassandra_pfpt::service
   contain cassandra_pfpt::firewall
-
+  contain cassandra_pfpt::system_keyspaces
+  contain cassandra_pfpt::roles
+  if $manage_jmx_exporter {
+    contain cassandra_pfpt::jmx_exporter
+  }
   if $manage_coralogix_agent {
     contain cassandra_pfpt::coralogix
     Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
   }
-
+  if $manage_backups {
+    class { 'cassandra_pfpt::backup':
+      full_backup_schedule         => $full_backup_schedule,
+      incremental_backup_schedule  => $incremental_backup_schedule,
+      backup_s3_bucket             => $backup_s3_bucket,
+      full_backup_script_path      => $full_backup_script_path,
+      incremental_backup_script_path => $incremental_backup_script_path,
+    }
+  }
   Class['cassandra_pfpt::java']
   -> Class['cassandra_pfpt::install']
   -> Class['cassandra_pfpt::config']
   ~> Class['cassandra_pfpt::service']
 }
+        
