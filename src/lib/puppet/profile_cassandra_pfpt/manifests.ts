@@ -120,40 +120,13 @@ class profile_cassandra_pfpt {
   $coralogix_region                 = lookup('profile_cassandra_pfpt::coralogix_region', { 'default_value' => 'US' })
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
+  $extra_jvm_args_override          = lookup('profile_cassandra_pfpt::extra_jvm_args_override', { 'default_value' => {} })
   
   if empty($seeds_hiera) {
     $seeds = [$facts['networking']['ip']]
   } else {
     $seeds = $seeds_hiera
   }
-
-  # Calculate extra JVM args based on GC type and Java version
-  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
-    {
-      'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
-      'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
-      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=75',
-      'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
-      'AggressiveOpts'               => '-XX:+AggressiveOpts',
-    }
-  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
-    {
-      'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
-      'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
-      'SurvivorRatio'               => '-XX:SurvivorRatio=8',
-      'MaxTenuringThreshold'        => '-XX:MaxTenuringThreshold=1',
-      'CMSInitiatingOccupancyFraction' => '-XX:CMSInitiatingOccupancyFraction=75',
-      'UseCMSInitiatingOccupancyOnly' => '-XX:+UseCMSInitiatingOccupancyOnly',
-      'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
-      'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
-    }
-  } else {
-    {}
-  }
-
-  $hiera_jvm_args_hash = lookup('profile_cassandra_pfpt::extra_jvm_args_override', { 'default_value' => {} })
-  $merged_jvm_args_hash = $default_jvm_args_hash + $hiera_jvm_args_hash
-  $extra_jvm_args = $merged_jvm_args_hash.values
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
@@ -180,7 +153,7 @@ class profile_cassandra_pfpt {
     hints_directory                  => $hints_directory,
     max_heap_size                    => $max_heap_size,
     gc_type                          => $gc_type,
-    extra_jvm_args                   => $extra_jvm_args,
+    extra_jvm_args_override          => $extra_jvm_args_override,
     cassandra_password               => $cassandra_password,
     replace_address                  => $replace_address,
     disable_swap                     => $disable_swap,

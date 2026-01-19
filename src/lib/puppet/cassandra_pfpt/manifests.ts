@@ -28,7 +28,7 @@ class cassandra_pfpt (
   String $hints_directory,
   String $max_heap_size,
   String $gc_type,
-  Array[String] $extra_jvm_args,
+  Hash $extra_jvm_args_override,
   String $cassandra_password,
   String $replace_address,
   Boolean $disable_swap,
@@ -121,6 +121,33 @@ class cassandra_pfpt (
   Boolean $coralogix_metrics_enabled,
   Boolean $enable_materialized_views,
 ) {
+
+  # Calculate extra JVM args based on GC type and Java version
+  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
+    {
+      'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
+      'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
+      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=75',
+      'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
+      'AggressiveOpts'               => '-XX:+AggressiveOpts',
+    }
+  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
+    {
+      'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
+      'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
+      'SurvivorRatio'               => '-XX:SurvivorRatio=8',
+      'MaxTenuringThreshold'        => '-XX:MaxTenuringThreshold=1',
+      'CMSInitiatingOccupancyFraction' => '-XX:CMSInitiatingOccupancyFraction=75',
+      'UseCMSInitiatingOccupancyOnly' => '-XX:+UseCMSInitiatingOccupancyOnly',
+      'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
+      'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
+    }
+  } else {
+    {}
+  }
+
+  $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
+  $extra_jvm_args = $merged_jvm_args_hash.values
 
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
@@ -555,3 +582,4 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
