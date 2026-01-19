@@ -1,5 +1,4 @@
 
-
 export const templates = {
       'cassandra.yaml.erb': `
 cluster_name: '<%= @cluster_name %>'
@@ -216,7 +215,7 @@ rack=<%= @rack %>
 <% end -%>
 
 # GC logging
-<% if @java_version.to_i >= 11 %>
+<% if Integer(@java_version) >= 11 %>
 -Xlog:gc*:/var/log/cassandra/gc.log:time,uptime,pid,tid,level,tags:filecount=10,filesize=100M
 <% else %>
 -Xloggc:/var/log/cassandra/gc.log
@@ -245,6 +244,11 @@ rack=<%= @rack %>
 -Dcom.sun.management.jmxremote.rmi.port=7199
 -Dcom.sun.management.jmxremote.ssl=false
 -Dcom.sun.management.jmxremote.authenticate=false
+<% end %>
+
+# JMX Exporter Agent
+<% if @manage_jmx_exporter %>
+-javaagent:<%= @jmx_exporter_jar_target %>=<%= @jmx_exporter_port %>:<%= @jmx_exporter_config_target %>
 <% end %>
 
 # Other common options
@@ -328,6 +332,37 @@ metrics:
     #   - "org.apache.cassandra.metrics:type=Storage,name=Load"
 <% end %>
 `.trim(),
+    'cassandra-backup.service.erb': `
+# /etc/systemd/system/cassandra-backup.service
+# Managed by Puppet
+
+[Unit]
+Description=Cassandra Node Backup Service
+Wants=cassandra.service
+After=cassandra.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=<%= @backup_script_path %> <%= @backup_s3_bucket %>
+`.trim(),
+    'cassandra-backup.timer.erb': `
+# /etc/systemd/system/cassandra-backup.timer
+# Managed by Puppet
+
+[Unit]
+Description=Timer to schedule Cassandra node backups
+
+[Timer]
+OnCalendar=<%= @backup_schedule %>
+Persistent=true
+Unit=cassandra-backup.service
+
+[Install]
+WantedBy=timers.target
+`.trim()
     };
+
 
 

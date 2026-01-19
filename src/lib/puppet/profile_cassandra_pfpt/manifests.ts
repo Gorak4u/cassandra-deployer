@@ -117,6 +117,7 @@ class profile_cassandra_pfpt {
   $file_cache_size_in_mb            = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
   $enable_materialized_views        = lookup('profile_cassandra_pfpt::enable_materialized_views', { 'default_value' => false })
   $jvm_overrides_from_hiera         = lookup('profile_cassandra_pfpt::extra_jvm_args_override', { 'default_value' => {} })
+  $cassandra_roles                  = lookup('profile_cassandra_pfpt::cassandra_roles', { 'default_value' => {} })
   # Coralogix Settings
   $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
   $coralogix_api_key                = lookup('profile_cassandra_pfpt::coralogix_api_key', { 'default_value' => '' })
@@ -125,6 +126,19 @@ class profile_cassandra_pfpt {
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
   $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
   $system_keyspaces_replication     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { 'default_value' => {} })
+  # JMX Exporter Settings
+  $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
+  $jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
+  $jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-\${jmx_exporter_version}.jar" })
+  $jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-\${jmx_exporter_version}.jar" })
+  $jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
+  $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
+  $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
+  # DIY Backup Settings
+  $manage_backups                   = lookup('profile_cassandra_pfpt::manage_backups', { 'default_value' => false })
+  $backup_schedule                  = lookup('profile_cassandra_pfpt::backup_schedule', { 'default_value' => 'daily' })
+  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
+  $backup_script_path               = lookup('profile_cassandra_pfpt::backup_script_path', { 'default_value' => '/usr/local/bin/backup-to-s3.sh' })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -245,6 +259,18 @@ class profile_cassandra_pfpt {
     coralogix_metrics_enabled        => $coralogix_metrics_enabled,
     coralogix_baseurl                => $coralogix_baseurl,
     system_keyspaces_replication     => $system_keyspaces_replication,
+    cassandra_roles                  => $cassandra_roles,
+    manage_jmx_exporter              => $manage_jmx_exporter,
+    jmx_exporter_version             => $jmx_exporter_version,
+    jmx_exporter_jar_source          => $jmx_exporter_jar_source,
+    jmx_exporter_jar_target          => $jmx_exporter_jar_target,
+    jmx_exporter_config_source       => $jmx_exporter_config_source,
+    jmx_exporter_config_target       => $jmx_exporter_config_target,
+    jmx_exporter_port                => $jmx_exporter_port,
+    manage_backups                   => $manage_backups,
+    backup_schedule                  => $backup_schedule,
+    backup_s3_bucket                 => $backup_s3_bucket,
+    backup_script_path               => $backup_script_path,
   }
 }
         `.trim(),
@@ -254,6 +280,8 @@ class profile_cassandra_pfpt {
     
 
     
+
+
 
 
 
