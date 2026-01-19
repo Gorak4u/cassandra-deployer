@@ -219,10 +219,10 @@ profile_cassandra_pfpt::incremental_backup_schedule:
 
 ### Restoring from a Backup
 
-A `restore-from-s3.sh` script is placed in `/usr/local/bin` on each node to perform restores. This script supports three primary modes. Before performing any action, the script will display the `backup_manifest.json` from the archive and require operator confirmation, which is a critical safety check.
+A `restore-from-s3.sh` script is placed in `/usr/local/bin` on each node to perform restores. This script supports three primary modes. Before taking any action, the script will first download and display the `backup_manifest.json` from the archive and require operator confirmation. This is a critical safety check to ensure you are restoring the correct data.
 
 #### Mode 1: Full Node Restore (Destructive)
-This mode is for recovering a completely failed node. It is a **destructive** operation.
+This mode is for recovering a completely failed node or for disaster recovery. It is a **destructive** operation.
 
 **WARNING:** Running a full restore will **WIPE ALL CASSANDRA DATA** on the target node before restoring the backup.
 
@@ -233,9 +233,10 @@ This mode is for recovering a completely failed node. It is a **destructive** op
     \`\`\`bash
     sudo /usr/local/bin/restore-from-s3.sh <backup_identifier>
     \`\`\`
+The script is intelligent: if it detects that the backup is from a different node (based on IP address), it will automatically configure the node to replace the old one, correctly assuming its identity and token ranges in the cluster.
 
 #### Mode 2: Granular Restore (Keyspace or Table)
-This mode is for recovering a specific table or an entire keyspace from a backup without affecting the rest of the cluster. It is a **non-destructive** operation that uses Cassandra's `sstableloader` tool to stream the backed-up data into the live cluster without downtime or affecting other data.
+This mode is for recovering a specific table or an entire keyspace from a backup without affecting the rest of the cluster. It is a **non-destructive** operation that uses Cassandra's `sstableloader` tool to stream the backed-up data into the live cluster without downtime.
 
 **Prerequisite:** The keyspace and table schema must already exist in the cluster before you can load data into it.
 
@@ -299,19 +300,20 @@ Now you will restore the data to each node individually. This should be done in 
 
 1.  For **each node** in your new cluster, SSH into it.
 2.  Identify the S3 backup that corresponds to this specific node. For example, if you are on `new-cassandra-1`, you need the backup taken from `old-cassandra-1`. The restore script automatically uses the node's hostname to find the correct backup path in S3.
-3.  Run the restore script in **full restore mode**.
+3.  Run the restore script in **full restore mode**. The script is intelligent and will automatically handle the node replacement process.
     \`\`\`bash
     # On new-cassandra-1, run:
     sudo /usr/local/bin/restore-from-s3.sh full_snapshot_20231027120000
-
+    
     # On new-cassandra-2, run:
     sudo /usr/local/bin/restore-from-s3.sh full_snapshot_20231027120000
     
     # ...and so on for all nodes.
     \`\`\`
 4.  The script will ask for confirmation before it wipes the (currently empty) data directories. Type `yes` to proceed.
-5.  The script will stop Cassandra, download and extract the data, and restart the service. The node will then boot up and rejoin the cluster with its restored data.
-6.  Move on to the next node and repeat the process.
+5.  Because the script detects it's a disaster recovery scenario (the new node's IP doesn't match the old node's IP from the backup manifest), it will automatically add the `-Dcassandra.replace_address_first_boot` flag to the Cassandra configuration before starting the service.
+6.  When Cassandra starts, it will use this flag to assume the identity and token ranges of the old node, correctly loading the restored data. After a successful start, the script removes the flag.
+7.  Move on to the next node and repeat the process.
 
 Once all nodes have been restored, your cluster is fully recovered.
 
@@ -323,3 +325,4 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
+
