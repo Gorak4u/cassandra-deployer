@@ -9,7 +9,7 @@ class profile_cassandra_pfpt {
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'pfpt-cassandra-cluster' })
-  $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
+  $seeds_hiera                      = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [] })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
@@ -114,41 +114,46 @@ class profile_cassandra_pfpt {
   $index_summary_capacity_in_mb     = lookup('profile_cassandra_pfpt::index_summary_capacity_in_mb', { 'default_value' => undef })
   $file_cache_size_in_mb            = lookup('profile_cassandra_pfpt::file_cache_size_in_mb', { 'default_value' => undef })
   $enable_materialized_views        = lookup('profile_cassandra_pfpt::enable_materialized_views', { 'default_value' => false })
-
   # Coralogix Settings
   $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
   $coralogix_api_key                = lookup('profile_cassandra_pfpt::coralogix_api_key', { 'default_value' => '' })
   $coralogix_region                 = lookup('profile_cassandra_pfpt::coralogix_region', { 'default_value' => 'US' })
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
-
-  # Calculate extra JVM args based on GC type and Java version
-  $default_extra_jvm_args = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
-    [
-      '-XX:G1HeapRegionSize=16M',
-      '-XX:MaxGCPauseMillis=500',
-      '-XX:InitiatingHeapOccupancyPercent=75',
-      '-XX:+ParallelRefProcEnabled',
-      '-XX:+AggressiveOpts',
-    ]
-  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
-    [
-      '-XX:+UseConcMarkSweepGC',
-      '-XX:+CMSParallelRemarkEnabled',
-      '-XX:SurvivorRatio=8',
-      '-XX:MaxTenuringThreshold=1',
-      '-XX:CMSInitiatingOccupancyFraction=75',
-      '-XX:+UseCMSInitiatingOccupancyOnly',
-      '-XX:+CMSClassUnloadingEnabled',
-      '-XX:+AlwaysPreTouch',
-    ]
+  
+  if empty($seeds_hiera) {
+    $seeds = [$facts['networking']['ip']]
   } else {
-    []
+    $seeds = $seeds_hiera
   }
 
-  $extra_jvm_args = lookup('profile_cassandra_pfpt::extra_jvm_args', {
-    'default_value' => $default_extra_jvm_args
-  })
+  # Calculate extra JVM args based on GC type and Java version
+  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
+    {
+      'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
+      'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
+      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=75',
+      'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
+      'AggressiveOpts'               => '-XX:+AggressiveOpts',
+    }
+  } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
+    {
+      'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
+      'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
+      'SurvivorRatio'               => '-XX:SurvivorRatio=8',
+      'MaxTenuringThreshold'        => '-XX:MaxTenuringThreshold=1',
+      'CMSInitiatingOccupancyFraction' => '-XX:CMSInitiatingOccupancyFraction=75',
+      'UseCMSInitiatingOccupancyOnly' => '-XX:+UseCMSInitiatingOccupancyOnly',
+      'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
+      'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
+    }
+  } else {
+    {}
+  }
+
+  $hiera_jvm_args_hash = lookup('profile_cassandra_pfpt::extra_jvm_args_override', { 'default_value' => {} })
+  $merged_jvm_args_hash = $default_jvm_args_hash + $hiera_jvm_args_hash
+  $extra_jvm_args = $merged_jvm_args_hash.values
 
   class { 'cassandra_pfpt':
     cassandra_version                => $cassandra_version,
@@ -207,7 +212,7 @@ class profile_cassandra_pfpt {
     concurrent_compactors            => $concurrent_compactors,
     compaction_throughput_mb_per_sec => $compaction_throughput_mb_per_sec,
     tombstone_warn_threshold         => $tombstone_warn_threshold,
-tombstone_failure_threshold      => $tombstone_failure_threshold,
+    tombstone_failure_threshold      => $tombstone_failure_threshold,
     change_password_cql              => $change_password_cql,
     cqlsh_path_env                   => $cqlsh_path_env,
     dynamic_snitch                   => $dynamic_snitch,
@@ -271,5 +276,7 @@ tombstone_failure_threshold      => $tombstone_failure_threshold,
         `.trim(),
     };
 
+
+    
 
     
