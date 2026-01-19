@@ -8,12 +8,13 @@ export const readme = `
 2.  [Setup](#setup)
 3.  [Usage Examples](#usage-examples)
 4.  [Hiera Parameter Reference](#hiera-parameter-reference)
-5.  [Backup and Restore](#backup-and-restore)
+5.  [Puppet Agent Management](#puppet-agent-management)
+6.  [Backup and Restore](#backup-and-restore)
     1.  [Automated Backups](#automated-backups)
     2.  [Restoring from a Backup](#restoring-from-a-backup)
     3.  [Disaster Recovery: Restoring to a Brand New Cluster (Cold Start)](#disaster-recovery-restoring-to-a-brand-new-cluster-cold-start)
-6.  [Limitations](#limitations)
-7.  [Development](#development)
+7.  [Limitations](#limitations)
+8.  [Development](#development)
 
 ## Description
 
@@ -148,6 +149,14 @@ This section documents every available Hiera key for this profile.
 *   \`profile_cassandra_pfpt::manage_repo\` (Boolean): Whether Puppet should manage the Cassandra YUM repository. Default: \`true\`.
 *   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli']\`.
 
+## Puppet Agent Management
+
+This profile also manages the Puppet agent itself by ensuring a scheduled run is in place via cron.
+
+*   **Scheduled Runs:** By default, the Puppet agent will run twice per hour at a staggered minute (e.g., at 15 and 45 minutes past the hour) to distribute the load on the Puppet primary server.
+*   **Maintenance Window:** The cron job will **not** run if a file exists at \`/var/lib/puppet-disabled\`. Creating this file is the standard way to temporarily disable Puppet runs on a node during maintenance.
+*   **Configuration:** You can override the default schedule by setting the \`profile_cassandra_pfpt::puppet_cron_schedule\` key in Hiera to a standard 5-field cron string.
+
 
 ## Backup and Restore
 
@@ -268,7 +277,7 @@ This mode is the first step for a full cluster disaster recovery. It extracts th
 
 ### Disaster Recovery: Restoring to a Brand New Cluster (Cold Start)
 
-This procedure outlines how to restore a full cluster from S3 backups onto a set of brand-new machines where the old cluster is completely lost. Thanks to the intelligent restore script, this process is now almost fully automated.
+This procedure outlines how to restore a full cluster from S3 backups onto a set of brand-new machines where the old cluster is completely lost. The intelligent restore script automates the most complex parts of this process.
 
 **The Strategy:** The script automatically detects if it's the first node being restored in an empty cluster.
 -   **For the First Node:** It will use the \`initial_token\` property in \`cassandra.yaml\` to force the node to bootstrap with the correct identity and token ranges from the backup.
@@ -292,7 +301,7 @@ The schema (definitions of keyspaces and tables) must be restored first.
     \`\`\`bash
     cqlsh -u cassandra -p 'YourPassword' -f /tmp/schema.cql
     \`\`\`
-5.  Once the schema is applied, **stop the cassandra service** on this coordinator node. The entire new cluster should now be offline, but all nodes will have the correct schema on disk.
+5.  Once the schema is applied, **stop the cassandra service** on this coordinator node. The entire new cluster should now be offline.
 
 #### Step 2: Perform a Rolling Restore of All Nodes
 
@@ -328,6 +337,7 @@ This profile is primarily tested and supported on Red Hat Enterprise Linux and i
 
 This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
 `.trim();
+
 
 
 
