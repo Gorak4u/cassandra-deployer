@@ -240,7 +240,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\d+).*$', '\\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
         descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
         baseurl             => $repo_baseurl,
@@ -345,7 +345,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
     'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
-    'disk-health-check.sh', 'decommission-node.sh' ].each |$script| {
+    'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh' ].each |$script| {
     file { "\${manage_bin_dir}/\${script}":
       ensure  => 'file',
       source  => "puppet:///modules/cassandra_pfpt/scripts/\${script}",
@@ -358,7 +358,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
-      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\s+partition\s+0\s*$"',
+      unless  => '/sbin/swapon -s | /bin/grep -qE "^/[^ ]+\\\\s+partition\\\\s+0\\\\s*$"',
       path    => ['/usr/bin', '/usr/sbin', '/bin', '/sbin'],
     }
     augeas { 'fstab_no_swap':
@@ -596,7 +596,7 @@ class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
     # The system_keyspaces_replication is a hash like {'dc1' => 3, 'dc2' => 3}
     # We need to convert it to a string like "'dc1': '3', 'dc2': '3'"
     $replication_map_parts = $system_keyspaces_replication.map |$dc, $rf| {
-      "'\${dc}': '\${rf}'"
+      "' \${dc}': '\${rf}'"
     }
     $replication_map_string = join($replication_map_parts, ', ')
     $replication_cql_string = "{'class': 'NetworkTopologyStrategy', \${replication_map_string}}"
@@ -769,7 +769,7 @@ class cassandra_pfpt::puppet inherits cassandra_pfpt {
   $cron_minute_2 = $cron_minute_1 + 30
   
   # Default schedule: runs twice an hour, staggered.
-  $default_schedule = "\\\${cron_minute_1},\\\${cron_minute_2} * * * *"
+  $default_schedule = "\${cron_minute_1},\${cron_minute_2} * * * *"
   
   # Use the schedule from the parameter if provided, otherwise use the staggered default.
   $final_schedule = pick($puppet_cron_schedule, $default_schedule)
