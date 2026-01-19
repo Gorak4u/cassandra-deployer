@@ -122,13 +122,14 @@ class cassandra_pfpt (
   Boolean $enable_materialized_views,
 ) {
 
+  # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
   $seeds = if empty($seeds_list) {
     [$facts['networking']['ip']]
   } else {
     $seeds_list
   }
 
-  # Calculate extra JVM args based on GC type and Java version
+  # Calculate default JVM args based on GC type and Java version
   $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
     {
       'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
@@ -152,6 +153,7 @@ class cassandra_pfpt (
     {}
   }
 
+  # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
 
@@ -588,5 +590,6 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
+
 
 
