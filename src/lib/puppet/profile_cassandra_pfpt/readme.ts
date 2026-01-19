@@ -157,9 +157,20 @@ This section documents every available Hiera key for this profile.
 *   \`profile_cassandra_pfpt::backup_schedule\` (String): The \`systemd\` OnCalendar schedule for backups. Default: \`'daily'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
 
-#### Managing Incremental Backups
+### Incremental Backups
+*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): Set to \`true\` to enable Cassandra's built-in incremental backup feature.
 
-*   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): If set to \`true\`, enables Cassandra's native incremental backup feature. When enabled, Cassandra creates a hard link to every new SSTable (data file) in a \`backups\` subdirectory within each table's data directory. This provides a continuous record of data changes between full snapshots. Default: \`false\`.
+#### How Incremental Backups Work
+When you set \`profile_cassandra_pfpt::incremental_backups\` to \`true\`, you enable a powerful, low-overhead feature inside Cassandra. Here’s a breakdown of the process:
+
+1.  **The Trigger:** Every time Cassandra writes data from memory (a Memtable) to a permanent file on disk (an SSTable), this feature is triggered.
+2.  **The Mechanism (Hard Links):** Instead of copying the new SSTable, Cassandra creates a **hard link** to it. A hard link is a filesystem entry that points to the exact same data on the disk. This is extremely fast and consumes no extra disk space initially.
+3.  **The Location:** These hard links are placed in a specific \`backups\` subdirectory inside each table's data directory. The exact path follows this structure:
+
+    \`/path/to/data/<keyspace_name>/<table_name>-<uuid>/backups/\`
+
+    For example, you would find them here:
+    \`/var/lib/cassandra/data/my_app/users-a1b2c3d4.../backups/\`
 
 **Strategy for Incremental Backups:**
 
