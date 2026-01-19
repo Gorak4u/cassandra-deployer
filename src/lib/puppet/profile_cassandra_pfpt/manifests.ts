@@ -9,7 +9,6 @@ class profile_cassandra_pfpt {
   $cassandra_version                = lookup('profile_cassandra_pfpt::cassandra_version', { 'default_value' => '4.1.10-1' })
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
-  $use_java11                       = lookup('profile_cassandra_pfpt::use_java11', { 'default_value' => true })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'pfpt-cassandra-cluster' })
   $seeds                            = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [$facts['networking']['ip']] })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
@@ -186,7 +185,6 @@ class profile_cassandra_pfpt {
     jamm_source                      => $jamm_source,
     jamm_target                      => $jamm_target,
     enable_range_repair              => $enable_range_repair,
-    use_java11                       => $use_java11,
     use_shenandoah_gc                => $use_shenandoah_gc,
     racks                            => $racks,
     ssl_enabled                      => $ssl_enabled,
@@ -272,7 +270,3 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
-
-
-
-

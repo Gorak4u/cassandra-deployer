@@ -1,5 +1,4 @@
 
-
 export const manifests = {
       'init.pp': `
 # @summary Main component class for managing Cassandra.
@@ -39,7 +38,6 @@ class cassandra_pfpt (
   String $jamm_source,
   String $jamm_target,
   Boolean $enable_range_repair,
-  Boolean $use_java11,
   Boolean $use_shenandoah_gc,
   Hash $racks,
   Boolean $ssl_enabled,
@@ -557,9 +555,3 @@ class cassandra_pfpt::coralogix inherits cassandra_pfpt {
 }
     `.trim()
     };
-
-
-
-
-
-
