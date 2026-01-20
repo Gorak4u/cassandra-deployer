@@ -18,8 +18,6 @@
     2.  [Full Cluster Restore (Cold Start)](#full-cluster-restore-cold-start)
 8.  [Hiera Parameter Reference](#hiera-parameter-reference)
 9.  [Puppet Agent Management](#puppet-agent-management)
-10. [Limitations](#limitations)
-11. [Development](#development)
 
 ## Description
 
@@ -113,7 +111,7 @@ This profile installs a suite of robust management scripts in `/usr/local/bin` o
 | `rebuild-node.sh`              | Rebuilds the data on a node by streaming from another data center. Used for adding a node to a new DC.       |
 | `range-repair.sh`              | **(Primary Repair Tool)** Initiates a safe, granular, low-impact repair of the node's data.                  |
 | `compaction-manager.sh`        | Safely runs `nodetool compact` while monitoring disk space to prevent failures.                               |
-| `garbage-collect.sh`           | Safely runs `nodetool garbagecollect` with pre-flight disk space checks.                                      |
+| `garbage-collect.sh`           | Safely runs `nodetool garbagecollect` with pre-flight safety checks.                                      |
 | `cleanup-node.sh`              | Safely runs `nodetool cleanup` after a new node is added to the cluster.                                    |
 | `upgrade-sstables.sh`          | Safely runs `nodetool upgradesstables` after a major Cassandra version upgrade.                               |
 | `robust_backup.sh`             | Creates a verified, ad-hoc local snapshot for testing or manual backup purposes.                            |
@@ -390,11 +388,3 @@ The base `cassandra_pfpt` component module includes logic to manage the Puppet a
 *   **Scheduled Runs:** By default, the Puppet agent will run twice per hour at a staggered minute.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.
-
-## Limitations
-
-This profile is primarily tested and supported on Red Hat Enterprise Linux and its derivatives (like CentOS, Rocky Linux). Support for other operating systems may require adjustments.
-
-## Development
-
-This module is generated and managed by Firebase Studio. Direct pull requests are not the intended workflow.
