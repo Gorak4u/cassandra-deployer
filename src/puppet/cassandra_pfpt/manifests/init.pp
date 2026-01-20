@@ -141,7 +141,7 @@ class cassandra_pfpt (
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
-  Sensitive[String] $backup_encryption_key = undef,
+  Sensitive[String] $backup_encryption_key,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
