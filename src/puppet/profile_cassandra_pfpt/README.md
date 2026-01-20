@@ -81,19 +81,28 @@ profile_cassandra_pfpt::repair_schedule: '*-*-1/5 01:00:00' # Every 5 days
 
 ### Managing Cassandra Roles
 
-You can declaratively manage Cassandra user roles.
+You can declaratively manage Cassandra user roles. For production environments, it is highly recommended to encrypt passwords using [Hiera-eyaml](https://github.com/voxpupuli/hiera-eyaml). The profile supports this automatically, as Puppet will decrypt the secrets before passing them to the module.
+
+Here is an example showing both a plain-text password and an encrypted one:
 
 ```yaml
 profile_cassandra_pfpt::cassandra_roles:
+  # Example with a plain-text password (suitable for development)
   'readonly_user':
     password: 'SafePassword123'
     is_superuser: false
     can_login: true
+
+  # Example with a securely encrypted password using eyaml (for production)
   'app_admin':
-    password: 'AnotherSafePassword456'
+    password: >
+      ENC[PKCS7,MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAq3s4/L5W
+      ... (rest of your encrypted string) ...
+      9y9gBFdCIg4a5A==]
     is_superuser: true
     can_login: true
 ```
+The Puppet master, configured with your eyaml keys, will automatically decrypt the `ENC[...]` block. The module code itself never sees the encrypted value, only the final decrypted password.
 
 ## Operator's Quick Reference: Management Scripts
 
