@@ -88,16 +88,25 @@ do_schema_restore() {
 # --- Function for Full Node Restore ---
 do_full_restore() {
     local MANIFEST_JSON="$1"
-    log_message "--- Starting FULL DESTRUCTIVE Node Restore for Backup ID: $BACKUP_ID ---"
+    local CASSANDRA_YAML_FILE="/etc/cassandra/conf/cassandra.yaml"
+    local JVM_OPTIONS_FILE="/etc/cassandra/conf/jvm-server.options"
 
-    log_message "This is a DESTRUCTIVE operation. It will:"
+    # This trap ensures that temporary restore flags are *always* removed on exit.
+    cleanup_restore_configs() {
+        log_message "INFO: Cleaning up temporary restore configurations from YAML and JVM options..."
+        sed -i '/^num_tokens:/d' "$CASSANDRA_YAML_FILE"
+        sed -i '/^initial_token:/d' "$CASSANDRA_YAML_FILE"
+        sed -i '/cassandra.replace_address_first_boot/d' "$JVM_OPTIONS_FILE"
+    }
+    trap cleanup_restore_configs EXIT
+
+    log_message "--- Starting FULL DESTRUCTIVE Node Restore for Backup ID: $BACKUP_ID ---"
+    log_message "WARNING: This is a DESTRUCTIVE operation. It will:"
     log_message "1. STOP the Cassandra service."
-    log_message "2. CHECK for sufficient disk space."
-    log_message "3. DELETE all existing data, commitlogs, and caches."
-    log_message "4. DOWNLOAD and extract backup from S3."
-    log_message "5. CONFIGURE node for startup (cold start or replacement)."
-    log_message "6. RESTART the Cassandra service."
-    read -p "Are you absolutely sure you want to continue with a full restore? Type 'yes': " confirmation
+    log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
+    log_message "3. RESTORE data from the backup."
+    log_message "4. RESTART the service, potentially joining a cluster or starting as a first node."
+    read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
     if [[ "$confirmation" != "yes" ]]; then
         log_message "Restore aborted by user."
         exit 0
@@ -108,7 +117,7 @@ do_full_restore() {
 
     log_message "2. Performing pre-restore disk space check..."
     if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -c 20; then
-        exit_code=$?
+        exit_code=${?}
         if [ $exit_code -eq 2 ]; then
             log_message "ERROR: CRITICAL lack of disk space. Restore cannot proceed."
             log_message "Please free up space on the data volume and try again."
@@ -140,24 +149,26 @@ do_full_restore() {
     # CRITICAL STEP: Determine restore strategy (Initial Seed vs. Replace)
     local ORIGINAL_IP
     ORIGINAL_IP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.ip_address')
-    local IS_FIRST_NODE=true
+    local IS_FIRST_NODE=
     local NODETOOL_HOSTS
     NODETOOL_HOSTS=$(echo "$LOADER_NODES" | sed 's/,/ -h /g')
 
     log_message "Determining restore strategy by checking seed nodes: $LOADER_NODES"
-    # Use nodetool on a list of seeds. If any seed is reachable, we are not the first node.
     if nodetool -h $NODETOOL_HOSTS status &>/dev/null; then
         IS_FIRST_NODE=false
         log_message "SUCCESS: Connected to live seed node. This node will join an existing cluster."
     else
-        log_message "INFO: Could not connect to any live seed nodes. Assuming this is the FIRST NODE in a cold-start DR."
+        log_message "WARNING: Could not connect to any live seed nodes."
+        log_message "This could be due to a network issue, or because this is the first node in a Disaster Recovery scenario."
+        read -p "Do you want to proceed in 'FIRST NODE' mode (using initial_token)? Type 'yes' to confirm: " dr_confirmation
+        if [[ "$dr_confirmation" != "yes" ]]; then
+            log_message "Restore aborted by user. Please resolve seed node connectivity and re-run."
+            exit 1
+        fi
+        IS_FIRST_NODE=true
     fi
-
-    local JVM_OPTIONS_FILE="/etc/cassandra/conf/jvm-server.options"
-    local CASSANDRA_YAML_FILE="/etc/cassandra/conf/cassandra.yaml"
     
     if [ "$IS_FIRST_NODE" = true ]; then
-        # FIRST NODE STRATEGY: Use initial_token in cassandra.yaml
         log_message "Applying FIRST NODE strategy: Writing initial_token to cassandra.yaml"
         local TOKENS_FROM_BACKUP
         TOKENS_FROM_BACKUP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.tokens | join(",")')
@@ -169,26 +180,15 @@ do_full_restore() {
             exit 1
         fi
 
-        # Remove old token settings for idempotency
-        sed -i '/^num_tokens:/d' "$CASSANDRA_YAML_FILE"
-        sed -i '/^initial_token:/d' "$CASSANDRA_YAML_FILE"
-
-        # Add new token settings
         echo "num_tokens: $NUM_TOKENS" >> "$CASSANDRA_YAML_FILE"
         echo "initial_token: '$TOKENS_FROM_BACKUP'" >> "$CASSANDRA_YAML_FILE"
         log_message "Successfully configured num_tokens and initial_token."
 
     else
-        # SUBSEQUENT NODE STRATEGY: Use replace_address
         log_message "Applying SUBSEQUENT NODE strategy: Setting cassandra.replace_address_first_boot"
         if [ "$ORIGINAL_IP" == "$LISTEN_ADDRESS" ]; then
             log_message "INFO: Restoring to the same IP. No replacement necessary, but using this path for consistency."
         fi
-        
-        # Clean up any previous replacement flags
-        sed -i '/cassandra.replace_address_first_boot/d' "$JVM_OPTIONS_FILE"
-
-        # Add the new flag
         echo "-Dcassandra.replace_address_first_boot=$ORIGINAL_IP" >> "$JVM_OPTIONS_FILE"
         log_message "Successfully configured JVM for node replacement."
     fi
@@ -203,7 +203,6 @@ do_full_restore() {
     systemctl start cassandra
     log_message "Service started. Waiting for node to initialize..."
 
-    # Wait for the node to come up before cleaning up the flag
     local CASSANDRA_READY=false
     for i in {1..30}; do # Wait up to 5 minutes (30 * 10 seconds)
         if nodetool status > /dev/null 2>&1; then
@@ -214,23 +213,15 @@ do_full_restore() {
         sleep 10
     done
 
+    # The trap will clean up configs automatically. We just need to report the final status.
     if [ "$CASSANDRA_READY" = true ]; then
         log_message "SUCCESS: Cassandra node is up and running."
-        # Clean up the temporary config so it doesn't get used on the next restart
-        if [ "$IS_FIRST_NODE" = true ]; then
-            log_message "Cleaning up initial_token from cassandra.yaml"
-            sed -i '/^num_tokens:/d' "$CASSANDRA_YAML_FILE"
-            sed -i '/^initial_token:/d' "$CASSANDRA_YAML_FILE"
-        else
-            log_message "Cleaning up replace_address_first_boot flag from JVM options."
-            sed -i '/cassandra.replace_address_first_boot/d' "$JVM_OPTIONS_FILE"
-        fi
+        log_message "--- Full Restore Process Finished Successfully ---"
     else
         log_message "ERROR: Cassandra node failed to start within 5 minutes. Please check system logs for errors."
+        log_message "Temporary restore flags have been automatically cleaned up."
         exit 1
     fi
-    
-    log_message "--- Full Restore Process Finished Successfully ---"
 }
 
 # --- Function for Granular Restore using sstableloader ---
@@ -253,7 +244,7 @@ do_granular_restore() {
     
     log_message "Performing pre-restore disk space check for temporary directory /tmp..."
     if ! /usr/local/bin/disk-health-check.sh -p /tmp -c 15; then
-        exit_code=$?
+        exit_code=${?}
         if [ $exit_code -eq 2 ]; then
             log_message "ERROR: CRITICAL lack of disk space in /tmp. Restore cannot proceed."
             log_message "Please free up space in /tmp and try again."
