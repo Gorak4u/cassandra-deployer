@@ -1,0 +1,29 @@
+{
+  "name": "pfpt-profile_cassandra_pfpt",
+  "version": "0.1.0",
+  "author": "pfpt",
+  "summary": "Profile module for configuring a Cassandra node.",
+  "license": "Apache-2.0",
+  "source": "",
+  "project_page": "",
+  "issues_url": "",
+  "dependencies": [
+    { "name": "pfpt-cassandra_pfpt", "version_requirement": ">= 0.1.0" }
+  ],
+  "operatingsystem_support": [
+    {
+      "operatingsystem": "RedHat",
+      "operatingsystemrelease": ["7", "8"]
+    },
+    {
+      "operatingsystem": "CentOS",
+      "operatingsystemrelease": ["7", "8"]
+    }
+  ],
+  "requirements": [
+    {
+      "name": "puppet",
+      "version_requirement": ">= 5.0.0 < 8.0.0"
+    }
+  ]
+}
