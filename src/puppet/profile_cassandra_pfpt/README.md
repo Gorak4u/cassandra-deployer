@@ -20,18 +20,34 @@ To configure your Cassandra node, you would define values in your Hiera YAML fil
 profile_cassandra_pfpt::cluster_name: 'My-Production-Cluster'
 profile_cassandra_pfpt::datacenter: 'dc1'
 profile_cassandra_pfpt::rack: 'rack1'
+
+# --- Seed Node Configuration ---
+# Define the seed nodes for the cluster
 profile_cassandra_pfpt::seeds:
   - '10.0.1.10'
   - '10.0.1.11'
   - '10.0.1.12'
 
+# --- JVM Settings ---
+# Common JVM memory settings
 profile_cassandra_pfpt::max_heap_size: '8G'
-profile_cassandra_pfpt::gc_type: 'G1GC'
+profile_cassandra_pfpt::gc_type: 'G1GC' # G1GC is recommended for C* 4.x
 
-# Enable backups to S3
+# Add any additional JVM options as a hash
+profile_cassandra_pfpt::jvm_additional_opts:
+  'cassandra.skip_wait_for_gossip_to_settle': '-1'
+  'some.other.java.property': 'value'
+
+# --- Backup Management ---
+# Enable full backups to S3
 profile_cassandra_pfpt::manage_full_backups: true
 profile_cassandra_pfpt::backup_s3_bucket: 'my-cassandra-backups-bucket'
+profile_cassandra_pfpt::backup_upload_streaming: true # Use streaming to save disk space
 
+# Enable incremental backups (runs more frequently)
+profile_cassandra_pfpt::manage_incremental_backups: true
+
+# --- System & Monitoring ---
 # Example of overriding sysctl settings
 profile_cassandra_pfpt::sysctl_settings:
   vm.max_map_count: 1048576
