@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # --- Configuration from JSON file ---
-CONFIG_FILE="/etc/backup/config.json"
+CONFIG_FILE="/etc/backup/backup_config.json"
 
 # --- Logging ---
 # This function will be defined after LOG_FILE is sourced from config
