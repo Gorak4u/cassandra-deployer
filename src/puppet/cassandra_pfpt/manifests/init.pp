@@ -130,7 +130,6 @@ class cassandra_pfpt (
   String $full_backup_schedule = 'daily',
   Variant[String, Array[String]] $incremental_backup_schedule = '0 */4 * * *',
   String $backup_s3_bucket = 'your-s3-backup-bucket',
-  Sensitive[String] $backup_encryption_key = undef,
   String $full_backup_script_path = '/usr/local/bin/full-backup-to-s3.sh',
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
   String $full_backup_log_file = '/var/log/cassandra/full_backup.log',
@@ -142,6 +141,7 @@ class cassandra_pfpt (
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
+  Sensitive[String] $backup_encryption_key = undef,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -201,25 +201,7 @@ class cassandra_pfpt (
     Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
   }
   if $manage_full_backups or $manage_incremental_backups {
-    class { 'cassandra_pfpt::backup':
-      s3_bucket_name               => $backup_s3_bucket,
-      cassandra_data_dir           => $data_dir,
-      commitlog_dir                => $commitlog_dir,
-      saved_caches_dir             => $saved_caches_dir,
-      full_backup_log_file         => $full_backup_log_file,
-      incremental_backup_log_file  => $incremental_backup_log_file,
-      listen_address               => $listen_address,
-      seeds_list                   => $seeds,
-      encryption_key               => $backup_encryption_key,
-      manage_full_backups          => $manage_full_backups,
-      full_backup_schedule         => $full_backup_schedule,
-      full_backup_script_path      => $full_backup_script_path,
-      manage_incremental_backups   => $manage_incremental_backups,
-      incremental_backup_schedule  => $incremental_backup_schedule,
-      incremental_backup_script_path => $incremental_backup_script_path,
-      backup_backend               => $backup_backend,
-      clearsnapshot_keep_days      => $clearsnapshot_keep_days,
-    }
+    contain cassandra_pfpt::backup
   }
   if $manage_scheduled_repair {
     contain cassandra_pfpt::repair

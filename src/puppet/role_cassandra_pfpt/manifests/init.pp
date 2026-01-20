@@ -1,5 +1,4 @@
-# @summary Role for a Cassandra node.
-# This class simply includes the profile, defining the node's function.
+# @summary A role class that defines a complete Cassandra server.
 class role_cassandra_pfpt {
   include profile_cassandra_pfpt
 }
