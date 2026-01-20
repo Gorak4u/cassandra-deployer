@@ -769,7 +769,7 @@ CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
 if [ -n "\$KEYSPACES" ]; then
     log_message "Targeting keyspaces: \$KEYSPACES"
     # Convert comma-separated to space-separated
-    CMD+=" -- \${KEYSPACES//,/' '}"
+    CMD+=" -- $(echo \$KEYSPACES | sed 's/,/ /g')"
 fi
 
 log_message "Executing: \$CMD"
@@ -804,7 +804,7 @@ CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
 if [ -n "\$KEYSPACES" ]; then
     log_message "Targeting keyspaces: \$KEYSPACES"
     # Convert comma-separated to space-separated for the command
-    CMD+=" -- \${KEYSPACES//,/' '}"
+    CMD+=" -- $(echo \$KEYSPACES | sed 's/,/ /g')"
 fi
 
 # 1. Take snapshot
@@ -838,3 +838,5 @@ log_message "To clear this snapshot, run: nodetool clearsnapshot -t \$SNAPSHOT_T
 exit 0
 `,
     };
+
+    

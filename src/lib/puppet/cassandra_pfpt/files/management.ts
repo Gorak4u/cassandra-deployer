@@ -1,6 +1,7 @@
 
 export const managementScripts = {
-      'drain-node.sh': '#!/bin/bash\\nnodetool drain',
+      'drain-node.sh': `#!/bin/bash
+nodetool drain`,
       'decommission-node.sh': `#!/bin/bash
 # Securely decommissions a Cassandra node from the cluster.
 
@@ -202,3 +203,5 @@ else
 fi
 `,
 };
+
+    

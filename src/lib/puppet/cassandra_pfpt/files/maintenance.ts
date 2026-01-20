@@ -66,7 +66,8 @@ else
     exit 0
 fi
 `,
-      'repair-node.sh': '#!/bin/bash\\nnodetool repair -pr',
+      'repair-node.sh': `#!/bin/bash
+nodetool repair -pr`,
       'cleanup-node.sh': `#!/bin/bash
 set -euo pipefail
 
@@ -588,3 +589,5 @@ else
 fi
 `,
 };
+
+    

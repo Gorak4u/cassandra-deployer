@@ -1,6 +1,7 @@
 
 export const healthScripts = {
-      'cluster-health.sh': '#!/bin/bash\\nnodetool status',
+      'cluster-health.sh': `#!/bin/bash
+nodetool status`,
       'disk-health-check.sh': `#!/bin/bash
 
 set -euo pipefail
@@ -205,3 +206,5 @@ else
 fi
 `,
 };
+
+    
