@@ -7,23 +7,23 @@ IP_ADDRESS="\${1:-$(hostname -I | awk '{print $1}')}" # Use provided IP or defau
 CQLSH_CONFIG="/root/.cassandra/cqlshrc"
 
 log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
 # 1. Check nodetool status for 'UN' (Up, Normal)
 log_message "Checking nodetool status..."
 NODETOOL_STATUS=$(nodetool status 2>&1)
-if echo "\$NODETOOL_STATUS" | grep -q 'UN'; then
+if echo "$NODETOOL_STATUS" | grep -q 'UN'; then
   log_message "Nodetool status: OK - At least one Up/Normal node found."
 else
   log_message "Nodetool status: WARNING - No Up/Normal nodes found or nodetool failed."
-  echo "\$NODETOOL_STATUS"
+  echo "$NODETOOL_STATUS"
   # return 1 # Don't exit here, might be starting up
 fi
 
 # 2. Check cqlsh connectivity
-log_message "Checking cqlsh connectivity using \$CQLSH_CONFIG..."
-if cqlsh --cqlshrc "\$CQLSH_CONFIG" "\${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
+log_message "Checking cqlsh connectivity using $CQLSH_CONFIG..."
+if cqlsh --cqlshrc "$CQLSH_CONFIG" "\${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
   log_message "Cqlsh connectivity: OK"
 else
   log_message "Cqlsh connectivity: FAILED"
@@ -215,38 +215,57 @@ fi
 log_message "--- Node Health Check Completed ---"
 `,
       'version-check.sh': `#!/bin/bash
-set -euo pipefail
+# Description: Audit script to check and print versions of various components.
 
-log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1"
+usage() {
+    echo "Usage: \$(basename "\$0") [-h|--help]"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help    Display this help message"
+    exit 1
 }
 
-log_message "--- Checking Cassandra versions across the cluster ---"
+# Parse command-line arguments
+while [[ "\$#" -gt 0 ]]; do
+    case "\$1" in
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown option: \$1"
+            usage
+            ;;
+    esac
+    shift
+done
 
-# Get versions from nodetool status, ignoring the header, and extract the version column (8th column)
-VERSIONS=$(nodetool status | tail -n +6 | head -n -1 | awk '{print \$8}')
+log_version() {
+    local component_name="\$1"
+    local command_to_run="\$2"
+    local output
 
-if [ -z "\$VERSIONS" ]; then
-    log_message "ERROR: Could not retrieve version information from 'nodetool status'."
-    exit 1
-fi
+    echo "--- Checking \$component_name ---"
+    if command -v \$(echo "\$command_to_run" | awk '{print \$1}') >/dev/null 2>&1; then
+        output=\$(eval "\$command_to_run" 2>&1)
+        if [ \$? -eq 0 ]; then
+            echo "Version:"
+            echo "\$output" | head -n 5 # Limit output to relevant lines
+        else
+            echo "Error running command for \$component_name: \$output"
+        fi
+    else
+        echo "\$component_name command not found: \$(echo "\$command_to_run" | awk '{print \$1}')"
+    fi
+    echo ""
+}
 
-# Count the number of unique versions
-UNIQUE_VERSIONS_COUNT=$(echo "\$VERSIONS" | sort -u | wc -l)
-
-if [ "\$UNIQUE_VERSIONS_COUNT" -eq 1 ]; then
-    UNIQUE_VERSION=$(echo "\$VERSIONS" | sort -u)
-    log_message "OK: All nodes are running the same Cassandra version: \$UNIQUE_VERSION"
-    exit 0
-else
-    log_message "ERROR: Inconsistent Cassandra versions found in the cluster!"
-    log_message "Unique versions found:"
-    echo "\$VERSIONS" | sort | uniq -c
-    exit 1
-fi
+log_version "Operating System" "cat /etc/os-release"
+log_version "Kernel" "uname -r"
+log_version "Puppet" "puppet -V"
+log_version "Java" "java -version"
+log_version "Cassandra (nodetool)" "nodetool version"
+log_version "Python" "python3 --version || python --version"
 `,
 };
-
-    
 
     
