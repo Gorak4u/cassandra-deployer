@@ -21,7 +21,7 @@ class cassandra_pfpt::roles inherits cassandra_pfpt {
         path    => ['/bin', '/usr/bin', $cqlsh_path_env],
         # Only run if the role doesn't exist. This isn't perfect for password updates but prevents rerunning CREATE ROLE.
         # A more robust check might query system_auth.roles.
-        unless  => "cqlsh \\\${cqlsh_ssl_opt} -u cassandra -p '\\\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\\\"\\\\\\"\\\${role_name}\\\\"\\\\";\\" \\\${listen_address}",
+        unless  => "cqlsh \\\${cqlsh_ssl_opt} -u cassandra -p '\\\${cassandra_password}' -e \\"DESCRIBE ROLE \\\\\\"\\\${role_name}\\\\\\";\\" \\\${listen_address}",
         require => [Exec['change_cassandra_password'], File[$cql_file_path]],
       }
     }

@@ -7,7 +7,7 @@ class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
     # The system_keyspaces_replication is a hash like {'dc1' => 3, 'dc2' => 3}
     # We need to convert it to a string like "'dc1': '3', 'dc2': '3'"
     $replication_map_parts = $system_keyspaces_replication.map |$dc, $rf| {
-      "' \\\${dc}': '\\\${rf}'"
+      "'\\\${dc}': '\\\${rf}'"
     }
     $replication_map_string = join($replication_map_parts, ', ')
     $replication_cql_string = "{'class': 'NetworkTopologyStrategy', \\\${replication_map_string}}"
