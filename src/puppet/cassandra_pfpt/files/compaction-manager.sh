@@ -71,6 +71,25 @@ log_message "Disk path to monitor: $DISK_CHECK_PATH"
 log_message "Critical free space threshold: $CRITICAL_THRESHOLD%"
 log_message "Disk check interval: $CHECK_INTERVALs"
 
+# Pre-flight disk space check
+log_message "Performing pre-flight disk space check..."
+if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -c "$CRITICAL_THRESHOLD"; then
+    log_message "ERROR: Pre-flight disk space check failed. Aborting compaction to prevent disk space issues."
+    exit 1
+fi
+log_message "Disk space OK."
+
+# Pre-flight node state check
+log_message "Performing pre-flight node state check..."
+if ! nodetool netstats | grep -q "Mode: NORMAL"; then
+    log_message "ERROR: Node is not in NORMAL mode. It may be streaming, joining, or leaving the cluster."
+    log_message "Aborting compaction. Please wait for the node to become idle."
+    nodetool netstats
+    exit 1
+fi
+log_message "Node state is NORMAL. Proceeding."
+
+
 # Start compaction in the background
 log_message "Starting compaction process..."
 $CMD &

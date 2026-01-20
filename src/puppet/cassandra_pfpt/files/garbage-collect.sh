@@ -95,7 +95,17 @@ if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRE
     log_message "ERROR: Pre-flight disk space check failed. Aborting garbage collection to prevent disk space issues."
     exit 1
 fi
-log_message "Disk space OK. Proceeding with garbage collection."
+log_message "Disk space OK. Proceeding."
+
+# Pre-flight node state check
+log_message "Performing pre-flight node state check..."
+if ! nodetool netstats | grep -q "Mode: NORMAL"; then
+    log_message "ERROR: Node is not in NORMAL mode. It may be streaming, joining, or leaving the cluster."
+    log_message "Aborting garbage collection. Please wait for the node to become idle."
+    nodetool netstats
+    exit 1
+fi
+log_message "Node state is NORMAL. Proceeding."
 
 # Execute the command
 if $CMD; then
