@@ -1,4 +1,10 @@
-# `profile_cassandra_pfpt` - A Complete Cassandra Operations Profile
+# `profile_cassandra_pfpt`: A Complete Cassandra Operations Profile
+
+> This module provides a complete profile for deploying and managing an Apache Cassandra node. It acts as a wrapper around the `cassandra_pfpt` component module, providing all of its configuration data via Hiera lookups. This allows for a clean separation of logic from data.
+>
+> Beyond initial deployment, this profile equips each node with a powerful suite of automation and command-line tools to simplify and safeguard common operational tasks, from health checks and backups to complex disaster recovery scenarios.
+
+---
 
 ## Table of Contents
 
@@ -19,24 +25,22 @@
 8.  [Hiera Parameter Reference](#hiera-parameter-reference)
 9.  [Puppet Agent Management](#puppet-agent-management)
 
-## Description
-
-This module provides a complete profile for deploying and managing an Apache Cassandra node. It acts as a wrapper around the `cassandra_pfpt` component module, providing all of its configuration data via Hiera lookups. This allows for a clean separation of logic (in the component module) from data (in Hiera).
-
-Beyond initial deployment, this profile equips each node with a powerful suite of automation and command-line tools to simplify and safeguard common operational tasks, from health checks and backups to complex disaster recovery scenarios.
+---
 
 ## Setup
 
 This profile is intended to be included by a role class. For example:
 
-```
+```puppet
 # In your role manifest (e.g., roles/manifests/cassandra.pp)
 class role::cassandra {
   include profile_cassandra_pfpt
 }
 ```
 
-All configuration for the node should be provided via your Hiera data source (e.g., in your `common.yaml` or node-specific YAML files). The backup scripts require the `jq` and `awscli` packages, which this profile will install by default.
+> All configuration for the node should be provided via your Hiera data source (e.g., in your `common.yaml` or node-specific YAML files). The backup scripts require the `jq` and `awscli` packages, which this profile will install by default.
+
+---
 
 ## Usage Examples
 
@@ -44,7 +48,7 @@ All configuration for the node should be provided via your Hiera data source (e.
 
 The following Hiera example demonstrates how to configure a multi-node cluster with automated backups, scheduled repairs, and custom JVM settings enabled.
 
-```
+```yaml
 # In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
 
 # --- Core Settings ---
@@ -85,7 +89,7 @@ You can declaratively manage Cassandra user roles. For production environments, 
 
 Here is an example showing both a plain-text password and an encrypted one:
 
-```
+```yaml
 # In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
 profile_cassandra_pfpt::cassandra_roles:
   # Example with a plain-text password (suitable for development)
@@ -103,6 +107,8 @@ profile_cassandra_pfpt::cassandra_roles:
     is_superuser: true
     can_login: true
 ```
+
+---
 
 ## Operator's Quick Reference: Management Scripts
 
@@ -129,13 +135,15 @@ This profile installs a suite of robust management scripts in `/usr/local/bin` o
 | `incremental-backup-to-s3.sh`  | (Automated) Script executed by `systemd` to perform scheduled incremental backups.                          |
 | `cassandra-upgrade-precheck.sh`| A detailed, non-invasive script to validate readiness for a major version upgrade (e.g., 3.11 to 4.0).         |
 
+---
+
 ## Day-2 Operations Guide
 
 This section provides a practical guide for common operational tasks.
 
 ### Node and Cluster Health Checks
 
-Before performing any maintenance, always check the health of the node and cluster.
+> Before performing any maintenance, always check the health of the node and cluster.
 
 *   **Check the Local Node:** Run `sudo /usr/local/bin/node_health_check.sh`. This script is your first stop. It checks disk space, node status (UN), gossip state, active streams, and recent log exceptions, giving you a quick "go/no-go" for maintenance.
 *   **Check Cluster Connectivity:** Run `sudo /usr/local/bin/cluster-health.sh`. This verifies that the node can communicate with the cluster and that the CQL port is open.
@@ -182,7 +190,7 @@ This is the primary script for running manual repairs. It intelligently breaks t
     ```bash
     sudo /usr/local/bin/range-repair.sh my_keyspace
     ```
-Run this sequentially on each node in the cluster for a full, safe, rolling repair.
+> Run this sequentially on each node in the cluster for a full, safe, rolling repair.
 
 #### Compaction (`compaction-manager.sh`)
 To manually trigger compaction while safely monitoring disk space:
@@ -216,6 +224,8 @@ After adding a new node to the cluster, run `cleanup` on the existing nodes in t
 sudo /usr/local/bin/cleanup-node.sh
 ```
 
+---
+
 ## Automated Maintenance Guide
 
 ### Automated Backups
@@ -230,9 +240,9 @@ This profile provides a fully automated, S3-based backup solution using `systemd
 5.  **Local Snapshot Cleanup:** The full backup script automatically deletes local snapshots older than `clearsnapshot_keep_days`.
 
 #### Pausing Backups
-To temporarily disable backups on a node for maintenance, create a flag file:
-`sudo touch /var/lib/backup-disabled`.
-To re-enable, simply remove the file.
+> To temporarily disable backups on a node for maintenance, create a flag file:
+> `sudo touch /var/lib/backup-disabled`.
+> To re-enable, simply remove the file.
 
 ### Automated Repair
 
@@ -247,6 +257,8 @@ A safe, low-impact, automated repair process is critical for data consistency.
     *   `sudo systemctl start cassandra-repair.service` (To manually start a repair)
     *   `sudo systemctl stop cassandra-repair.timer` (To pause the automated schedule)
 
+---
+
 ## Disaster Recovery Guide: Restoring from Backups
 
 The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to handle multiple recovery scenarios. Before taking any action, the script will always download and display the backup's manifest file and require operator confirmation—a critical safety check.
@@ -254,7 +266,7 @@ The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to ha
 ### Restore Modes
 
 #### Mode 1: Full Node Restore (Destructive)
-This mode is for recovering a completely failed node. **WARNING:** It will **WIPE ALL CASSANDRA DATA** on the target node before restoring.
+> **WARNING:** This mode is for recovering a completely failed node. It will **WIPE ALL CASSANDRA DATA** on the target node before restoring.
 
 1.  SSH into the node you want to restore.
 2.  Run the script with the backup ID:
@@ -264,7 +276,7 @@ This mode is for recovering a completely failed node. **WARNING:** It will **WIP
 The script is intelligent: if it detects the backup is from a different IP, it will automatically configure the node to replace the old one, assuming its identity and token ranges.
 
 #### Mode 2: Granular Restore (Keyspace or Table)
-This is a **non-destructive** operation that uses `sstableloader` to stream data into a live cluster without downtime. The keyspace/table schema must already exist.
+> This is a **non-destructive** operation that uses `sstableloader` to stream data into a live cluster without downtime. The keyspace/table schema must already exist.
 
 1.  SSH into any Cassandra node in the cluster.
 2.  Run the script with the backup ID, keyspace, and optional table name:
@@ -277,7 +289,7 @@ This is a **non-destructive** operation that uses `sstableloader` to stream data
     ```
 
 #### Mode 3: Schema-Only Restore
-This extracts the `schema.cql` file from a backup, which is the first step for a full cluster disaster recovery.
+> This extracts the `schema.cql` file from a backup, which is the first step for a full cluster disaster recovery.
 
 1.  SSH into one node of your new, empty cluster.
 2.  Run the script with the `--schema-only` flag:
@@ -290,9 +302,9 @@ This saves the schema to `/tmp/schema.cql`, which you can then apply to the clus
 
 This procedure restores a full cluster from S3 backups onto brand-new machines.
 
-**Prerequisites:**
-*   You have full backups for each node of the old cluster in S3.
-*   You have provisioned new machines, applied this Puppet profile, and the `cassandra` service is **stopped** on all of them.
+> #### Prerequisites
+> *   You have full backups for each node of the old cluster in S3.
+> *   You have provisioned new machines, applied this Puppet profile, and the `cassandra` service is **stopped** on all of them.
 
 #### Step 1: Restore the Schema
 1.  Choose **one node** in the new cluster. Start the `cassandra` service on this node only.
@@ -327,6 +339,8 @@ The restore script handles the complexity of determining whether to start as a f
     *   The script will detect a live seed node and automatically use the `replace_address` method to join the cluster.
 
 3.  **Repeat for all remaining nodes**, one at a time, until the entire cluster is recovered.
+
+---
 
 ## Hiera Parameter Reference
 
@@ -389,6 +403,8 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::backup_upload_streaming` (Boolean): If `true`, the full backup script will stream the archive directly to S3 without creating a large temporary file. **Recommended for large nodes.** Default: `false`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
+
+---
 
 ## Puppet Agent Management
 
