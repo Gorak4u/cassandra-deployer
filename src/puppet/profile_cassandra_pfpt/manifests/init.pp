@@ -22,7 +22,6 @@ class profile_cassandra_pfpt {
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
   $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => false })
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
-  $enable_range_repair              = lookup('profile_cassandra_pfpt::enable_range_repair', { 'default_value' => false })
   $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
   $ssl_enabled                      = lookup('profile_cassandra_pfpt::ssl_enabled', { 'default_value' => false })
   $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
@@ -131,7 +130,7 @@ class profile_cassandra_pfpt {
   $jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
   $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
   $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
-  # DIY Backup Settings
+  # Backup Settings
   $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => false })
   $manage_incremental_backups       = lookup('profile_cassandra_pfpt::manage_incremental_backups', { 'default_value' => false })
   $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
@@ -145,7 +144,6 @@ class profile_cassandra_pfpt {
   $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
   $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
-
   # Scheduled Repair Settings
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
@@ -186,7 +184,6 @@ class profile_cassandra_pfpt {
     manage_bin_dir                   => $manage_bin_dir,
     jamm_source                      => $jamm_source,
     jamm_target                      => $jamm_target,
-    enable_range_repair              => $enable_range_repair,
     use_shenandoah_gc                => $use_shenandoah_gc,
     racks                            => $racks,
     ssl_enabled                      => $ssl_enabled,
