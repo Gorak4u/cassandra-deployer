@@ -34,26 +34,50 @@ class role::cassandra {
 All configuration for the node should be provided via your Hiera data source (e.g., in your `common.yaml` or node-specific YAML files). The backup scripts require the `jq` and `awscli` packages, which this profile will install by default.
 ## Usage Examples
 
-### Basic Single-Node Cluster
+### Comprehensive Configuration Example
 
-A minimal Hiera configuration for a single-node cluster that seeds from itself.
+The following Hiera example demonstrates how to configure a multi-node cluster with backups and custom JVM settings enabled.
 
 ```yaml
-# common.yaml
-profile_cassandra_pfpt::cluster_name: 'MyTestCluster'
+# In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
+
+# --- Core Settings ---
+profile_cassandra_pfpt::cluster_name: 'MyProductionCluster'
 profile_cassandra_pfpt::cassandra_password: 'a-very-secure-password'
-```
 
-### Multi-Node Cluster
-
-For a multi-node cluster, you define the seed nodes for the cluster to use for bootstrapping.
-
-```yaml
-# common.yaml
-profile_cassandra_pfpt::seeds:
+# --- Topology & Seeds ---
+profile_cassandra_pfpt::datacenter: 'dc1'
+profile_cassandra_pfpt::rack: 'rack1'
+profile_cassandra_pfpt::seeds: # Use 'seeds' not 'seeds_list'
   - '10.0.1.10'
   - '10.0.1.11'
   - '10.0.1.12'
+
+# --- JVM Settings ---
+profile_cassandra_pfpt::max_heap_size: '8G' # Set max heap to 8 Gigabytes
+profile_cassandra_pfpt::jvm_additional_opts: # Use 'jvm_additional_opts' not 'extra_jvm_args_override'
+  'print_flame_graphs': '-XX:+PreserveFramePointer'
+
+# --- Backup Configuration ---
+# Enable Cassandra's internal mechanism for creating incremental backup files
+profile_cassandra_pfpt::incremental_backups: true
+
+# Enable the full backup process via Puppet
+profile_cassandra_pfpt::manage_full_backups: true
+profile_cassandra_pfpt::full_backup_schedule: 'daily' # Runs at midnight
+
+# Enable the incremental backup process via Puppet
+profile_cassandra_pfpt::manage_incremental_backups: true
+profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # Runs every 4 hours
+
+# Define the S3 bucket for all backups
+profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
+
+# --- Enable streaming for full backups to save local disk space ---
+profile_cassandra_pfpt::backup_upload_streaming: true
+
+# --- Set local snapshot retention ---
+profile_cassandra_pfpt::clearsnapshot_keep_days: 7 # Use 'clearsnapshot_keep_days'
 ```
 
 ### Managing Cassandra Roles
@@ -175,41 +199,25 @@ This profile provides a fully automated, S3-based backup solution using `systemd
 4.  **Execution & Metadata Capture:** The scripts first generate a `backup_manifest.json` file containing critical metadata like the cluster name, node IP, datacenter, rack, and the node's token ranges. They then create a data snapshot, archive everything (data, schema, and manifest), and upload it to your specified S3 bucket. If `backup_upload_streaming` is enabled for full backups, the script builds the archive in memory and streams it directly to S3, avoiding local disk usage.
 5.  **Local Snapshot Cleanup:** Before a new backup is taken, the script automatically cleans up any local snapshots that are older than the configured retention period (`profile_cassandra_pfpt::clearsnapshot_keep_days`). This provides a window for fast, local restores without filling up the disk.
 
+#### Managed Systemd Units
+
+When you enable backups via Hiera, this profile creates and manages the following `systemd` units on your Cassandra nodes. You can inspect them using commands like `systemctl status cassandra-full-backup.timer` or `journalctl -u cassandra-full-backup.service`.
+
+*   **Full Backups**
+    *   **Unit:** `cassandra-full-backup.timer` & `cassandra-full-backup.service`
+    *   **Description:** This timer triggers a service that executes the `/usr/local/bin/full-backup-to-s3.sh` script.
+    *   **Controlled By:** `profile_cassandra_pfpt::manage_full_backups: true`
+    *   **Schedule:** Configured by `profile_cassandra_pfpt::full_backup_schedule`.
+
+*   **Incremental Backups**
+    *   **Unit:** `cassandra-incremental-backup.timer` & `cassandra-incremental-backup.service`
+    *   **Description:** This timer triggers a service that executes the `/usr/local/bin/incremental-backup-to-s3.sh` script, which archives and uploads existing incremental backup files.
+    *   **Controlled By:** `profile_cassandra_pfpt::manage_incremental_backups: true`
+    *   **Schedule:** Configured by `profile_cassandra_pfpt::incremental_backup_schedule`.
+
 #### Configuration Examples
 
-##### Scenario 1: Full Backups Only (for Dev/Test)
-This is ideal for development environments or clusters where a daily recovery point is sufficient.
-
-```yaml
-# Hiera:
-profile_cassandra_pfpt::manage_full_backups: true
-profile_cassandra_pfpt::backup_s3_bucket: 'my-dev-cassandra-backups'
-profile_cassandra_pfpt::full_backup_schedule: '*-*-* 02:00:00' # Daily at 2 AM
-profile_cassandra_pfpt::clearsnapshot_keep_days: 7 # Keep local snapshots for a week
-```
-
-##### Scenario 2: Both Full and Incremental Backups (Recommended for Production)
-This is the most robust strategy, providing a daily full snapshot and frequent incremental backups for point-in-time recovery.
-
-```yaml
-# Hiera:
-
-# Enable Cassandra's internal mechanism for creating incremental backup files
-profile_cassandra_pfpt::incremental_backups: true
-
-# Enable the full backup process via Puppet
-profile_cassandra_pfpt::manage_full_backups: true
-profile_cassandra_pfpt::full_backup_schedule: 'daily' # Runs at midnight
-
-# Enable the incremental backup process via Puppet
-profile_cassandra_pfpt::manage_incremental_backups: true
-profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # Runs every 4 hours
-
-# Define the S3 bucket for all backups
-profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
-```
-
-##### Scenario 3: Production Backups with Streaming to Save Disk Space
+##### Scenario 1: Production Backups with Streaming to Save Disk Space
 This configuration is ideal for production nodes where local disk space is a concern during backups.
 
 ```yaml
@@ -232,7 +240,6 @@ profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 profile_cassandra_pfpt::backup_upload_streaming: true
 ```
 
-
 #### Hiera Parameters for Backups
 
 *   `profile_cassandra_pfpt::incremental_backups` (Boolean): **Required for incremental backups.** Enables Cassandra's built-in feature to create hard links to new SSTables. Default: `false`.
@@ -242,7 +249,6 @@ profile_cassandra_pfpt::backup_upload_streaming: true
 *   `profile_cassandra_pfpt::full_backup_schedule` (String): The `systemd` OnCalendar schedule for full snapshot backups. Default: `'daily'`.
 *   `profile_cassandra_pfpt::incremental_backup_schedule` (String | Array[String]): The `systemd` OnCalendar schedule(s) for incremental backups. Default: `'0 */4 * * *'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to upload backups to. Default: `'puppet-cassandra-backups'`.
-*   `profile_cassandra_pfpt::backup_upload_streaming` (Boolean): If `true`, the full backup script will stream the archive directly to S3 without creating a temporary file on disk, saving significant local disk space. Default: `false`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep snapshots locally on the node before they are automatically deleted. Set to 0 to disable local retention. Default: `3`.
 *   `profile_cassandra_pfpt::full_backup_log_file` (String): Log file path for the full backup script. Default: `'/var/log/cassandra/full_backup.log'`.
 *   `profile_cassandra_pfpt::incremental_backup_log_file` (String): Log file path for the incremental backup script. Default: `'/var/log/cassandra/incremental_backup.log'`.
