@@ -175,7 +175,7 @@ fi
 
 # Create an uncompressed tarball of the main data files first
 log_message "Creating uncompressed archive of snapshot files..."
-tar -cf "$UNCOMPRESSED_TAR_PATH" -P -T "$BACKUP_TEMP_DIR/snapshot_files.list"
+tar -cf "$UNCOMPRESSED_TAR_PATH" -C / -T <(sed 's#^/##' "$BACKUP_TEMP_DIR/snapshot_files.list")
 
 # Append manifest to the uncompressed tarball
 log_message "Appending manifest to archive..."
