@@ -198,7 +198,8 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_message "Skipping S3 upload and local cleanup."
 else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/full/$SNAPSHOT_TAG.tar.gz"
+        BACKUP_DATE=$(date +%Y-%m-%d)
+        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE/full/$SNAPSHOT_TAG.tar.gz"
         log_message "Simulating S3 upload to: $UPLOAD_PATH"
         # In a real environment, the following line would be active:
         # if ! aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"; then
@@ -364,7 +365,8 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
 else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/incremental/$BACKUP_TAG.tar.gz"
+        BACKUP_DATE=$(date +%Y-%m-%d)
+        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE/incremental/$BACKUP_TAG.tar.gz"
         log_message "Simulating S3 upload to: $UPLOAD_PATH"
         # In a real environment: aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"
         log_message "S3 upload simulated successfully."
@@ -745,8 +747,17 @@ if [[ "$BACKUP_TYPE" != "full" && "$BACKUP_TYPE" != "incremental" ]]; then
     exit 1
 fi
 
+# Extract date from backup ID like 'type_YYYYMMDDHHMMSS'
+BACKUP_DATE_STR=$(echo "$BACKUP_ID" | sed -n 's/.*_\\([0-9]\\{8\\}\\).*/\\1/p')
+if [ -z "$BACKUP_DATE_STR" ]; then
+    log_message "ERROR: Could not extract date from backup ID '$BACKUP_ID'. Expected format: type_YYYYMMDDHHMMSS."
+    exit 1
+fi
+BACKUP_DATE_FOLDER=$(date -d "$BACKUP_DATE_STR" '+%Y-%m-%d')
+
+
 TARBALL_NAME="$HOSTNAME_$BACKUP_ID.tar.gz"
-S3_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_TYPE/$TARBALL_NAME"
+S3_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE_FOLDER/$BACKUP_TYPE/$TARBALL_NAME"
 
 log_message "Preparing to restore from S3 path: $S3_PATH"
 
@@ -878,6 +889,8 @@ log_message "To clear this snapshot, run: nodetool clearsnapshot -t $SNAPSHOT_TA
 exit 0
 `,
     };
+
+    
 
     
 
