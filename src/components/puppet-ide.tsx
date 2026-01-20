@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -237,9 +238,17 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                                 </AlertDescription>
                             </Alert>
                             )}
-                            <CodeBlock
-                            code={ isLoadingFile ? '// Loading...' : fileContent }
-                            />
+                            {selectedFile.lang === 'markdown' ? (
+                                <div className="p-4 text-sm bg-muted/50 rounded-md overflow-x-auto border font-body">
+                                  <pre className="whitespace-pre-wrap font-body">
+                                    {isLoadingFile ? 'Loading...' : fileContent}
+                                  </pre>
+                                </div>
+                              ) : (
+                                <CodeBlock
+                                  code={isLoadingFile ? '// Loading...' : fileContent}
+                                />
+                              )}
                         </CardContent>
                     </Card>
                 ) : (
