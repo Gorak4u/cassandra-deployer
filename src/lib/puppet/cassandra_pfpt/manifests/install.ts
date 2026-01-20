@@ -1,4 +1,5 @@
 
+export const install = `
 # @summary Handles package installation for Cassandra and dependencies.
 class cassandra_pfpt::install inherits cassandra_pfpt {
   user { $user:
@@ -11,9 +12,9 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
   }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
-      $os_release_major = regsubst($facts['os']['release']['full'], '^(\d+).*$', '\1')
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(\\\\d+).*$', '\\\\1')
       yumrepo { 'cassandra':
-        descr               => "Apache Cassandra \${cassandra_version} for EL\${os_release_major}",
+        descr               => "Apache Cassandra \\${cassandra_version} for EL\\${os_release_major}",
         baseurl             => $repo_baseurl,
         enabled             => 1,
         gpgcheck            => $repo_gpgcheck,
@@ -44,3 +45,4 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
     require => Package['cassandra'],
   }
 }
+`;
