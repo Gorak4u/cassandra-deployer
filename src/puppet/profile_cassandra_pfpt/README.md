@@ -77,7 +77,11 @@ profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 profile_cassandra_pfpt::backup_upload_streaming: true
 
 # --- Set local snapshot retention ---
-profile_cassandra_pfpt::clearsnapshot_keep_days: 7 # Use 'clearsnapshot_keep_days'
+profile_cassandra_pfpt::clearsnapshot_keep_days: 7
+
+# --- Enable and configure scheduled repair ---
+profile_cassandra_pfpt::manage_scheduled_repair: true
+profile_cassandra_pfpt::repair_schedule: '*-*-1/5 01:00:00' # Every 5 days
 ```
 
 ### Managing Cassandra Roles
@@ -178,6 +182,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Currently only supports `'s3'`. If set to another value, backups will be created locally but not uploaded. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::backup_upload_streaming` (Boolean): If `true`, the full backup script will stream the archive directly to S3 without creating a temporary file on disk, saving significant local disk space. Default: `false`.
+*   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep snapshots locally on the node before they are automatically deleted by the backup script. Set to 0 to disable local retention. Default: `3`.
 
 ### Scheduled Repair
 *   `profile_cassandra_pfpt::manage_scheduled_repair` (Boolean): Set to `true` to enable the automated weekly repair job. Default: `false`.
