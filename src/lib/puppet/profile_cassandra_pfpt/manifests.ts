@@ -291,5 +291,3 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
-
-    
