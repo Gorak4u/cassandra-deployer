@@ -129,8 +129,8 @@ class profile_cassandra_pfpt {
   # JMX Exporter Settings
   $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
   $jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
-  $jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-\\\${jmx_exporter_version}.jar" })
-  $jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-\\\${jmx_exporter_version}.jar" })
+  $jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-\${$jmx_exporter_version}.jar" })
+  $jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-\${$jmx_exporter_version}.jar" })
   $jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
   $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
   $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
@@ -138,15 +138,15 @@ class profile_cassandra_pfpt {
   $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => true })
   $manage_incremental_backups       = lookup('profile_cassandra_pfpt::manage_incremental_backups', { 'default_value' => true })
   $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
-  $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
-  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
+  $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */1 * * *' })
+  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'cassandra-prod-us-east-1-backups' })
   $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
   $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
   $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
   $puppet_cron_schedule             = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => undef })
-  $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep', { 'default_value' => 3 })
+  $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 7 })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -157,7 +157,7 @@ class profile_cassandra_pfpt {
     user                             => $user,
     group                            => $group,
     repo_baseurl                     => $repo_baseurl,
-    repo_gpgkey                      => $repo_gpgkey,
+    repo_gpgkey                     => $repo_gpgkey,
     repo_gpgcheck                    => $repo_gpgcheck,
     repo_priority                    => $repo_priority,
     repo_skip_if_unavailable         => $repo_skip_if_unavailable,
@@ -192,7 +192,7 @@ class profile_cassandra_pfpt {
     keystore_path                    => $keystore_path,
     keystore_password                => $keystore_password,
     truststore_path                  => $truststore_path,
-    truststore_password              => $truststore_password,
+    truststore_password                => $truststore_password,
     internode_encryption             => $internode_encryption,
     internode_require_client_auth    => $internode_require_client_auth,
     client_optional                  => $client_optional,
@@ -291,3 +291,7 @@ class profile_cassandra_pfpt {
 }
         `.trim(),
     };
+
+    
+
+    
