@@ -29,7 +29,7 @@ Beyond initial deployment, this profile equips each node with a powerful suite o
 
 This profile is intended to be included by a role class. For example:
 
-```puppet
+```
 # In your role manifest (e.g., roles/manifests/cassandra.pp)
 class role::cassandra {
   include profile_cassandra_pfpt
@@ -44,7 +44,7 @@ All configuration for the node should be provided via your Hiera data source (e.
 
 The following Hiera example demonstrates how to configure a multi-node cluster with automated backups, scheduled repairs, and custom JVM settings enabled.
 
-```yaml
+```
 # In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
 
 # --- Core Settings ---
@@ -85,7 +85,8 @@ You can declaratively manage Cassandra user roles. For production environments, 
 
 Here is an example showing both a plain-text password and an encrypted one:
 
-```yaml
+```
+# In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
 profile_cassandra_pfpt::cassandra_roles:
   # Example with a plain-text password (suitable for development)
   'readonly_user':
@@ -102,7 +103,6 @@ profile_cassandra_pfpt::cassandra_roles:
     is_superuser: true
     can_login: true
 ```
-The Puppet master, configured with your eyaml keys, will automatically decrypt the `ENC[...]` block. The module code itself never sees the encrypted value, only the final decrypted password.
 
 ## Operator's Quick Reference: Management Scripts
 
@@ -303,7 +303,7 @@ This procedure restores a full cluster from S3 backups onto brand-new machines.
     ```
 4.  Apply the schema to the new cluster:
     ```bash
-    cqlsh -u cassandra -p 'YourPassword' -f /tmp/schema.cql
+    cqlsh -u cassandra -p 'YourPassword' --ssl -f /tmp/schema.cql
     ```
 5.  Stop the `cassandra` service on this node. The entire new cluster should now be offline.
 
