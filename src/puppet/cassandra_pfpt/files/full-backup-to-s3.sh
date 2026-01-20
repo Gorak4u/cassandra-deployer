@@ -5,6 +5,7 @@ set -euo pipefail
 
 # --- Configuration from JSON file ---
 CONFIG_FILE="/etc/backup/config.json"
+ENCRYPTION_KEY_FILE="/etc/backup/backup.key" # Path to the encryption key
 
 # --- Logging ---
 # This function will be defined after LOG_FILE is sourced from config
@@ -12,12 +13,15 @@ log_message() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Check for config file and jq
-if ! command -v jq &> /dev/null; then
-  # Cannot use log_message here as LOG_FILE is not yet defined
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: jq is not installed. Please install jq to continue."
-  exit 1
-fi
+# Check for required tools
+for tool in jq aws openssl; do
+    if ! command -v $tool &> /dev/null; then
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Required tool '$tool' is not installed or in PATH."
+        exit 1
+    fi
+done
+
+# Check for config file
 if [ ! -f "$CONFIG_FILE" ]; then
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at $CONFIG_FILE"
   exit 1
@@ -30,8 +34,7 @@ CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
-UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
-
+# upload_streaming is deprecated in this new model
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -40,10 +43,9 @@ if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" 
 fi
 
 # --- Static Configuration ---
-SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
+BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
 HOSTNAME=$(hostname -s)
-BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/${HOSTNAME}_$SNAPSHOT_TAG"
+BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$" # Use PID to ensure uniqueness
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
@@ -54,25 +56,41 @@ cleanup_old_snapshots() {
 
     log_message "--- Starting Old Snapshot Cleanup ---"
     log_message "Retention period: $KEEP_DAYS days"
-    local cutoff_date
-    cutoff_date=$(date -d "-$KEEP_DAYS days" +%Y%m%d)
+    
+    # We need to handle both the old and new snapshot tag formats for a transition period.
+    # Old format: full_snapshot_YYYYMMDDHHMMSS
+    # New format: YYYY-MM-DD-HH-MM
+    
+    local cutoff_timestamp_days
+    cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     nodetool listsnapshots | while read -r snapshot_line; do
-      if [[ "$snapshot_line" =~ ^(full_snapshot_|adhoc_snapshot_|snapshot_) ]]; then
-        local tag
-        tag=$(echo "$snapshot_line" | awk '{print $1}')
-        # Extract date from tag like 'full_snapshot_YYYYMMDDHHMMSS'
-        local snapshot_date
-        snapshot_date=$(echo "$tag" | sed -n 's/^.*_\([0-9]\{8\}\)[0-9]\{6\}$/\1/p')
+      if [[ -z "$snapshot_line" || "$snapshot_line" == *"Total snapshots"* ]]; then
+          continue
+      fi
 
-        if [ -n "$snapshot_date" ]; then
-          if [ "$snapshot_date" -lt "$cutoff_date" ]; then
-            log_message "Deleting old snapshot: $tag (date: $snapshot_date is older than cutoff: $cutoff_date)"
-            if ! nodetool clearsnapshot -t "$tag"; then
-              log_message "ERROR: Failed to delete snapshot $tag"
-            fi
+      local tag
+      tag=$(echo "$snapshot_line" | awk '{print $1}')
+      local snapshot_timestamp=0
+
+      # Try parsing new format first: YYYY-MM-DD-HH-MM
+      if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
+          snapshot_timestamp=$(date -d "$(echo "$tag" | tr -d ' ')" +%s)
+      # Try parsing old format: full_snapshot_YYYYMMDD...
+      elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
+          local snapshot_date_str=${BASH_REMATCH[1]}
+          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s)
+      fi
+      
+      if [[ "$snapshot_timestamp" -gt 0 ]]; then
+        if [ "$snapshot_timestamp" -lt "$cutoff_timestamp_days" ]; then
+          log_message "Deleting old snapshot: $tag (timestamp: $snapshot_timestamp is older than cutoff: $cutoff_timestamp_days)"
+          if ! nodetool clearsnapshot -t "$tag"; then
+            log_message "ERROR: Failed to delete snapshot $tag"
           fi
         fi
+      else
+        log_message "WARNING: Could not parse date from snapshot tag '$tag'. Skipping."
       fi
     done
     log_message "--- Snapshot Cleanup Finished ---"
@@ -101,18 +119,84 @@ if [ -f "/var/lib/backup-disabled" ]; then
     exit 0
 fi
 
+# Check for encryption key
+if [ ! -r "$ENCRYPTION_KEY_FILE" ]; then
+    log_message "ERROR: Encryption key not found or not readable at $ENCRYPTION_KEY_FILE"
+    exit 1
+fi
+
 # Run cleanup of old snapshots BEFORE taking a new one
 cleanup_old_snapshots
 
-log_message "--- Starting Full Cassandra Snapshot Backup Process ---"
+log_message "--- Starting Granular Cassandra Snapshot Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
-log_message "Snapshot Tag: $SNAPSHOT_TAG"
-log_message "Upload Streaming: $UPLOAD_STREAMING"
+log_message "Backup Timestamp (Tag): $BACKUP_TAG"
 
-# 1. Create temporary directory structure
-mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directories."; exit 1; }
+# 1. Create temporary directory for manifest
+mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
 
-# 2. Create Backup Manifest
+# 2. Take a node-local snapshot
+log_message "Taking full snapshot with tag: $BACKUP_TAG..."
+if ! nodetool snapshot -t "$BACKUP_TAG"; then
+  log_message "ERROR: Failed to take Cassandra snapshot. Aborting backup."
+  exit 1
+fi
+log_message "Full snapshot taken successfully."
+
+# 3. Archive and Upload, per-table
+log_message "Discovering keyspaces and tables to back up..."
+SYSTEM_KEYSPACES="system system_auth system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+TABLES_BACKED_UP="[]"
+UPLOAD_ERRORS=0
+
+# Determine if SSL is needed for cqlsh
+CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+CQLSH_SSL_OPT=""
+if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+    log_message "INFO: SSL section found in cqlshrc, using --ssl for cqlsh schema dump."
+    CQLSH_SSL_OPT="--ssl"
+fi
+
+for ks in $(nodetool keyspaces); do
+    if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
+        continue
+    fi
+    log_message "Processing keyspace: $ks"
+    
+    # Find table directories. They have a UUID suffix.
+    find "$CASSANDRA_DATA_DIR/$ks" -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
+        table_name=$(basename "$table_dir" | cut -d'-' -f1)
+        snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
+        
+        # Check if snapshot dir exists and is not empty
+        if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
+            log_message "Backing up table: $ks.$table_name"
+            s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.enc"
+            
+            # Streaming pipeline: tar -> gzip -> openssl -> aws s3
+            tar -C "$snapshot_dir" -c . | \
+            gzip | \
+            openssl enc -aes-256-cbc -salt -pass "file:$ENCRYPTION_KEY_FILE" | \
+            aws s3 cp - "$s3_path"
+
+            # Check the exit code of the aws cli command (the last in the pipe)
+            if [ ${PIPESTATUS[3]} -eq 0 ]; then
+                log_message "Successfully uploaded backup for $ks.$table_name"
+                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+            else
+                log_message "ERROR: Failed to upload backup for $ks.$table_name"
+                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+            fi
+        fi
+    done
+done
+
+if [ "$UPLOAD_ERRORS" -gt 0 ]; then
+    log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
+    # We still upload a manifest so the operator knows what *did* succeed.
+fi
+
+# 4. Create Backup Manifest
 MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 log_message "Creating backup manifest at $MANIFEST_FILE..."
 
@@ -124,20 +208,22 @@ else
     NODE_IP="$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b")
+# Tolerate failures in nodetool status for manifest generation
+NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b" || echo "Unknown UNKNOWN $LISTEN_ADDRESS UNKNOWN UNKNOWN UNKNOWN")
 NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
 NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
 NODE_TOKENS=$(nodetool ring | grep "\b$NODE_IP\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
 
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
-  --arg backup_id "$SNAPSHOT_TAG" \
+  --arg backup_id "$BACKUP_TAG" \
   --arg backup_type "full" \
   --arg timestamp "$(date --iso-8601=seconds)" \
   --arg node_ip "$NODE_IP" \
   --arg node_dc "$NODE_DC" \
   --arg node_rack "$NODE_RACK" \
   --arg tokens "$NODE_TOKENS" \
+  --argjson tables "$TABLES_BACKED_UP" \
   '{
     "cluster_name": $cluster_name,
     "backup_id": $backup_id,
@@ -148,130 +234,58 @@ jq -n \
       "datacenter": $node_dc,
       "rack": $node_rack,
       "tokens": ($tokens | split(","))
-    }
+    },
+    "tables_backed_up": $tables
   }' > "$MANIFEST_FILE"
 
 log_message "Manifest created successfully."
 
-
-# 3. Take a node-local snapshot
-log_message "Taking full snapshot with tag: $SNAPSHOT_TAG..."
-if ! nodetool snapshot -t "$SNAPSHOT_TAG"; then
-  log_message "ERROR: Failed to take Cassandra snapshot. Aborting backup."
-  exit 1
-fi
-log_message "Full snapshot taken successfully."
-
-# 4. Collect snapshot file paths
-find "$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/$SNAPSHOT_TAG/*" > "$BACKUP_TEMP_DIR/snapshot_files.list"
-
-# 5. Archive the files
-TARBALL_PATH="$BACKUP_ROOT_DIR/${HOSTNAME}_${SNAPSHOT_TAG}.tar.gz"
-UNCOMPRESSED_TAR_PATH="$BACKUP_ROOT_DIR/${HOSTNAME}_${SNAPSHOT_TAG}.tar"
-
-# Check if there are snapshot files before proceeding
-if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
-    log_message "WARNING: No snapshot files found. The cluster may be empty. Aborting backup."
-    nodetool clearsnapshot -t "$SNAPSHOT_TAG"
-    exit 0
-fi
-
-# 6. Archive the schema
+# 5. Archive the schema
 log_message "Backing up schema..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
-# Determine if SSL is needed for cqlsh
-CQLSH_CONFIG="/root/.cassandra/cqlshrc"
-CQLSH_SSL_OPT=""
-if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
-    log_message "INFO: SSL section found in cqlshrc, using --ssl for cqlsh schema dump."
-    CQLSH_SSL_OPT="--ssl"
-fi
-# Use a timeout to prevent cqlsh from hanging indefinitely
-timeout 30 cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"
-if [ $? -ne 0 ]; then
-  log_message "WARNING: Failed to dump schema. Backup will continue without it."
-else
+if timeout 30 cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"; then
   log_message "Schema backup created successfully."
-fi
-
-# 7. Create local archive or prepare for streaming
-if [ "$UPLOAD_STREAMING" == "true" ]; then
-    log_message "Streaming mode enabled. Local tarball creation will be skipped."
 else
-    log_message "Creating uncompressed archive of snapshot files..."
-    tar -cf "$UNCOMPRESSED_TAR_PATH" -C / --files-from=<(sed 's#^/##' "$BACKUP_TEMP_DIR/snapshot_files.list")
-
-    log_message "Appending manifest to archive..."
-    tar -rf "$UNCOMPRESSED_TAR_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
-
-    if [ -f "$SCHEMA_FILE" ]; then
-      log_message "Appending schema to archive..."
-      tar -rf "$UNCOMPRESSED_TAR_PATH" -C "$BACKUP_TEMP_DIR" "schema.cql"
-    fi
-    
-    log_message "Compressing the final archive..."
-    gzip -c "$UNCOMPRESSED_TAR_PATH" > "$TARBALL_PATH"
-    rm -f "$UNCOMPRESSED_TAR_PATH"
-    log_message "Archive compressed and temporary tar file removed."
+  log_message "WARNING: Failed to dump schema. Backup manifest will be uploaded without it."
+  rm -f "$SCHEMA_FILE" # Ensure partial schema file is not uploaded
 fi
 
-
-# 8. Upload to S3 and Cleanup
+# 6. Upload Manifest and Schema to S3
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
-    if [ "$UPLOAD_STREAMING" == "false" ]; then
-        log_message "Backup archive is available at: $TARBALL_PATH"
-    fi
-    log_message "Snapshot is available with tag: $SNAPSHOT_TAG"
-    log_message "Skipping S3 upload and local cleanup."
+    log_message "Backup artifacts are available locally with tag: $BACKUP_TAG"
+    log_message "Local snapshot will NOT be automatically cleared."
 else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        BACKUP_DATE=$(date +%Y-%m-%d)
-        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE/full/$SNAPSHOT_TAG.tar.gz"
-
-        if [ "$UPLOAD_STREAMING" == "true" ]; then
-            log_message "Streaming backup directly to S3: $UPLOAD_PATH"
-            
-            # This pipeline creates a concatenated tar stream from multiple sources,
-            # gzips it, and pipes it directly to the aws-cli.
-            {
-                tar -cf - -C / --files-from=<(sed 's#^/##' "$BACKUP_TEMP_DIR/snapshot_files.list");
-                tar -cf - -C "$BACKUP_TEMP_DIR" "backup_manifest.json";
-                if [ -f "$SCHEMA_FILE" ]; then
-                    tar -cf - -C "$BACKUP_TEMP_DIR" "schema.cql";
-                fi
-            } | gzip -c | aws s3 cp - "$UPLOAD_PATH"
-
-            if [ ${PIPESTATUS[2]} -ne 0 ]; then
-                log_message "ERROR: Backup stream failed. Check logs for details from tar, gzip, or aws-cli."
-                exit 1
+        log_message "Uploading manifest file..."
+        MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
+        if ! aws s3 cp "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
+          log_message "ERROR: Failed to upload manifest to S3. The backup is not properly indexed."
+          exit 1
+        fi
+        log_message "Manifest uploaded successfully."
+        
+        if [ -f "$SCHEMA_FILE" ]; then
+            log_message "Uploading schema file..."
+            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
+            if ! aws s3 cp "$SCHEMA_FILE" "$SCHEMA_S3_PATH"; then
+              log_message "ERROR: Failed to upload schema to S3."
+              # This is not a fatal error for the backup itself.
+            else
+              log_message "Schema uploaded successfully."
             fi
-            
-            log_message "S3 stream upload completed successfully."
-            # No local tarball to remove in streaming mode.
-
-        else # The original non-streaming logic
-            log_message "Uploading local archive to S3: $UPLOAD_PATH"
-            if ! aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"; then
-              log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
-              exit 1
-            fi
-            log_message "S3 upload completed successfully."
-
-            # Cleanup (only after successful upload)
-            log_message "Cleaning up local archive file..."
-            rm -f "$TARBALL_PATH"
         fi
     else
-        log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping upload."
-        if [ "$UPLOAD_STREAMING" == "false" ]; then
-            log_message "Backup archive is available at: $TARBALL_PATH"
-        fi
-        log_message "Snapshot is available with tag: $SNAPSHOT_TAG"
-        log_message "Local files will NOT be cleaned up."
+        log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping manifest upload."
+        log_message "Local snapshot is available with tag: $BACKUP_TAG"
     fi
 fi
 
-log_message "--- Full Cassandra Snapshot Backup Process Finished Successfully ---"
+if [ "$UPLOAD_ERRORS" -gt 0 ]; then
+    log_message "--- Granular Cassandra Backup Process Finished with ERRORS ---"
+    exit 1
+else
+    log_message "--- Granular Cassandra Backup Process Finished Successfully ---"
+fi
 
 exit 0
