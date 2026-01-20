@@ -1,14 +1,14 @@
 {
-  "name": "pfpt-profile_cassandra_pfpt",
+  "name": "pp/profile_cassandra_pfpt",
   "version": "0.1.0",
-  "author": "pfpt",
+  "author": "pp",
   "summary": "Profile module for configuring a Cassandra node.",
   "license": "Apache-2.0",
   "source": "",
   "project_page": "",
   "issues_url": "",
   "dependencies": [
-    { "name": "pfpt-cassandra_pfpt", "version_requirement": ">= 0.1.0" }
+    { "name": "pp/cassandra_pfpt", "version_requirement": ">= 0.1.0" }
   ],
   "operatingsystem_support": [
     {

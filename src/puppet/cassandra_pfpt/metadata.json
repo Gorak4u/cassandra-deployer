@@ -1,7 +1,7 @@
 {
-  "name": "pfpt-cassandra_pfpt",
+  "name": "pp/cassandra_pfpt",
   "version": "0.1.0",
-  "author": "pfpt",
+  "author": "pp",
   "summary": "Component module for managing Apache Cassandra.",
   "license": "Apache-2.0",
   "source": "",
