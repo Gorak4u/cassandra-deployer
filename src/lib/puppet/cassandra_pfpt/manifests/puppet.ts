@@ -7,9 +7,9 @@ class cassandra_pfpt::puppet inherits cassandra_pfpt {
   $cron_minute_2 = $cron_minute_1 + 30
 
   # Check if a custom schedule is provided via Hiera.
-  if $\\{puppet_cron_schedule} {
+  if $puppet_cron_schedule {
     # If a custom schedule is defined, parse it.
-    $schedule_parts = split($\\{puppet_cron_schedule}, ' ')
+    $schedule_parts = split($puppet_cron_schedule, ' ')
     $minute         = $schedule_parts[0]
     $hour           = $schedule_parts[1]
     $monthday       = $schedule_parts[2]
@@ -18,8 +18,7 @@ class cassandra_pfpt::puppet inherits cassandra_pfpt {
   } else {
     # If no custom schedule, use the default staggered schedule.
     # The minute parameter accepts an array of values.
-    $minute   = [$\\
-{cron_minute_1}, $\\{cron_minute_2}]
+    $minute   = [$cron_minute_1, $cron_minute_2]
     $hour     = '*'
     $monthday = '*'
     $month    = '*'
