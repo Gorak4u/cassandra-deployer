@@ -2,9 +2,8 @@
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { cn } from '@/lib/utils';
+import { CodeBlock } from '@/components/code-block';
 
 interface MarkdownViewProps {
   content: string;
@@ -26,25 +25,7 @@ export function MarkdownView({ content, className }: MarkdownViewProps) {
             const match = /language-(\w+)/.exec(className || '');
             const codeString = String(children).replace(/\n$/, '');
             return match ? (
-              <SyntaxHighlighter
-                style={vscDarkPlus}
-                language={match[1]}
-                showLineNumbers
-                wrapLines={true}
-                customStyle={{ 
-                    margin: 0, 
-                    backgroundColor: 'hsl(224, 71%, 4%)',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '0.375rem',
-                }}
-                codeTagProps={{
-                    style: {
-                        fontFamily: 'var(--font-code)',
-                    }
-                }}
-              >
-                {codeString}
-              </SyntaxHighlighter>
+              <CodeBlock code={codeString} language={match[1]} />
             ) : (
               <code className={className} {...props}>
                 {children}
