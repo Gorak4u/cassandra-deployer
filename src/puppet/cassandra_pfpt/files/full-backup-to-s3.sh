@@ -192,7 +192,7 @@ if [ "$UPLOAD_STREAMING" == "true" ]; then
     log_message "Streaming mode enabled. Local tarball creation will be skipped."
 else
     log_message "Creating uncompressed archive of snapshot files..."
-    tar -cf "$UNCOMPRESSED_TAR_PATH" -C / -T <(sed 's#^/##' "$BACKUP_TEMP_DIR/snapshot_files.list")
+    tar -cf "$UNCOMPRESSED_TAR_PATH" -C / --files-from=<(sed 's#^/##' "$BACKUP_TEMP_DIR/snapshot_files.list")
 
     log_message "Appending manifest to archive..."
     tar -rf "$UNCOMPRESSED_TAR_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
@@ -235,7 +235,7 @@ else
                 fi
             } | gzip -c | aws s3 cp - "$UPLOAD_PATH"
 
-            if [ $? -ne 0 ]; then
+            if [ ${PIPESTATUS[2]} -ne 0 ]; then
                 log_message "ERROR: Backup stream failed. Check logs for details from tar, gzip, or aws-cli."
                 exit 1
             fi
