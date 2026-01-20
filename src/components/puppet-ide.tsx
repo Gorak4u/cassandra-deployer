@@ -41,6 +41,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import type { PuppetFile } from '@/lib/actions';
 import { getFileContent, getZippedModules } from '@/lib/actions';
+import { MarkdownView } from './markdown-view';
 
 
 const getRepoFilesByGroup = (repoName: string, allFiles: PuppetFile[]) => {
@@ -239,10 +240,8 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                             </Alert>
                             )}
                             {selectedFile.lang === 'markdown' ? (
-                                <div className="p-4 text-sm bg-background rounded-md overflow-x-auto border font-body">
-                                  <pre className="whitespace-pre-wrap font-body leading-relaxed">
-                                    {isLoadingFile ? 'Loading...' : fileContent}
-                                  </pre>
+                                <div className="p-4 bg-background rounded-md overflow-x-auto">
+                                  <MarkdownView content={isLoadingFile ? 'Loading...' : fileContent} />
                                 </div>
                               ) : (
                                 <CodeBlock
