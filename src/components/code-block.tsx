@@ -29,7 +29,7 @@ export const CodeBlock: FC<CodeBlockProps> = ({ code, className, ...props }) => 
       <Button
         size="icon"
         variant="ghost"
-        className="absolute top-2 right-2 h-8 w-8 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 h-8 w-8 text-muted-foreground transition-opacity"
         onClick={copyToClipboard}
       >
         {hasCopied ? <Check className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />}
