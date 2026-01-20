@@ -43,7 +43,7 @@ fi
 SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG"
+BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/\${HOSTNAME}_$SNAPSHOT_TAG"
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
@@ -165,7 +165,7 @@ log_message "Full snapshot taken successfully."
 find "$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/$SNAPSHOT_TAG/*" > "$BACKUP_TEMP_DIR/snapshot_files.list"
 
 # 5. Archive the files
-TARBALL_PATH="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG.tar.gz"
+TARBALL_PATH="$BACKUP_ROOT_DIR/\${HOSTNAME}_$SNAPSHOT_TAG.tar.gz"
 log_message "Archiving snapshot data to $TARBALL_PATH..."
 
 if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
@@ -267,7 +267,7 @@ fi
 BACKUP_TAG="incremental_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$BACKUP_TAG"
+BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/\${HOSTNAME}_$BACKUP_TAG"
 
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
@@ -351,7 +351,7 @@ log_message "Manifest created successfully."
 
 
 # 5. Archive the files
-TARBALL_PATH="$BACKUP_ROOT_DIR/$HOSTNAME_$BACKUP_TAG.tar.gz"
+TARBALL_PATH="$BACKUP_ROOT_DIR/\${HOSTNAME}_$BACKUP_TAG.tar.gz"
 log_message "Archiving incremental data to $TARBALL_PATH..."
 
 tar -czf "$TARBALL_PATH" -P -T "$BACKUP_TEMP_DIR/incremental_files.list"
@@ -756,7 +756,7 @@ fi
 BACKUP_DATE_FOLDER=$(date -d "$BACKUP_DATE_STR" '+%Y-%m-%d')
 
 
-TARBALL_NAME="$HOSTNAME_$BACKUP_ID.tar.gz"
+TARBALL_NAME="\${HOSTNAME}_$BACKUP_ID.tar.gz"
 S3_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE_FOLDER/$BACKUP_TYPE/$TARBALL_NAME"
 
 log_message "Preparing to restore from S3 path: $S3_PATH"
