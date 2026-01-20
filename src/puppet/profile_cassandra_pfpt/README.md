@@ -19,17 +19,22 @@
 6.  [Automated Maintenance Guide](#automated-maintenance-guide)
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
-7.  [Disaster Recovery Guide: Restoring from Backups](#disaster-recovery-guide-restoring-from-backups)
+7.  [Disaster Recovery Guide: Point-in-Time Recovery](#disaster-recovery-guide-point-in-time-recovery)
     1.  [Restore Modes](#restore-modes)
-    2.  [Full Cluster Restore (Cold Start)](#full-cluster-restore-cold-start)
+    2.  [Example: Granular Table Restore](#example-granular-table-restore)
+    3.  [Example: Full Cluster Restore (Cold Start)](#example-full-cluster-restore-cold-start)
 8.  [Hiera Parameter Reference](#hiera-parameter-reference)
 9.  [Puppet Agent Management](#puppet-agent-management)
 
 ---
 
+## Description
+
+This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts installed in `/usr/local/bin`. These scripts are your primary interface for safely managing the Cassandra cluster.
+
 ## Setup
 
-This profile is intended to be included by a role class. For example:
+This profile is intended to be included by a role class.
 
 ```puppet
 # In your role manifest (e.g., roles/manifests/cassandra.pp)
@@ -38,7 +43,7 @@ class role::cassandra {
 }
 ```
 
-> All configuration for the node should be provided via your Hiera data source (e.g., in your `common.yaml` or node-specific YAML files). The backup scripts require the `jq` and `awscli` packages, which this profile will install by default.
+> All configuration for the node should be provided via your Hiera data source (e.g., in your `common.yaml` or node-specific YAML files). The backup scripts require the `jq`, `awscli`, and `openssl` packages, which this profile will install by default.
 
 ---
 
@@ -69,13 +74,11 @@ profile_cassandra_pfpt::jvm_additional_opts:
   'print_flame_graphs': '-XX:+PreserveFramePointer'
 
 # --- Backup Configuration ---
-profile_cassandra_pfpt::incremental_backups: true
 profile_cassandra_pfpt::manage_full_backups: true
-profile_cassandra_pfpt::full_backup_schedule: 'daily'
+profile_cassandra_pfpt::full_backup_schedule: 'daily' # systemd timer spec
 profile_cassandra_pfpt::manage_incremental_backups: true
-profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *'
+profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # cron spec
 profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
-profile_cassandra_pfpt::backup_upload_streaming: true
 profile_cassandra_pfpt::clearsnapshot_keep_days: 7
 
 # --- Automated Repair Configuration ---
@@ -85,12 +88,12 @@ profile_cassandra_pfpt::repair_schedule: '*-*-1/5 01:00:00' # Every 5 days
 
 ### Managing Cassandra Roles
 
-You can declaratively manage Cassandra user roles. For production environments, it is highly recommended to encrypt passwords using [Hiera-eyaml](https://github.com/voxpupuli/hiera-eyaml). The profile supports this automatically, as Puppet will decrypt the secrets before passing them to the module.
+You can declaratively manage Cassandra user roles. For production environments, it is highly recommended to encrypt passwords using **Hiera-eyaml**. The profile supports this automatically, as Puppet will decrypt the secrets before passing them to the module.
 
 Here is an example showing both a plain-text password and an encrypted one:
 
 ```yaml
-# In your Hiera data (e.g., nodes/cassandra-node-1.yaml)
+# In your Hiera data
 profile_cassandra_pfpt::cassandra_roles:
   # Example with a plain-text password (suitable for development)
   'readonly_user':
@@ -129,11 +132,11 @@ This profile installs a suite of robust management scripts in `/usr/local/bin` o
 | `garbage-collect.sh`           | Safely runs `nodetool garbagecollect` with pre-flight safety checks.                                      |
 | `cleanup-node.sh`              | Safely runs `nodetool cleanup` after a new node is added to the cluster.                                    |
 | `upgrade-sstables.sh`          | Safely runs `nodetool upgradesstables` after a major Cassandra version upgrade.                               |
-| `robust_backup.sh`             | Creates a verified, ad-hoc local snapshot for testing or manual backup purposes.                            |
-| `restore-from-s3.sh`           | **(Primary Restore Tool)** A powerful script to restore data from S3 backups.                                   |
+| `restore-from-s3.sh`           | **(Primary Restore Tool)** A powerful script to restore data to a point in time from S3 backups.              |
 | `full-backup-to-s3.sh`         | (Automated) Script executed by `systemd` to perform scheduled full backups.                                 |
 | `incremental-backup-to-s3.sh`  | (Automated) Script executed by `systemd` to perform scheduled incremental backups.                          |
 | `cassandra-upgrade-precheck.sh`| A detailed, non-invasive script to validate readiness for a major version upgrade (e.g., 3.11 to 4.0).         |
+| `robust_backup.sh`             | Deprecated. Use `full-backup-to-s3.sh` with `backup_backend: 'local'`.                                     |
 
 ---
 
@@ -233,10 +236,10 @@ sudo /usr/local/bin/cleanup-node.sh
 This profile provides a fully automated, S3-based backup solution using `systemd` timers.
 
 #### How It Works
-1.  **Configuration:** You enable backups and set schedules through Hiera (see `manage_full_backups`, `full_backup_schedule`, etc.).
+1.  **Granular Backups:** Backups are no longer single, large archives. Instead, each table (for full backups) or set of incremental changes is archived and uploaded as a small, separate file to S3.
 2.  **Scheduling:** Puppet creates `systemd` timer units (`cassandra-full-backup.timer`, `cassandra-incremental-backup.timer`) on each node.
 3.  **Execution:** `systemd` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`).
-4.  **Process:** The scripts generate a `backup_manifest.json` with critical metadata, create a data snapshot, archive everything, and upload it to your S3 bucket.
+4.  **Process:** The scripts generate a `backup_manifest.json` with critical metadata for each backup run (identified by a `YYYY-MM-DD-HH-MM` timestamp), encrypt the archives, and upload them to a structured path in S3.
 5.  **Local Snapshot Cleanup:** The full backup script automatically deletes local snapshots older than `clearsnapshot_keep_days`.
 
 #### Pausing Backups
@@ -259,86 +262,82 @@ A safe, low-impact, automated repair process is critical for data consistency.
 
 ---
 
-## Disaster Recovery Guide: Restoring from Backups
+## Disaster Recovery Guide: Point-in-Time Recovery
 
-The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to handle multiple recovery scenarios. Before taking any action, the script will always download and display the backup's manifest file and require operator confirmation—a critical safety check.
+The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to restore data to a specific point in time by intelligently combining full and incremental backups.
+
+### The Restore Process
+
+1.  **Find the Backup Chain:** You provide a target timestamp. The script finds the most recent full backup *before* your target time, and all incremental backups between the full backup and your target.
+2.  **Confirm:** It presents this "restore chain" to you for confirmation before proceeding.
+3.  **Restore:** It restores the full backup, then applies each incremental backup in chronological order.
 
 ### Restore Modes
 
-#### Mode 1: Full Node Restore (Destructive)
-> **WARNING:** This mode is for recovering a completely failed node. It will **WIPE ALL CASSANDRA DATA** on the target node before restoring.
+#### Mode 1: Granular Restore (Non-Destructive)
+> This is the most common use case. It streams data for a specific table or keyspace into a **live, running cluster** without downtime.
 
-1.  SSH into the node you want to restore.
-2.  Run the script with the backup ID:
+*   **Usage:**
     ```bash
-    sudo /usr/local/bin/restore-from-s3.sh <backup_identifier>
-    ```
-The script is intelligent: if it detects the backup is from a different IP, it will automatically configure the node to replace the old one, assuming its identity and token ranges.
-
-#### Mode 2: Granular Restore (Keyspace or Table)
-> This is a **non-destructive** operation that uses `sstableloader` to stream data into a live cluster without downtime. The keyspace/table schema must already exist.
-
-1.  SSH into any Cassandra node in the cluster.
-2.  Run the script with the backup ID, keyspace, and optional table name:
-    ```bash
-    # Restore a single table
-    sudo /usr/local/bin/restore-from-s3.sh <backup_id> <keyspace_name> <table_name>
+    # Restore a single table to its state at or before the target time
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --table users
 
     # Restore an entire keyspace
-    sudo /usr/local/bin/restore-from-s3.sh <backup_id> <keyspace_name>
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app
+    ```
+
+#### Mode 2: Full Node Restore (Destructive)
+> **WARNING:** This mode is for recovering a completely failed node. It will **WIPE ALL CASSANDRA DATA** on the target node before restoring.
+
+*   **Usage:**
+    ```bash
+    # Restore the entire node to the state at the target time
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --full-restore
     ```
 
 #### Mode 3: Schema-Only Restore
-> This extracts the `schema.cql` file from a backup, which is the first step for a full cluster disaster recovery.
+> This extracts the `schema.cql` file from the relevant full backup, which is the first step for a full cluster disaster recovery.
 
-1.  SSH into one node of your new, empty cluster.
-2.  Run the script with the `--schema-only` flag:
+*   **Usage:**
     ```bash
-    sudo /usr/local/bin/restore-from-s3.sh --schema-only <backup_id>
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --schema-only
     ```
-This saves the schema to `/tmp/schema.cql`, which you can then apply to the cluster using `cqlsh`.
+This saves the schema to `/tmp/schema_restore.cql`, which you can then apply to your new cluster using `cqlsh`.
 
-### Full Cluster Restore (Cold Start)
+### Example: Full Cluster Restore (Cold Start)
 
 This procedure restores a full cluster from S3 backups onto brand-new machines.
 
 > #### Prerequisites
-> *   You have full backups for each node of the old cluster in S3.
+> *   You have full and incremental backups for each node of the old cluster in S3.
 > *   You have provisioned new machines, applied this Puppet profile, and the `cassandra` service is **stopped** on all of them.
 
 #### Step 1: Restore the Schema
 1.  Choose **one node** in the new cluster. Start the `cassandra` service on this node only.
 2.  SSH into that node.
-3.  Choose a full backup from any of your old nodes and run the restore script in schema-only mode:
+3.  Choose a target restore time and run the script in schema-only mode:
     ```bash
-    sudo /usr/local/bin/restore-from-s3.sh --schema-only <backup_id_of_any_old_node>
+    sudo /usr/local/bin/restore-from-s3.sh --date "YYYY-MM-DD-HH-MM" --schema-only
     ```
 4.  Apply the schema to the new cluster:
     ```bash
-    cqlsh -u cassandra -p 'YourPassword' --ssl -f /tmp/schema.cql
+    cqlsh -u cassandra -p 'YourPassword' --ssl -f /tmp/schema_restore.cql
     ```
 5.  Stop the `cassandra` service on this node. The entire new cluster should now be offline.
 
 #### Step 2: Perform a Rolling Restore of All Nodes
 The restore script handles the complexity of determining whether to start as a first seed or join an existing cluster.
 
-1.  **On the first node** (e.g., `new-cassandra-1`):
-    *   SSH into the node.
-    *   Run the restore script in full mode with the backup ID of the old node it is replacing:
+1.  **On each node (one at a time):**
+    *   SSH into the new node.
+    *   Run the restore script in full mode with the desired point-in-time timestamp.
         ```bash
-        sudo /usr/local/bin/restore-from-s3.sh <backup_id_for_old_cassandra_1>
+        sudo /usr/local/bin/restore-from-s3.sh --date "YYYY-MM-DD-HH-MM" --full-restore
         ```
-    *   The script will detect it's the first node, use `initial_token` to start, and wait for it to come online.
+    *   The script will download and apply the full backup and all necessary incrementals. It will then start Cassandra.
+    *   Wait for the node to come online and report `UN` in `nodetool status` before moving to the next node.
 
-2.  **On the second node** (e.g., `new-cassandra-2`):
-    *   Wait for the first node to be fully up (`nodetool status` from the first node should show `UN`).
-    *   SSH into the second node and run the restore script with its corresponding backup:
-        ```bash
-        sudo /usr/local/bin/restore-from-s3.sh <backup_id_for_old_cassandra_2>
-        ```
-    *   The script will detect a live seed node and automatically use the `replace_address` method to join the cluster.
-
-3.  **Repeat for all remaining nodes**, one at a time, until the entire cluster is recovered.
+2.  Repeat for all remaining nodes until the entire cluster is recovered.
 
 ---
 
@@ -401,7 +400,6 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::manage_incremental_backups` (Boolean): Enables the scheduled incremental backup script. Default: `false`.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
-*   `profile_cassandra_pfpt::backup_upload_streaming` (Boolean): If `true`, the full backup script will stream the archive directly to S3 without creating a large temporary file. **Recommended for large nodes.** Default: `false`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 
 ---
