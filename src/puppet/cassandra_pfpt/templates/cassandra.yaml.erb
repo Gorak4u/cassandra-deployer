@@ -1,0 +1,14 @@
+# This file is managed by Puppet
+cluster_name: '<%= @cluster_name %>'
+num_tokens: 256
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "<%= @seeds %>"
+storage_port: 7000
+ssl_storage_port: 7001
+listen_address: <%= @listen_address %>
+rpc_address: <%= @rpc_address %>
+endpoint_snitch: GossipingPropertyFileSnitch
+# Other configurations can be added here
+incremental_backups: true

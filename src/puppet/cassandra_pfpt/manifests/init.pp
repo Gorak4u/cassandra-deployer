@@ -1,120 +1,38 @@
+# Class: cassandra_pfpt
+#
+# This is the main class of the cassandra_pfpt module.
+# It orchestrates the entire Cassandra node setup.
+#
 class cassandra_pfpt (
-  String $package_name              = 'cassandra',
-  String $service_name              = 'cassandra',
-  String $config_file_path          = '/etc/cassandra/cassandra.yaml',
-  String $data_directory_path       = '/var/lib/cassandra/data',
-  String $log_directory_path        = '/var/log/cassandra',
-  String $user                      = 'cassandra',
-  String $group                     = 'cassandra',
-  Array[String] $seed_nodes         = [],
-  String $cluster_name              = 'MyCassandraCluster',
-  String $listen_address            = $facts['networking']['ip'],
-  Optional[String] $broadcast_address = undef,
+  String $cassandra_version,
+  String $cluster_name,
+  String $dc,
+  String $rack,
+  String $listen_address,
+  String $rpc_address,
+  String $seeds,
+  Boolean $backup_enabled,
+  String $s3_bucket_name,
+  Integer $full_backup_hour,
+  Integer $full_backup_minute,
+  Integer $incremental_backup_minute,
+  Integer $clearsnapshot_keep_days,
+  String $backup_backend,
 ) {
 
-  package { $package_name:
-    ensure => installed,
-  }
+  contain cassandra_pfpt::install
+  contain cassandra_pfpt::config
+  contain cassandra_pfpt::service
+  contain cassandra_pfpt::health
+  contain cassandra_pfpt::maintenance
+  contain cassandra_pfpt::management
+  contain cassandra_pfpt::backup
 
-  service { $service_name:
-    ensure  => running,
-    enable  => true,
-    require => Package[$package_name],
-  }
-
-  file { '/usr/local/bin/assassinate-node.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/assassinate-node.sh',
-  }
-
-  file { '/usr/local/bin/cassandra-upgrade-precheck.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/cassandra-upgrade-precheck.sh',
-  }
-
-  file { '/usr/local/bin/cassandra_range_repair.py':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/cassandra_range_repair.py',
-  }
-
-  file { '/usr/local/bin/cleanup-node.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/cleanup-node.sh',
-  }
-
-  file { '/usr/local/bin/cluster-health.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/cluster-health.sh',
-  }
-
-  file { '/usr/local/bin/compaction-manager.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/compaction-manager.sh',
-  }
-
-  file { '/usr/local/bin/decommission-node.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/decommission-node.sh',
-  }
-
-  file { '/usr/local/bin/disk-health-check.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/disk-health-check.sh',
-  }
-
-  file { '/usr/local/bin/drain-node.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/drain-node.sh',
-  }
-
-  file { '/usr/local/bin/full-backup-to-s3.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/full-backup-to-s3.sh',
-  }
-
-  file { '/usr/local/bin/garbage-collect.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/garbage-collect.sh',
-  }
-
-  file { '/usr/local/bin/incremental-backup-to-s3.sh':
-    ensure => file,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-    source => 'puppet:///modules/cassandra_pfpt/incremental-backup-to-s3.sh',
-  }
+  Class['cassandra_pfpt::install']
+  -> Class['cassandra_pfpt::config']
+  ~> Class['cassandra_pfpt::service']
+  -> Class['cassandra_pfpt::health']
+  -> Class['cassandra_pfpt::maintenance']
+  -> Class['cassandra_pfpt::management']
+  -> Class['cassandra_pfpt::backup']
 }

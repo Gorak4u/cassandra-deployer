@@ -1,0 +1,9 @@
+{
+  "s3_bucket_name": "<%= @s3_bucket_name %>",
+  "backup_backend": "<%= @backup_backend %>",
+  "cassandra_data_dir": "/var/lib/cassandra/data",
+  "full_backup_log_file": "/var/log/cassandra/full_backup.log",
+  "incremental_backup_log_file": "/var/log/cassandra/incremental_backup.log",
+  "listen_address": "<%= @listen_address %>",
+  "clearsnapshot_keep_days": <%= @clearsnapshot_keep_days %>
+}
