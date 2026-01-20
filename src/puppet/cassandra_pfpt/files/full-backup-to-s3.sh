@@ -41,7 +41,7 @@ fi
 SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/${HOSTNAME}_$SNAPSHOT_TAG"
+BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG"
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
@@ -61,7 +61,7 @@ cleanup_old_snapshots() {
         tag=$(echo "$snapshot_line" | awk '{print $1}')
         # Extract date from tag like 'full_snapshot_YYYYMMDDHHMMSS'
         local snapshot_date
-        snapshot_date=$(echo "$tag" | sed -n 's/^.*_\\([0-9]\\{8\\}\\)\\[0-9]\\{6\\}$/\\1/p')
+        snapshot_date=$(echo "$tag" | sed -n 's/^.*_\([0-9]\{8\}\)[0-9]\{6\}$/\1/p')
 
         if [ -n "$snapshot_date" ]; then
           if [ "$snapshot_date" -lt "$cutoff_date" ]; then
@@ -121,10 +121,10 @@ else
     NODE_IP="$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=$(nodetool status | grep "\\b$NODE_IP\\b")
+NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b")
 NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
 NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
-NODE_TOKENS=$(nodetool ring | grep "\\b$NODE_IP\\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
+NODE_TOKENS=$(nodetool ring | grep "\b$NODE_IP\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
 
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
@@ -163,8 +163,7 @@ log_message "Full snapshot taken successfully."
 find "$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/$SNAPSHOT_TAG/*" > "$BACKUP_TEMP_DIR/snapshot_files.list"
 
 # 5. Archive the files
-TARBALL_PATH_UNCOMPRESSED="$BACKUP_ROOT_DIR/${HOSTNAME}_$SNAPSHOT_TAG.tar"
-TARBALL_PATH="$TARBALL_PATH_UNCOMPRESSED.gz"
+TARBALL_PATH="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG.tar.gz"
 log_message "Archiving snapshot data to $TARBALL_PATH..."
 
 if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
@@ -173,8 +172,8 @@ if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
     exit 0
 fi
 
-tar -cf "$TARBALL_PATH_UNCOMPRESSED" --absolute-names -T "$BACKUP_TEMP_DIR/snapshot_files.list"
-tar -rf "$TARBALL_PATH_UNCOMPRESSED" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
+tar -czf "$TARBALL_PATH" -P -T "$BACKUP_TEMP_DIR/snapshot_files.list"
+tar -rf "$TARBALL_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
 log_message "Backup manifest appended to archive."
 
 # 6. Archive the schema
@@ -185,17 +184,11 @@ if [ $? -ne 0 ]; then
   log_message "WARNING: Failed to dump schema. Backup will continue without it."
 else
   # Add schema to the existing tarball
-  tar -rf "$TARBALL_PATH_UNCOMPRESSED" -C "$BACKUP_TEMP_DIR" "schema.cql"
+  tar -rf "$TARBALL_PATH" -C "$BACKUP_TEMP_DIR" "schema.cql"
   log_message "Schema appended to archive."
 fi
 
-# 7. Compress the archive
-log_message "Compressing the archive..."
-gzip "$TARBALL_PATH_UNCOMPRESSED"
-log_message "Archive compressed successfully."
-
-
-# 8. Upload to S3 and Cleanup
+# 7. Upload to S3 and Cleanup
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
     log_message "Backup archive is available at: $TARBALL_PATH"
@@ -213,7 +206,7 @@ else
         # fi
         log_message "S3 upload simulated successfully."
 
-        # 9. Cleanup (only after successful upload)
+        # 8. Cleanup (only after successful upload)
         log_message "Cleaning up local archive file..."
         rm -f "$TARBALL_PATH"
     else

@@ -1,40 +1,16 @@
-# @summary Manages basic firewall rules for Cassandra.
-# This is a placeholder and should be adapted to your specific firewall solution
-# (e.g., firewalld, iptables, ufw) and security zones.
+# @summary Placeholder for managing firewall rules for Cassandra.
 class cassandra_pfpt::firewall {
-  # This class is intentionally left blank.
-  # In a real environment, you would add resources for your chosen firewall tool.
-
-  # Example for firewalld (requires puppetlabs/firewalld module):
-  #
-  # firewalld_port { 'cassandra-jmx':
-  #   ensure   => present,
-  #   port     => '7199',
-  #   protocol => 'tcp',
-  #   zone     => 'internal',
+  # This is a placeholder for firewall rules.
+  # Implementation would go here, e.g., using puppetlabs/firewall module.
+  # Example:
+  # firewall { '100 allow cassandra gossip':
+  #   dport  => 7000,
+  #   proto  => 'tcp',
+  #   action => 'accept',
   # }
-  # firewalld_port { 'cassandra-internode':
-  #   ensure   => present,
-  #   port     => '7000',
-  #   protocol => 'tcp',
-  #   zone     => 'internal',
-  # }
-  # firewalld_port { 'cassandra-internode-ssl':
-  #   ensure   => present,
-  #   port     => '7001',
-  #   protocol => 'tcp',
-  #   zone     => 'internal',
-  # }
-  # firewalld_port { 'cassandra-cql':
-  #   ensure   => present,
-  #   port     => '9042',
-  #   protocol => 'tcp',
-  #   zone     => 'public',
-  # }
-  # firewalld_port { 'cassandra-thrift':
-  #   ensure   => present,
-  #   port     => '9160',
-  #   protocol => 'tcp',
-  #   zone     => 'public',
+  # firewall { '101 allow cassandra thrift':
+  #   dport  => 9160,
+  #   proto  => 'tcp',
+  #   action => 'accept',
   # }
 }

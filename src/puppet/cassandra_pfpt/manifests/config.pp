@@ -62,11 +62,12 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     group  => 'root',
     mode   => '0755',
   }
-  [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh',
-    'cleanup-node.sh', 'drain-node.sh',
-    'garbage-collect.sh', 'assassinate-node.sh',
-    'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh',
-    'cassandra_range_repair.py',
+  [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh', 'repair-node.sh',
+    'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
+    'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
+    'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
+    'cassandra_range_repair.py', 'range-repair.sh', 'robust_backup.sh',
+    'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh' ].each |$script| {
     file { "${$manage_bin_dir}/${$script}":
       ensure  => 'file',

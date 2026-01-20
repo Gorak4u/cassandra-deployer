@@ -69,7 +69,7 @@ fi
 log_message "Target: $TARGET_DESC"
 log_message "Disk path to monitor: $DISK_CHECK_PATH"
 log_message "Critical free space threshold: $CRITICAL_THRESHOLD%"
-log_message "Disk check interval: ${CHECK_INTERVAL}s"
+log_message "Disk check interval: $CHECK_INTERVALs"
 
 # Start compaction in the background
 log_message "Starting compaction process..."

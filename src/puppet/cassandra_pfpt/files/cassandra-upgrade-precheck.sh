@@ -178,8 +178,8 @@ check_data_health() {
 
     # Active Compactions
     local compact_count=$($NODETOOL compactionstats | grep "pending tasks:" | awk '{print $3}')
-    local active_lines=$(grep -v "pending tasks" <($NODETOOL compactionstats) | grep -v "compaction type" | grep -v "^-" | wc -l)
-
+    local active_lines=$($NODETOOL compactionstats | grep -v "pending tasks" | grep -v "compaction type" | grep -v "^-" | wc -l)
+    
     if [[ "$compact_count" -gt 0 ]] || [[ "$active_lines" -gt 0 ]]; then
         log_warn "Compactions are currently active or pending ($compact_count tasks)."
         log_warn "It is HIGHLY recommended to stop compactions ('nodetool stop COMPACTION') before shutting down for upgrade."
@@ -329,7 +329,7 @@ check_sstables
 check_schema_objects
 check_config_and_jvm
 
-echo -e "\\n======================================================"
+echo -e "\n======================================================"
 echo -e " SUMMARY"
 echo -e "======================================================"
 if [ "$FAILURES" -gt 0 ]; then

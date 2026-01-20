@@ -1,12 +1,7 @@
 #!/bin/bash
 # Checks Cassandra cluster health, Cqlsh connectivity, and native transport port
 
-IP_ADDRESS=""
-if [ -n "$1" ]; then
-    IP_ADDRESS="$1"
-else
-    IP_ADDRESS="$(hostname -I | awk '{print $1}')"
-fi
+IP_ADDRESS="${1:-$(hostname -I | awk '{print $1}')}" # Use provided IP or default to primary IP
 CQLSH_CONFIG="/root/.cassandra/cqlshrc"
 
 log_message() {
@@ -26,7 +21,7 @@ fi
 
 # 2. Check cqlsh connectivity
 log_message "Checking cqlsh connectivity using $CQLSH_CONFIG..."
-if cqlsh --cqlshrc "$CQLSH_CONFIG" "$IP_ADDRESS" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
+if cqlsh --cqlshrc "$CQLSH_CONFIG" "${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
   log_message "Cqlsh connectivity: OK"
 else
   log_message "Cqlsh connectivity: FAILED"
@@ -35,7 +30,7 @@ fi
 
 # 3. Check native transport port 9042 using nc
 log_message "Checking native transport port 9042..."
-if nc -z -w 5 "$IP_ADDRESS" 9042 >/dev/null 2>&1; then
+if nc -z -w 5 "${IP_ADDRESS}" 9042 >/dev/null 2>&1; then
   log_message "Port 9042 (Native Transport): OPEN"
 else
   log_message "Port 9042 (Native Transport): CLOSED or FAILED"

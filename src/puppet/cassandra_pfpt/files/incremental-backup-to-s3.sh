@@ -42,7 +42,7 @@ fi
 BACKUP_TAG="incremental_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/${HOSTNAME}_$BACKUP_TAG"
+BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$BACKUP_TAG"
 
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
@@ -95,10 +95,10 @@ else
     NODE_IP="$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=$(nodetool status | grep "\\b$NODE_IP\\b")
+NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b")
 NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
 NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
-NODE_TOKENS=$(nodetool ring | grep "\\b$NODE_IP\\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
+NODE_TOKENS=$(nodetool ring | grep "\b$NODE_IP\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
 
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
@@ -126,21 +126,14 @@ log_message "Manifest created successfully."
 
 
 # 5. Archive the files
-TARBALL_PATH_UNCOMPRESSED="$BACKUP_ROOT_DIR/${HOSTNAME}_$BACKUP_TAG.tar"
-TARBALL_PATH="$TARBALL_PATH_UNCOMPRESSED.gz"
+TARBALL_PATH="$BACKUP_ROOT_DIR/$HOSTNAME_$BACKUP_TAG.tar.gz"
 log_message "Archiving incremental data to $TARBALL_PATH..."
 
-tar -cf "$TARBALL_PATH_UNCOMPRESSED" --absolute-names -T "$BACKUP_TEMP_DIR/incremental_files.list"
-tar -rf "$TARBALL_PATH_UNCOMPRESSED" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
+tar -czf "$TARBALL_PATH" -P -T "$BACKUP_TEMP_DIR/incremental_files.list"
+tar -rf "$TARBALL_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
 log_message "Backup manifest appended to archive."
 
-# 6. Compress the archive
-log_message "Compressing the archive..."
-gzip "$TARBALL_PATH_UNCOMPRESSED"
-log_message "Archive compressed successfully."
-
-
-# 7. Upload to S3 and Cleanup
+# 6. Upload to S3 and Cleanup
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
     log_message "Backup archive is available at: $TARBALL_PATH"
@@ -153,7 +146,7 @@ else
         # In a real environment: aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"
         log_message "S3 upload simulated successfully."
 
-        # 8. Cleanup (only after successful upload)
+        # 7. Cleanup (only after successful upload)
         log_message "Cleaning up archived incremental backup files and local tarball..."
         xargs -a "$BACKUP_TEMP_DIR/incremental_files.list" rm -f
         log_message "Source incremental files deleted."

@@ -1,18 +1,16 @@
 # @summary Manages Java installation for Cassandra.
-class cassandra_pfpt::java {
-  if $cassandra_pfpt::java_package_name {
-    package { $cassandra_pfpt::java_package_name:
-      ensure => installed,
-    }
+class cassandra_pfpt::java inherits cassandra_pfpt {
+  if $java_package_name and $java_package_name != '' {
+    $actual_java_package = $java_package_name
   } else {
-    # Basic logic for OpenJDK, assumes RedHat family OS.
-    $java_pkg = $cassandra_pfpt::java_version ? {
-      '11'    => 'java-11-openjdk-devel',
-      '8'     => 'java-1.8.0-openjdk-devel',
-      default => fail("Unsupported Java version for automatic package selection: ${cassandra_pfpt::java_version}"),
+    $actual_java_package = $java_version ? {
+      '8'     => 'java-1.8.0-openjdk-headless',
+      '11'    => 'java-11-openjdk-headless',
+      '17'    => 'java-17-openjdk-headless',
+      default => "java-${$java_version}-openjdk-headless",
     }
-    package { $java_pkg:
-      ensure => installed,
-    }
+  }
+  package { $actual_java_package:
+    ensure  => 'present',
   }
 }

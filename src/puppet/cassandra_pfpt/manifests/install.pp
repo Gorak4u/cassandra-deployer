@@ -1,41 +1,45 @@
-# @summary Manages the installation of Cassandra and its dependencies.
+# @summary Handles package installation for Cassandra and dependencies.
 class cassandra_pfpt::install inherits cassandra_pfpt {
-
-  # Ensure dependencies are installed
-  if !empty($package_dependencies) {
-    package { $package_dependencies:
-      ensure => 'installed',
-    }
+  user { $user:
+    ensure     => 'present',
+    system     => true,
   }
-
+  group { $group:
+    ensure => 'present',
+    system => true,
+  }
   if $manage_repo {
     if $facts['os']['family'] == 'RedHat' {
+      $os_release_major = regsubst($facts['os']['release']['full'], '^(d+).*$', '\1')
       yumrepo { 'cassandra':
-        ensure   => 'present',
-        baseurl  => $repo_baseurl,
-        descr    => 'Apache Cassandra',
-        enabled  => 1,
-        gpgcheck => $repo_gpgcheck ? 1 : 0,
-        gpgkey   => $repo_gpgkey,
-        priority => $repo_priority,
-        skip_if_unavailable => $repo_skip_if_unavailable ? 1 : 0,
-        sslverify => $repo_sslverify ? 1 : 0,
+        descr               => "Apache Cassandra ${$cassandra_version} for EL${$os_release_major}",
+        baseurl             => $repo_baseurl,
+        enabled             => 1,
+        gpgcheck            => $repo_gpgcheck,
+        gpgkey              => $repo_gpgkey,
+        priority            => $repo_priority,
+        skip_if_unavailable => $repo_skip_if_unavailable,
+        sslverify           => $repo_sslverify,
+        require             => Group[$group],
       }
-      $repo_require = Yumrepo['cassandra']
-    } elsif $facts['os']['family'] == 'Debian' {
-      # Placeholder for Debian/Ubuntu repo management
-      # You would use apt::source and apt::key here
-      $repo_require = undef
-    } else {
-      fail("Unsupported OS family: ${facts['os']['family']}")
     }
-  } else {
-    $repo_require = undef
+    # Add logic for other OS families like Debian if needed
   }
-
+  package { $package_dependencies:
+    ensure  => 'present',
+    require => Class['cassandra_pfpt::java'],
+  }
+  $cassandra_ensure = $cassandra_version ? {
+    undef   => 'present',
+    default => $cassandra_version,
+  }
   package { 'cassandra':
-    ensure  => $cassandra_version,
-    require => $repo_require,
+    ensure  => $cassandra_ensure,
+    require => [ Class['cassandra_pfpt::java'], User[$user], Yumrepo['cassandra'] ],
     before  => Class['cassandra_pfpt::config'],
+  }
+  package { 'cassandra-tools':
+    ensure  => $cassandra_ensure,
+    require => Package['cassandra'],
   }
 }

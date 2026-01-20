@@ -142,8 +142,6 @@ class profile_cassandra_pfpt {
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
   $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
   $puppet_cron_schedule             = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => undef })
-  $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
-  $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -282,9 +280,5 @@ class profile_cassandra_pfpt {
     full_backup_log_file             => $full_backup_log_file,
     incremental_backup_log_file      => $incremental_backup_log_file,
     puppet_cron_schedule             => $puppet_cron_schedule,
-    backup_backend                   => $backup_backend,
-    clearsnapshot_keep_days          => $clearsnapshot_keep_days,
   }
 }
-
-    

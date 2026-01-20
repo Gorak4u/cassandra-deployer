@@ -1,26 +1,27 @@
-# @summary Optionally alters the replication factor of system keyspaces.
-class cassandra_pfpt::system_keyspaces {
-  # This is critical for multi-datacenter clusters.
-  if !empty($cassandra_pfpt::system_keyspaces_replication) {
-    # This needs to run after the service is up and the password has been set.
-    $cql_command_auth = "ALTER KEYSPACE system_auth WITH REPLICATION = ${cassandra_pfpt::system_keyspaces_replication}"
-    exec { 'alter-system-auth-replication':
-      command   => "cqlsh -u cassandra -p '${cassandra_pfpt::cassandra_password}' -e \"${cql_command_auth}\"",
-      path      => ['/bin', '/usr/bin'],
-      unless    => "cqlsh -u cassandra -p '${cassandra_pfpt::cassandra_password}' -e 'DESCRIBE KEYSPACE system_auth' | grep \"'class': 'NetworkTopologyStrategy'\" ",
-      require   => Exec['set-initial-cassandra-password'],
-      tries     => 3,
-      try_sleep => 10,
+# @summary Manages system keyspace replication for multi-DC clusters.
+class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
+  # Only proceed if a replication strategy is defined.
+  if !empty($system_keyspaces_replication) {
+    # The system_keyspaces_replication is a hash like {'dc1' => 3, 'dc2' => 3}
+    # We need to convert it to a string like "'dc1': '3', 'dc2': '3'"
+    $replication_map_parts = $system_keyspaces_replication.map |$dc, $rf| {
+      "'${$dc}': '${$rf}'"
     }
-
-    $cql_command_traces = "ALTER KEYSPACE system_traces WITH REPLICATION = ${cassandra_pfpt::system_keyspaces_replication}"
-    exec { 'alter-system-traces-replication':
-      command   => "cqlsh -u cassandra -p '${cassandra_pfpt::cassandra_password}' -e \"${cql_command_traces}\"",
-      path      => ['/bin', '/usr/bin'],
-      unless    => "cqlsh -u cassandra -p '${cassandra_pfpt::cassandra_password}' -e 'DESCRIBE KEYSPACE system_traces' | grep \"'class': 'NetworkTopologyStrategy'\" ",
-      require   => Exec['set-initial-cassandra-password'],
-      tries     => 3,
-      try_sleep => 10,
+    $replication_map_string = join($replication_map_parts, ', ')
+    $replication_cql_string = "{'class': 'NetworkTopologyStrategy', ${replication_map_string}}"
+    # Define the command to alter keyspaces
+    $alter_auth_cql = "ALTER KEYSPACE system_auth WITH replication = ${replication_cql_string}"
+    $alter_dist_cql = "ALTER KEYSPACE system_distributed WITH replication = ${replication_cql_string}"
+    $alter_traces_cql = "ALTER KEYSPACE system_traces WITH replication = ${replication_cql_string}"
+    # Use a single check for idempotency. This isn't perfect but is simpler.
+    # It checks if the string for system_auth's replication is what we expect.
+    $check_command = "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password}' -e \"DESCRIBE KEYSPACE system_auth;\" | grep -q \"replication = ${replication_cql_string}\""
+    exec { 'update_system_keyspace_replication':
+      command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password}' -e \"${alter_auth_cql}; ${alter_dist_cql}; ${alter_traces_cql};\"",
+      path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+      unless    => $check_command,
+      logoutput => on_failure,
+      require   => Exec['change_cassandra_password'], # Ensure password is set first
     }
   }
 }
