@@ -1,40 +1,180 @@
-#
-# @summary This profile configures a complete Cassandra node, including backups and operational scripts.
-#
-# @param cluster_name The name of the Cassandra cluster.
-# @param seeds An array of seed node IP addresses for the cluster.
-# @param backup_s3_bucket The S3 bucket where backups will be stored.
-# @param backup_encryption_key The secret key used to encrypt and decrypt backups.
-#
+# @summary Profile for a Cassandra node.
+# This class wraps the component module and provides its data via Hiera.
 class profile_cassandra_pfpt (
-  String                $cluster_name            = lookup('profile_cassandra_pfpt::cluster_name', { default_value => 'pfpt-cassandra-cluster' }),
-  Array[String]         $seeds                   = lookup('profile_cassandra_pfpt::seeds', { default_value => [] }),
-  String                $backup_s3_bucket        = lookup('profile_cassandra_pfpt::backup_s3_bucket', { default_value => 'puppet-cassandra-backups' }),
-  Sensitive[String]     $backup_encryption_key   = lookup('profile_cassandra_pfpt::backup_encryption_key'),
+  # This profile mirrors the parameters of the cassandra_pfpt component module.
+  # We use lookup() to pull values from Hiera, providing a clean separation
+  # of concerns. Default values are set here if not found in Hiera.
+
+  # Core Settings
+  String $cassandra_version                               = lookup('profile_cassandra_pfpt::cassandra_version', { default_value => '4.1.10-1' }),
+  String $java_version                                    = lookup('profile_cassandra_pfpt::java_version', { default_value => '11' }),
+  Optional[String] $java_package_name                     = lookup('profile_cassandra_pfpt::java_package_name', { default_value => undef }),
+  Boolean $manage_repo                                    = lookup('profile_cassandra_pfpt::manage_repo', { default_value => true }),
+  String $user                                            = lookup('profile_cassandra_pfpt::user', { default_value => 'cassandra' }),
+  String $group                                           = lookup('profile_cassandra_pfpt::group', { default_value => 'cassandra' }),
+  String $repo_baseurl                                    = lookup('profile_cassandra_pfpt::repo_baseurl', { default_value => 'https://downloads.apache.org/cassandra/redhat/41x/' }),
+  String $repo_gpgkey                                     = lookup('profile_cassandra_pfpt::repo_gpgkey', { default_value => 'https://downloads.apache.org/cassandra/KEYS' }),
+  Boolean $repo_gpgcheck                                  = lookup('profile_cassandra_pfpt::repo_gpgcheck', { default_value => true }),
+  Integer $repo_priority                                  = lookup('profile_cassandra_pfpt::repo_priority', { default_value => 1 }),
+  Boolean $repo_skip_if_unavailable                      = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { default_value => false }),
+  Boolean $repo_sslverify                                 = lookup('profile_cassandra_pfpt::repo_sslverify', { default_value => true }),
+  Array[String] $package_dependencies                     = lookup('profile_cassandra_pfpt::package_dependencies', { default_value => ['jq', 'awscli', 'openssl', 'nc'] }),
+  String $cluster_name                                    = lookup('profile_cassandra_pfpt::cluster_name', { default_value => 'pfpt-cassandra-cluster' }),
+  Array[String] $seeds_list                               = lookup('profile_cassandra_pfpt::seeds', { default_value => [] }),
+  Sensitive[String] $cassandra_password                   = lookup('profile_cassandra_pfpt::cassandra_password', { default_value => 'PP#C@ss@ndr@000' }),
+
+  # Topology & Networking
+  String $listen_address                                  = lookup('profile_cassandra_pfpt::listen_address', { default_value => $facts['networking']['ip'] }),
+  String $datacenter                                       = lookup('profile_cassandra_pfpt::datacenter', { default_value => 'dc1' }),
+  String $rack                                             = lookup('profile_cassandra_pfpt::rack', { default_value => 'rack1' }),
+
+  # Directories
+  String $data_dir                                         = lookup('profile_cassandra_pfpt::data_dir', { default_value => '/var/lib/cassandra/data' }),
+  String $saved_caches_dir                                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { default_value => '/var/lib/cassandra/saved_caches' }),
+  String $commitlog_dir                                    = lookup('profile_cassandra_pfpt::commitlog_dir', { default_value => '/var/lib/cassandra/commitlog' }),
+  String $hints_directory                                  = lookup('profile_cassandra_pfpt::hints_directory', { default_value => '/var/lib/cassandra/hints' }),
+  String $cdc_raw_directory                                = lookup('profile_cassandra_pfpt::cdc_raw_directory', { default_value => '/var/lib/cassandra/cdc_raw' }),
+
+  # JVM and Performance
+  String $max_heap_size                                    = lookup('profile_cassandra_pfpt::max_heap_size', { default_value => '3G' }),
+  String $gc_type                                          = lookup('profile_cassandra_pfpt::gc_type', { default_value => 'G1GC' }),
+  Hash $extra_jvm_args_override                           = lookup('profile_cassandra_pfpt::jvm_additional_opts', { default_value => {} }),
+
+  # Backup and Repair
+  Boolean $manage_full_backups                            = lookup('profile_cassandra_pfpt::manage_full_backups', { default_value => false }),
+  Boolean $manage_incremental_backups                     = lookup('profile_cassandra_pfpt::manage_incremental_backups', { default_value => false }),
+  String $full_backup_schedule                           = lookup('profile_cassandra_pfpt::full_backup_schedule', { default_value => 'daily' }),
+  Variant[String, Array[String]] $incremental_backup_schedule = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { default_value => '0 */4 * * *' }),
+  String $backup_s3_bucket                                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { default_value => 'puppet-cassandra-backups' }),
+  Sensitive[String] $backup_encryption_key                 = lookup('profile_cassandra_pfpt::backup_encryption_key'), # No default for security
+  String $backup_backend                                   = lookup('profile_cassandra_pfpt::backup_backend', { default_value => 's3' }),
+  Integer $clearsnapshot_keep_days                        = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { default_value => 3 }),
+  Boolean $manage_scheduled_repair                        = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { default_value => false }),
+  String $repair_schedule                                  = lookup('profile_cassandra_pfpt::repair_schedule', { default_value => '*-*-1/5 01:00:00' }),
+  Optional[String] $repair_keyspace                       = lookup('profile_cassandra_pfpt::repair_keyspace', { default_value => undef }),
+  Hash $cassandra_roles                                    = lookup('profile_cassandra_pfpt::cassandra_roles', { default_value => {} }),
+  Hash $system_keyspaces_replication                     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { default_value => {} }),
+  # Pass all the gathered parameters to the component class
 ) {
-
-  # This hash constructs the configuration that will be written to /etc/backup/config.json
-  # The component module cassandra_pfpt will handle the file creation.
-  $backup_config_hash = {
-    's3_bucket_name'                => $backup_s3_bucket,
-    'cassandra_data_dir'            => '/var/lib/cassandra/data',
-    'commitlog_dir'                 => '/var/lib/cassandra/commitlog',
-    'saved_caches_dir'              => '/var/lib/cassandra/saved_caches',
-    'full_backup_log_file'          => '/var/log/cassandra/full-backup.log',
-    'incremental_backup_log_file'   => '/var/log/cassandra/incremental-backup.log',
-    'listen_address'                => $facts['networking']['ip'],
-    'seeds_list'                    => $seeds,
-    'encryption_key'                => $backup_encryption_key.unwrap,
-  }
-
-  # Convert the hash to a JSON string
-  $backup_config_json = to_json_pretty($backup_config_hash)
-
-  # Include the component module, passing down all necessary data.
   class { 'cassandra_pfpt':
-    cluster_name          => $cluster_name,
-    seeds                 => $seeds,
-    backup_config_content => $backup_config_json,
-    # Pass other necessary parameters from Hiera to the component module below
+    cassandra_version             => $cassandra_version,
+    java_version                  => $java_version,
+    java_package_name             => $java_package_name,
+    manage_repo                   => $manage_repo,
+    user                          => $user,
+    group                         => $group,
+    repo_baseurl                  => $repo_baseurl,
+    repo_gpgkey                   => $repo_gpgkey,
+    repo_gpgcheck                 => $repo_gpgcheck,
+    repo_priority                 => $repo_priority,
+    repo_skip_if_unavailable      => $repo_skip_if_unavailable,
+    repo_sslverify                => $repo_sslverify,
+    package_dependencies          => $package_dependencies,
+    cluster_name                  => $cluster_name,
+    seeds_list                    => $seeds_list,
+    cassandra_password            => $cassandra_password,
+    listen_address                => $listen_address,
+    datacenter                    => $datacenter,
+    rack                          => $rack,
+    data_dir                      => $data_dir,
+    saved_caches_dir              => $saved_caches_dir,
+    commitlog_dir                 => $commitlog_dir,
+    hints_directory               => $hints_directory,
+    cdc_raw_directory             => $cdc_raw_directory,
+    max_heap_size                 => $max_heap_size,
+    gc_type                       => $gc_type,
+    extra_jvm_args_override       => $extra_jvm_args_override,
+    cassandra_roles               => $cassandra_roles,
+    system_keyspaces_replication  => $system_keyspaces_replication,
+
+    # Backup & Repair Parameters
+    manage_full_backups           => $manage_full_backups,
+    manage_incremental_backups    => $manage_incremental_backups,
+    full_backup_schedule          => $full_backup_schedule,
+    incremental_backup_schedule   => $incremental_backup_schedule,
+    backup_s3_bucket              => $backup_s3_bucket,
+    backup_encryption_key         => $backup_encryption_key,
+    backup_backend                => $backup_backend,
+    clearsnapshot_keep_days       => $clearsnapshot_keep_days,
+    manage_scheduled_repair       => $manage_scheduled_repair,
+    repair_schedule               => $repair_schedule,
+    repair_keyspace               => $repair_keyspace,
+
+    # Forward all other required parameters, using defaults from cassandra_pfpt if not specified
+    # This example is abbreviated for clarity. In a real scenario, you'd pass all params.
+    replace_address                         => '',
+    disable_swap                            => true,
+    sysctl_settings                         => {},
+    limits_settings                         => {},
+    manage_bin_dir                          => '/usr/local/bin',
+    jamm_source                             => 'https://repo1.maven.org/maven2/com/github/jbellis/jamm/0.4.0/jamm-0.4.0.jar',
+    jamm_target                             => '/usr/share/cassandra/lib/jamm-0.4.0.jar',
+    use_shenandoah_gc                       => false,
+    racks                                   => {},
+    ssl_enabled                             => false,
+    https_domain                            => 'localhost',
+    target_dir                              => '/etc/cassandra/conf',
+    keystore_path                           => '/etc/cassandra/conf/keystore.jks',
+    keystore_password                       => 'cassandra',
+    truststore_path                         => '/etc/cassandra/conf/truststore.jks',
+    truststore_password                     => 'cassandra',
+    internode_encryption                    => 'none',
+    internode_require_client_auth           => false,
+    client_optional                         => false,
+    client_require_client_auth              => false,
+    client_keystore_path                    => '/etc/cassandra/conf/client_keystore.jks',
+    client_truststore_path                  => '/etc/cassandra/conf/client_truststore.jks',
+    client_truststore_password              => 'cassandra',
+    tls_protocol                            => 'TLSv1.2',
+    tls_algorithm                           => 'SunX509',
+    store_type                              => 'JKS',
+    concurrent_compactors                   => 4,
+    compaction_throughput_mb_per_sec        => 16,
+    tombstone_warn_threshold                => 1000,
+    tombstone_failure_threshold             => 100000,
+    change_password_cql                     => "ALTER USER cassandra WITH PASSWORD '${cassandra_password}';",
+    cqlsh_path_env                          => '/usr/bin:/bin',
+    dynamic_snitch                          => true,
+    start_native_transport                  => true,
+    role_manager                            => 'CassandraRoleManager',
+    commit_failure_policy                   => 'stop',
+    commitlog_sync                          => 'periodic',
+    disk_failure_policy                     => 'stop',
+    incremental_backups                     => true,
+    max_hints_delivery_threads              => 2,
+    native_transport_flush_in_batches_legacy=> true,
+    native_transport_max_frame_size_in_mb   => 256,
+    range_request_timeout_in_ms             => 10000,
+    read_request_timeout_in_ms              => 5000,
+    request_timeout_in_ms                   => 10000,
+    ssl_storage_port                        => 7001,
+    storage_port                            => 7000,
+    truncate_request_timeout_in_ms          => 60000,
+    write_request_timeout_in_ms             => 2000,
+    commitlog_sync_period_in_ms             => 10000,
+    start_rpc                               => true,
+    rpc_port                                => 9160,
+    rpc_keepalive                           => true,
+    thrift_framed_transport_size_in_mb      => 15,
+    enable_transient_replication            => false,
+    manage_jmx_security                     => false,
+    jmx_password_file_content               => '',
+    jmx_access_file_content                 => '',
+    jmx_password_file_path                  => '/etc/cassandra/jmxremote.password',
+    jmx_access_file_path                    => '/etc/cassandra/jmxremote.access',
+    service_timeout_start_sec               => '180s',
+    manage_coralogix_agent                  => false,
+    coralogix_api_key                       => '',
+    coralogix_region                        => 'us',
+    coralogix_logs_enabled                  => true,
+    coralogix_metrics_enabled               => true,
+    enable_materialized_views               => false,
+    manage_jmx_exporter                     => false,
+    jmx_exporter_version                    => '0.16.1',
+    jmx_exporter_jar_source                 => "https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.16.1/jmx_prometheus_javaagent-0.16.1.jar",
+    jmx_exporter_jar_target                 => '/usr/share/cassandra/lib/jmx_prometheus_javaagent.jar',
+    jmx_exporter_config_source              => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml',
+    jmx_exporter_config_target              => '/etc/cassandra/conf/jmx_exporter_config.yaml',
+    jmx_exporter_port                       => 9404,
   }
 }
