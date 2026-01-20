@@ -119,20 +119,20 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
 
   return (
     <SidebarProvider>
-      <Sidebar className="border-r bg-card text-card-foreground">
+      <Sidebar className="border-r bg-sidebar text-sidebar-foreground">
         <SidebarHeader className="p-2">
             <div className="flex items-center gap-3">
              <div className="bg-primary text-primary-foreground p-2 rounded-lg shadow-md">
                 <RocketIcon className="w-6 h-6" />
              </div>
-             <h2 className="text-xl font-semibold text-primary">Cassandra Deployer</h2>
+             <h2 className="text-xl font-semibold text-sidebar-primary">Cassandra Deployer</h2>
           </div>
         </SidebarHeader>
         <Separator />
         <SidebarContent className="p-0">
             <div className="p-4">
                  <Select value={selectedRepo} onValueChange={handleRepoChange}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full bg-sidebar-background border-sidebar-border focus:ring-sidebar-ring">
                     <SelectValue placeholder="Select a repository" />
                   </SelectTrigger>
                   <SelectContent>
@@ -154,9 +154,9 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
             >
               {sortedGroups.map(([group, files]) => (
                 <AccordionItem value={group} key={group} className="border-b-0">
-                  <AccordionTrigger className="px-2 py-1.5 text-sm hover:bg-muted rounded-md hover:no-underline capitalize">
+                  <AccordionTrigger className="px-2 py-1.5 text-sm hover:bg-sidebar-accent/80 rounded-md hover:no-underline capitalize">
                     <div className="flex items-center gap-2">
-                      <Folder className="h-5 w-5 text-primary" />
+                      <Folder className="h-5 w-5 text-sidebar-primary" />
                       <span className="font-semibold">{group === 'root' ? 'Module Root' : group}</span>
                     </div>
                   </AccordionTrigger>
@@ -168,9 +168,9 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                           variant="ghost"
                           size="sm"
                           className={cn(
-                            'justify-start gap-2 h-8 font-normal',
+                            'justify-start gap-2 h-8 font-normal text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground',
                             selectedFile?.path === file.path &&
-                              'bg-accent text-accent-foreground hover:bg-accent/90 hover:text-accent-foreground'
+                              'bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent/90 hover:text-sidebar-accent-foreground'
                           )}
                           onClick={() => handleFileSelect(file)}
                         >
@@ -184,7 +184,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
               ))}
             </Accordion>
         </SidebarContent>
-        <SidebarFooter className="p-4 border-t">
+        <SidebarFooter className="p-4 border-t border-sidebar-border">
              <Button onClick={handleDownload} disabled={isDownloading} className="w-full">
                 <Download className="mr-2 h-4 w-4" />
                 {isDownloading ? 'Downloading...' : `Download All Modules`}
@@ -239,14 +239,15 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                             </Alert>
                             )}
                             {selectedFile.lang === 'markdown' ? (
-                                <div className="p-4 text-sm bg-muted/50 rounded-md overflow-x-auto border font-body">
-                                  <pre className="whitespace-pre-wrap font-body">
+                                <div className="p-4 text-sm bg-background rounded-md overflow-x-auto border font-body">
+                                  <pre className="whitespace-pre-wrap font-body leading-relaxed">
                                     {isLoadingFile ? 'Loading...' : fileContent}
                                   </pre>
                                 </div>
                               ) : (
                                 <CodeBlock
                                   code={isLoadingFile ? '// Loading...' : fileContent}
+                                  language={selectedFile.lang}
                                 />
                               )}
                         </CardContent>
