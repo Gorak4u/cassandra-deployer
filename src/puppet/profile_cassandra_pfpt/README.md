@@ -179,6 +179,12 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::backup_upload_streaming` (Boolean): If `true`, the full backup script will stream the archive directly to S3 without creating a temporary file on disk, saving significant local disk space. Default: `false`.
 
+### Scheduled Repair
+*   `profile_cassandra_pfpt::manage_scheduled_repair` (Boolean): Set to `true` to enable the automated weekly repair job. Default: `false`.
+*   `profile_cassandra_pfpt::repair_schedule` (String): The `systemd` OnCalendar schedule for the automated repair job. Default: `'*-*-1/5 01:00:00'`. This default schedules the repair to run on the 1st, 6th, 11th, 16th, 21st, and 26th of every month at 1 AM. This ensures that a full repair cycle completes at least twice within the typical 10-day `gc_grace_seconds` period, which is critical for data consistency.
+*   `profile_cassandra_pfpt::repair_keyspace` (String): If set, the automated repair job will only repair this specific keyspace. If unset, it repairs all non-system keyspaces. This allows for breaking up large repair jobs. Default: `undef`.
+
+
 ## Puppet Agent Management
 
 The base `cassandra_pfpt` component module includes logic to manage the Puppet agent itself by ensuring a scheduled run is in place via cron. This profile exposes the configuration for that feature.
