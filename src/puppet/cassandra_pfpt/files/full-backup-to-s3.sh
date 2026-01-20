@@ -163,7 +163,8 @@ log_message "Full snapshot taken successfully."
 find "$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/$SNAPSHOT_TAG/*" > "$BACKUP_TEMP_DIR/snapshot_files.list"
 
 # 5. Archive the files
-TARBALL_PATH="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG.tar.gz"
+TARBALL_PATH="$BACKUP_ROOT_DIR/${HOSTNAME}_${SNAPSHOT_TAG}.tar.gz"
+UNCOMPRESSED_TAR_PATH="$BACKUP_ROOT_DIR/${HOSTNAME}_${SNAPSHOT_TAG}.tar"
 log_message "Archiving snapshot data to $TARBALL_PATH..."
 
 if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
@@ -172,23 +173,36 @@ if [ ! -s "$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
     exit 0
 fi
 
-tar -czf "$TARBALL_PATH" -P -T "$BACKUP_TEMP_DIR/snapshot_files.list"
-tar -rf "$TARBALL_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
+# Create an uncompressed tarball of the main data files first
+log_message "Creating uncompressed archive of snapshot files..."
+tar -cf "$UNCOMPRESSED_TAR_PATH" -P -T "$BACKUP_TEMP_DIR/snapshot_files.list"
+
+# Append manifest to the uncompressed tarball
+log_message "Appending manifest to archive..."
+tar -rf "$UNCOMPRESSED_TAR_PATH" -C "$BACKUP_TEMP_DIR" "backup_manifest.json"
 log_message "Backup manifest appended to archive."
 
 # 6. Archive the schema
 log_message "Backing up schema..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
+# Use a timeout to prevent cqlsh from hanging indefinitely
 timeout 30 cqlsh -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"
 if [ $? -ne 0 ]; then
   log_message "WARNING: Failed to dump schema. Backup will continue without it."
 else
-  # Add schema to the existing tarball
-  tar -rf "$TARBALL_PATH" -C "$BACKUP_TEMP_DIR" "schema.cql"
+  # Add schema to the existing uncompressed tarball
+  log_message "Appending schema to archive..."
+  tar -rf "$UNCOMPRESSED_TAR_PATH" -C "$BACKUP_TEMP_DIR" "schema.cql"
   log_message "Schema appended to archive."
 fi
 
-# 7. Upload to S3 and Cleanup
+# 7. Compress the final tarball and clean up
+log_message "Compressing the final archive..."
+gzip -c "$UNCOMPRESSED_TAR_PATH" > "$TARBALL_PATH"
+rm -f "$UNCOMPRESSED_TAR_PATH"
+log_message "Archive compressed and temporary tar file removed."
+
+# 8. Upload to S3 and Cleanup
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
     log_message "Backup archive is available at: $TARBALL_PATH"
@@ -206,7 +220,7 @@ else
         # fi
         log_message "S3 upload simulated successfully."
 
-        # 8. Cleanup (only after successful upload)
+        # Cleanup (only after successful upload)
         log_message "Cleaning up local archive file..."
         rm -f "$TARBALL_PATH"
     else
