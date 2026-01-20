@@ -22,26 +22,26 @@ fi
 
 # Extract the command parameter from the JSON input
 # We use jq for robust JSON parsing
-COMMAND=$(echo "$cmd_json" | /usr/bin/jq -r '.command')
+COMMAND=\\$(echo "\\$cmd_json" | /usr/bin/jq -r '.command')
 
-if [ -z "$COMMAND" ]; then
+if [ -z "\\$COMMAND" ]; then
   echo "Error: 'command' parameter not provided in JSON input."
   exit 1
 fi
 
 # Basic security check: prevent running commands that could be destructive
 # This is a simple blacklist. In a real-world scenario, you might prefer a whitelist.
-if [[ "$COMMAND" =~ ^(stop|decommission|removenode|move|assassinate) ]]; then
-  echo "Error: Destructive commands like '$COMMAND' are not permitted via this task."
+if [[ "\\$COMMAND" =~ ^(stop|decommission|removenode|move|assassinate) ]]; then
+  echo "Error: Destructive commands like '\\$COMMAND' are not permitted via this task."
   exit 1
 fi
 
 # Execute the nodetool command
 # Ensure nodetool is in the path
-export PATH=$PATH:/usr/bin:/usr/sbin
+export PATH=\\$PATH:/usr/bin:/usr/sbin
 
-nodetool $COMMAND
-exit $?
+nodetool \\$COMMAND
+exit \\$?
 `.trim(),
     };
 
