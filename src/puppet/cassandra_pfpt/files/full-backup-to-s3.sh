@@ -5,7 +5,6 @@ set -euo pipefail
 
 # --- Configuration from JSON file ---
 CONFIG_FILE="/etc/backup/config.json"
-ENCRYPTION_KEY_FILE="/etc/backup/backup.key" # Path to the encryption key
 
 # --- Logging ---
 # This function will be defined after LOG_FILE is sourced from config
@@ -57,10 +56,6 @@ cleanup_old_snapshots() {
     log_message "--- Starting Old Snapshot Cleanup ---"
     log_message "Retention period: $KEEP_DAYS days"
     
-    # We need to handle both the old and new snapshot tag formats for a transition period.
-    # Old format: full_snapshot_YYYYMMDDHHMMSS
-    # New format: YYYY-MM-DD-HH-MM
-    
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
@@ -73,10 +68,8 @@ cleanup_old_snapshots() {
       tag=$(echo "$snapshot_line" | awk '{print $1}')
       local snapshot_timestamp=0
 
-      # Try parsing new format first: YYYY-MM-DD-HH-MM
       if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
           snapshot_timestamp=$(date -d "$(echo "$tag" | tr -d ' ')" +%s)
-      # Try parsing old format: full_snapshot_YYYYMMDD...
       elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}
           snapshot_timestamp=$(date -d "$snapshot_date_str" +%s)
@@ -111,18 +104,23 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-trap cleanup_temp_dir EXIT
+# Create a temporary file for the encryption key and set a trap to clean it up
+TMP_KEY_FILE=$(mktemp)
+chmod 600 "$TMP_KEY_FILE"
+trap 'rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
+
+# Extract key from config and write to temp file
+ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
+if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
+    log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
+    exit 1
+fi
+echo "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 # Check for global backup disable flag
 if [ -f "/var/lib/backup-disabled" ]; then
     log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
     exit 0
-fi
-
-# Check for encryption key
-if [ ! -r "$ENCRYPTION_KEY_FILE" ]; then
-    log_message "ERROR: Encryption key not found or not readable at $ENCRYPTION_KEY_FILE"
-    exit 1
 fi
 
 # Run cleanup of old snapshots BEFORE taking a new one
@@ -176,7 +174,7 @@ for ks in $(nodetool keyspaces); do
             # Streaming pipeline: tar -> gzip -> openssl -> aws s3
             tar -C "$snapshot_dir" -c . | \
             gzip | \
-            openssl enc -aes-256-cbc -salt -pass "file:$ENCRYPTION_KEY_FILE" | \
+            openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
 
             # Check the exit code of the aws cli command (the last in the pipe)
@@ -193,7 +191,6 @@ done
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
-    # We still upload a manifest so the operator knows what *did* succeed.
 fi
 
 # 4. Create Backup Manifest
@@ -270,7 +267,6 @@ else
             SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
             if ! aws s3 cp "$SCHEMA_FILE" "$SCHEMA_S3_PATH"; then
               log_message "ERROR: Failed to upload schema to S3."
-              # This is not a fatal error for the backup itself.
             else
               log_message "Schema uploaded successfully."
             fi

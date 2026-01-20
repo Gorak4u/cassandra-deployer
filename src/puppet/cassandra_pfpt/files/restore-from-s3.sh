@@ -7,7 +7,6 @@ set -euo pipefail
 
 # --- Configuration & Input ---
 CONFIG_FILE="/etc/backup/config.json"
-ENCRYPTION_KEY_FILE="/etc/backup/backup.key"
 HOSTNAME=$(hostname -s)
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
 
@@ -54,11 +53,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-if [ ! -r "$ENCRYPTION_KEY_FILE" ]; then
-    log_message "ERROR: Encryption key not found or not readable at $ENCRYPTION_KEY_FILE"
-    exit 1
-fi
-
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
@@ -74,7 +68,6 @@ if [ -n "$SEEDS" ]; then
 else
     LOADER_NODES="$LISTEN_ADDRESS"
 fi
-
 
 # --- Argument Parsing ---
 if [ "$#" -eq 0 ]; then
@@ -99,7 +92,6 @@ if [ -z "$TARGET_DATE" ]; then
     usage
 fi
 
-# Determine mode if not explicitly set
 if [ -z "$MODE" ]; then
     if [ -n "$KEYSPACE_NAME" ]; then
         MODE="granular"
@@ -114,9 +106,22 @@ if [ "$MODE" = "granular" ] && [ -z "$KEYSPACE_NAME" ]; then
     usage
 fi
 
+# Create a temporary file for the encryption key and set a trap to clean it up
+TMP_KEY_FILE=$(mktemp)
+chmod 600 "$TMP_KEY_FILE"
+trap 'rm -f "$TMP_KEY_FILE"' EXIT
+
+# Extract key from config and write to temp file
+ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
+if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
+    log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
+    exit 1
+fi
+echo "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+
+
 # --- Core Logic Functions ---
 
-# Finds the correct sequence of full + incremental backups to restore
 find_backup_chain() {
     log_message "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
     
@@ -127,7 +132,6 @@ find_backup_chain() {
         exit 1
     fi
 
-    # List all backup folders (timestamps) from S3 for this host
     log_message "Listing available backups from S3..."
     local all_backups
     all_backups=$(aws s3 ls "s3://$S3_BUCKET_NAME/$HOSTNAME/" | awk '{print $2}' | sed 's/\///' || true)
@@ -137,7 +141,6 @@ find_backup_chain() {
         exit 1
     fi
 
-    # Filter to backups at or before the target date
     local eligible_backups=()
     for backup_ts in $all_backups; do
         local backup_date_seconds
@@ -152,7 +155,6 @@ find_backup_chain() {
         exit 1
     fi
 
-    # Sort reverse-chronologically to find the chain
     local sorted_backups
     sorted_backups=($(printf "%s\n" "${eligible_backups[@]}" | sort -r))
 
@@ -179,13 +181,11 @@ find_backup_chain() {
         }
     done
 
-    # Validate chain
     if [ -z "$BASE_FULL_BACKUP" ]; then
         log_message "ERROR: Point-in-time recovery failed. Could not find a 'full' backup in the history for the specified date."
         exit 1
     fi
 
-    # Reverse the chain to be chronological for restore
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
@@ -238,7 +238,6 @@ do_full_restore() {
     log_message "3. Downloading and extracting data from backup chain..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
-        # List all table archives in this backup
         local table_archives
         table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.enc)$' | awk '{print $4}')
 
@@ -251,8 +250,7 @@ do_full_restore() {
             log_message "Restoring to $target_dir from $s3_path"
             mkdir -p "$target_dir"
             
-            # Decrypt and extract directly to the target directory
-            if ! aws s3 cp "$s3_path" - | openssl enc -d -aes-256-cbc -pass "file:$ENCRYPTION_KEY_FILE" | tar -xzf - -C "$target_dir"; then
+            if ! aws s3 cp "$s3_path" - | openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | tar -xzf - -C "$target_dir"; then
                  log_message "ERROR: Failed to download or extract $archive_key. Aborting restore."
                  exit 1
             fi
@@ -260,8 +258,6 @@ do_full_restore() {
     done
     log_message "All data from backup chain extracted."
     
-    # Logic for joining cluster vs first seed is complex and should be handled by Puppet/Hiera for a real DR scenario.
-    # For now, we assume a simple restart. The operator should have configured initial_token or seeds via Hiera.
     log_message "4. Setting permissions..."
     chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
     chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
@@ -279,7 +275,8 @@ do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
     
     local restore_temp_dir="/tmp/restore_$$"
-    trap 'rm -rf "$restore_temp_dir"' EXIT
+    # Overwrite the trap to include the new temp dir
+    trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$restore_temp_dir"' EXIT
     mkdir -p "$restore_temp_dir"
 
     log_message "Streaming data to cluster nodes ($LOADER_NODES) with sstableloader..."
@@ -287,9 +284,9 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
-        # Check for full backup file first, then incremental
-        local archive_path_full="$HOSTNAME/$backup_ts/$KEYSPACE_NAME/$TABLE_NAME/table.tar.enc"
-        local archive_path_incr="$HOSTNAME/$backup_ts/$KEYSPACE_NAME/$TABLE_NAME/incremental.tar.enc"
+        local archive_path_base="$HOSTNAME/$backup_ts/$KEYSPACE_NAME/$TABLE_NAME"
+        local archive_path_full="$archive_path_base/$TABLE_NAME.tar.enc"
+        local archive_path_incr="$archive_path_base/incremental.tar.enc"
         local archive_to_download=""
 
         if aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_full" >/dev/null 2>&1; then
@@ -306,23 +303,19 @@ do_granular_restore() {
         local table_restore_dir="$restore_temp_dir/$KEYSPACE_NAME/$TABLE_NAME-$(date +%s)"
         mkdir -p "$table_restore_dir"
         
-        # Download, decrypt, and extract
         aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | \
-        openssl enc -d -aes-256-cbc -pass "file:$ENCRYPTION_KEY_FILE" | \
+        openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | \
         tar -xzf - -C "$table_restore_dir"
 
-        # Run sstableloader on the extracted files
         if sstableloader -d "$LOADER_NODES" "$table_restore_dir"; then
             log_message "Successfully loaded data from backup $backup_ts."
-            rm -rf "$table_restore_dir" # Clean up after successful load
+            rm -rf "$table_restore_dir"
         else
             log_message "ERROR: sstableloader failed for data from backup $backup_ts. Aborting."
             exit 1
         fi
     done
     
-    trap - EXIT
-    rm -rf "$restore_temp_dir"
     log_message "--- Granular Restore Process Finished Successfully ---"
 }
 
@@ -341,7 +334,6 @@ if [[ "$manifest_confirmation" != "yes" ]]; then
     exit 0
 fi
 
-# Execute the chosen mode
 case $MODE in
     "schema")
         do_schema_restore

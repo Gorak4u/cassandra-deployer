@@ -5,7 +5,6 @@ set -euo pipefail
 
 # --- Configuration from JSON file ---
 CONFIG_FILE="/etc/backup/config.json"
-ENCRYPTION_KEY_FILE="/etc/backup/backup.key" # Path to the encryption key
 
 # --- Logging ---
 # This function will be defined after LOG_FILE is sourced from config
@@ -42,10 +41,9 @@ if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" 
 fi
 
 # --- Static Configuration ---
-BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
+BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M')
 HOSTNAME=$(hostname -s)
-BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$" # Use PID to ensure uniqueness
-
+BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$"
 
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
@@ -61,7 +59,19 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-trap cleanup_temp_dir EXIT
+# Create a temporary file for the encryption key and set a trap to clean it up
+TMP_KEY_FILE=$(mktemp)
+chmod 600 "$TMP_KEY_FILE"
+trap 'rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
+
+# Extract key from config and write to temp file
+ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
+if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
+    log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
+    exit 1
+fi
+echo "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+
 
 # Check for global backup disable flag
 if [ -f "/var/lib/backup-disabled" ]; then
@@ -69,18 +79,11 @@ if [ -f "/var/lib/backup-disabled" ]; then
     exit 0
 fi
 
-# Check for encryption key
-if [ ! -r "$ENCRYPTION_KEY_FILE" ]; then
-    log_message "ERROR: Encryption key not found or not readable at $ENCRYPTION_KEY_FILE"
-    exit 1
-fi
-
 log_message "--- Starting Granular Incremental Cassandra Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
 log_message "Backup Timestamp (Tag): $BACKUP_TAG"
 
 # Find all incremental backup directories that are not empty
-# This finds any 'backups' directory with at least one file, then returns the directory name
 INCREMENTAL_DIRS=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print)
 
 if [ -z "$INCREMENTAL_DIRS" ]; then
@@ -98,11 +101,9 @@ SYSTEM_KEYSPACES="system system_auth system_distributed system_schema system_tra
 
 # Loop through each directory containing incremental backups
 echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
-    # Path is like: /var/lib/cassandra/data/my_ks/my_table-uuid/backups
     relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
     ks_name=$(echo "$relative_path" | cut -d'/' -f1)
 
-    # Skip system keyspaces
     if [[ $SYSTEM_KEYSPACES =~ $ks_name ]]; then
         continue
     fi
@@ -117,7 +118,7 @@ echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
     # Streaming pipeline: tar -> gzip -> openssl -> aws s3
     tar -C "$backup_dir" -c . | \
     gzip | \
-    openssl enc -aes-256-cbc -salt -pass "file:$ENCRYPTION_KEY_FILE" | \
+    openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
     aws s3 cp - "$s3_path"
 
     # Check the exit code of the aws cli command (the last in the pipe)
@@ -125,7 +126,6 @@ echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
         log_message "Successfully uploaded incremental backup for $ks_name.$table_name"
         TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name.$table_name\"]")
         
-        # After success, clean up the source files
         log_message "Cleaning up local incremental files for $ks_name.$table_name"
         rm -f "$backup_dir"/*
     else
@@ -136,9 +136,7 @@ done
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_message "ERROR: $UPLOAD_ERRORS incremental backup(s) failed to upload. The backup is incomplete."
-    # We still upload a manifest so the operator knows what *did* succeed.
 fi
-
 
 # Create and Upload Manifest
 log_message "Creating backup manifest at $MANIFEST_FILE..."
@@ -185,7 +183,6 @@ else
         MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
         if ! aws s3 cp "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
             log_message "ERROR: Failed to upload manifest to S3. The backup is not properly indexed."
-            # Don't exit, still report final status
         else
             log_message "Manifest uploaded successfully."
         fi
