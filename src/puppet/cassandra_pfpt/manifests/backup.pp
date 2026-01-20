@@ -18,7 +18,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
       owner   => 'root',
       group   => 'root',
       mode    => '0600',
-      content => template('cassandra_pfpt/backup.config.json.erb'),
+      content => template('cassandra_pfpt/backup_config.json.erb'),
       require => File['/etc/backup'],
     }
   }
