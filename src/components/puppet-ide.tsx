@@ -193,76 +193,74 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <main className="min-h-screen bg-background font-body text-foreground">
-            <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur-sm px-4 lg:h-[60px] lg:px-6">
-                <SidebarTrigger className="md:hidden" />
-                <div className="flex-1">
-                     {selectedFile && (
-                        <span className="font-mono text-sm bg-muted px-2 py-1 rounded">
-                            {selectedFile.path}
-                        </span>
-                     )}
-                </div>
-            </header>
-
-            <div className="flex-1 p-4 md:p-6 lg:p-8">
-                {selectedFile ? (
-                    <Card className="w-full shadow-md border">
-                        <CardHeader>
-                            <CardTitle>{selectedFile.name.split('/').pop()}</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'cassandra_pfpt' && (
-                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
-                                <Terminal className="h-4 w-4 text-accent" />
-                                <AlertTitle>Component Module</AlertTitle>
-                                <AlertDescription>
-                                This is the main component module. It is highly parameterized and should not contain direct Hiera lookups.
-                                </AlertDescription>
-                            </Alert>
-                            )}
-                            {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'profile_cassandra_pfpt' && (
-                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
-                                <Terminal className="h-4 w-4 text-accent" />
-                                <AlertTitle>Profile Module</AlertTitle>
-                                <AlertDescription>
-                                This profile wraps the component module and provides its data via Hiera.
-                                </AlertDescription>
-                            </Alert>
-                            )}
-                            {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'role_cassandra_pfpt' && (
-                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
-                                <Terminal className="h-4 w-4 text-accent" />
-                                <AlertTitle>Role Module</AlertTitle>
-                                <AlertDescription>
-                                This role includes the profile to define a complete Cassandra server. This is what you assign to nodes.
-                                </AlertDescription>
-                            </Alert>
-                            )}
-                            {selectedFile.lang === 'markdown' ? (
-                                <div className="p-4 bg-background rounded-md overflow-x-auto">
-                                  <MarkdownView content={isLoadingFile ? 'Loading...' : fileContent} />
-                                </div>
-                              ) : (
-                                <CodeBlock
-                                  code={isLoadingFile ? '// Loading...' : fileContent}
-                                  language={selectedFile.lang}
-                                />
-                              )}
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-[60vh] text-center text-muted-foreground rounded-lg border-2 border-dashed">
-                        <Package className="mx-auto h-16 w-16" />
-                        <h2 className="mt-4 text-xl font-semibold">Welcome to the Cassandra Deployer</h2>
-                        <p className="mt-2 max-w-md">Select a file from the sidebar to explore the Puppet modules that power your Cassandra deployment architecture.</p>
-                    </div>
-                )}
+        <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur-sm px-4 lg:h-[60px] lg:px-6">
+            <SidebarTrigger className="md:hidden" />
+            <div className="flex-1">
+                 {selectedFile && (
+                    <span className="font-mono text-sm bg-muted px-2 py-1 rounded">
+                        {selectedFile.path}
+                    </span>
+                 )}
             </div>
-            <footer className="text-center p-4 text-sm text-muted-foreground">
-                <p>Built for stability and scale.</p>
-            </footer>
-        </main>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+            {selectedFile ? (
+                <Card className="w-full shadow-md border">
+                    <CardHeader>
+                        <CardTitle>{selectedFile.name.split('/').pop()}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'cassandra_pfpt' && (
+                        <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                            <Terminal className="h-4 w-4 text-accent" />
+                            <AlertTitle>Component Module</AlertTitle>
+                            <AlertDescription>
+                            This is the main component module. It is highly parameterized and should not contain direct Hiera lookups.
+                            </AlertDescription>
+                        </Alert>
+                        )}
+                        {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'profile_cassandra_pfpt' && (
+                        <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                            <Terminal className="h-4 w-4 text-accent" />
+                            <AlertTitle>Profile Module</AlertTitle>
+                            <AlertDescription>
+                            This profile wraps the component module and provides its data via Hiera.
+                            </AlertDescription>
+                        </Alert>
+                        )}
+                        {selectedFile.name.endsWith('init.pp') && selectedFile.repo === 'role_cassandra_pfpt' && (
+                        <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                            <Terminal className="h-4 w-4 text-accent" />
+                            <AlertTitle>Role Module</AlertTitle>
+                            <AlertDescription>
+                            This role includes the profile to define a complete Cassandra server. This is what you assign to nodes.
+                            </AlertDescription>
+                        </Alert>
+                        )}
+                        {selectedFile.lang === 'markdown' ? (
+                            <div className="p-4 bg-background rounded-md overflow-x-auto">
+                              <MarkdownView content={isLoadingFile ? 'Loading...' : fileContent} />
+                            </div>
+                          ) : (
+                            <CodeBlock
+                              code={isLoadingFile ? '// Loading...' : fileContent}
+                              language={selectedFile.lang}
+                            />
+                          )}
+                    </CardContent>
+                </Card>
+            ) : (
+                <div className="flex flex-col items-center justify-center h-[60vh] text-center text-muted-foreground rounded-lg border-2 border-dashed">
+                    <Package className="mx-auto h-16 w-16" />
+                    <h2 className="mt-4 text-xl font-semibold">Welcome to the Cassandra Deployer</h2>
+                    <p className="mt-2 max-w-md">Select a file from the sidebar to explore the Puppet modules that power your Cassandra deployment architecture.</p>
+                </div>
+            )}
+        </div>
+        <footer className="text-center p-4 text-sm text-muted-foreground border-t">
+            <p>Built for stability and scale.</p>
+        </footer>
       </SidebarInset>
     </SidebarProvider>
   );
