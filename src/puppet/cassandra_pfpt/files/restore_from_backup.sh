@@ -1,1 +1,2 @@
-#!/bin/bash\\necho "Restore from Backup Script Placeholder"
+#!/bin/bash
+echo "Restore from Backup Script Placeholder"
