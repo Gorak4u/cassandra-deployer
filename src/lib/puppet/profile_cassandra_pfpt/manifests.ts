@@ -129,8 +129,8 @@ class profile_cassandra_pfpt {
   # JMX Exporter Settings
   \$manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
   \$jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
-  \$jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-\\\${\$jmx_exporter_version}.jar" })
-  \$jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-\\\${\$jmx_exporter_version}.jar" })
+  \$jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-\${jmx_exporter_version}.jar" })
+  \$jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-\${jmx_exporter_version}.jar" })
   \$jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
   \$jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
   \$jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })

@@ -1,5 +1,4 @@
 
-export const init = `
 # @summary Main component class for managing Cassandra.
 # This class is fully parameterized and should receive its data from a profile.
 class cassandra_pfpt (
@@ -156,6 +155,12 @@ class cassandra_pfpt (
     $seeds_list
   }
   
+  # Set cqlsh --ssl option globally for all inheriting classes
+  $cqlsh_ssl_opt = $ssl_enabled ? {
+    true  => '--ssl',
+    false => '',
+  }
+
   # Calculate default JVM args based on GC type and Java version
   $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
     {
@@ -209,4 +214,3 @@ class cassandra_pfpt (
   -> Class['cassandra_pfpt::config']
   ~> Class['cassandra_pfpt::service']
 }
-`.trim();

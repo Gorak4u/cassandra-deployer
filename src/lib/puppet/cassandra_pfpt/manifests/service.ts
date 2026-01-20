@@ -21,10 +21,6 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     group   => 'root',
     mode    => '0600',
   }
-  $cqlsh_ssl_opt = $ssl_enabled ? {
-    true  => '--ssl',
-    false => '',
-  }
   # Change only if new password isn't already active
   exec { 'change_cassandra_password':
     command     => "cqlsh \${cqlsh_ssl_opt} -u cassandra -p cassandra -f \${change_password_cql} \${listen_address}",
