@@ -19,7 +19,19 @@ import {
 import { RocketIcon } from '@/components/icons';
 import { CodeBlock } from '@/components/code-block';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal, Folder, File as FileIcon, Download, Package } from 'lucide-react';
+import { 
+    Terminal, 
+    Folder, 
+    File as FileIcon, 
+    Download, 
+    Package,
+    Puzzle,
+    FileCode,
+    FileJson,
+    Shell,
+    FileText,
+    FileCog,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -42,6 +54,7 @@ import { Separator } from '@/components/ui/separator';
 import type { PuppetFile } from '@/lib/actions';
 import { getFileContent, getZippedModules } from '@/lib/actions';
 import { MarkdownView } from './markdown-view';
+import { Skeleton } from './ui/skeleton';
 
 
 const getRepoFilesByGroup = (repoName: string, allFiles: PuppetFile[]) => {
@@ -78,6 +91,27 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
   const [fileContent, setFileContent] = useState('// Select a file to view its content');
   const [isDownloading, setIsDownloading] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  const getFileIcon = (lang: string) => {
+    switch (lang) {
+        case 'puppet':
+            return <Puzzle className="h-4 w-4" />;
+        case 'ruby':
+        case 'python':
+            return <FileCode className="h-4 w-4" />;
+        case 'yaml':
+        case 'json':
+            return <FileJson className="h-4 w-4" />;
+        case 'bash':
+            return <Shell className="h-4 w-4" />;
+        case 'markdown':
+            return <FileText className="h-4 w-4" />;
+        case 'binary':
+            return <FileCog className="h-4 w-4" />;
+        default:
+            return <FileIcon className="h-4 w-4" />;
+    }
+  }
 
   const handleFileSelect = async (file: PuppetFile) => {
     setSelectedFile(file);
@@ -175,7 +209,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                           )}
                           onClick={() => handleFileSelect(file)}
                         >
-                          <FileIcon className="h-4 w-4" />
+                          {getFileIcon(file.lang)}
                           {file.name.split('/').pop()}
                         </Button>
                       ))}
@@ -238,13 +272,15 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                             </AlertDescription>
                         </Alert>
                         )}
-                        {selectedFile.lang === 'markdown' ? (
+                        {isLoadingFile ? (
+                            <Skeleton className="h-96 w-full rounded-md" />
+                        ) : selectedFile.lang === 'markdown' ? (
                             <div className="p-4 bg-background rounded-md overflow-x-auto">
-                              <MarkdownView content={isLoadingFile ? 'Loading...' : fileContent} />
+                              <MarkdownView content={fileContent} />
                             </div>
                           ) : (
                             <CodeBlock
-                              code={isLoadingFile ? '// Loading...' : fileContent}
+                              code={fileContent}
                               language={selectedFile.lang}
                             />
                           )}
