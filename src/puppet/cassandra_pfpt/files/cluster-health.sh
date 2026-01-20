@@ -3,10 +3,17 @@
 
 IP_ADDRESS="${1:-$(hostname -I | awk '{print $1}')}" # Use provided IP or default to primary IP
 CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+CQLSH_SSL_OPT=""
 
 log_message() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
+
+# Check for SSL configuration in cqlshrc
+if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+    log_message "SSL section found in cqlshrc, using --ssl for cqlsh commands."
+    CQLSH_SSL_OPT="--ssl"
+fi
 
 # 1. Check nodetool status for 'UN' (Up, Normal)
 log_message "Checking nodetool status..."
@@ -21,7 +28,7 @@ fi
 
 # 2. Check cqlsh connectivity
 log_message "Checking cqlsh connectivity using $CQLSH_CONFIG..."
-if cqlsh --cqlshrc "$CQLSH_CONFIG" "${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
+if cqlsh --cqlshrc "$CQLSH_CONFIG" ${CQLSH_SSL_OPT} "${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
   log_message "Cqlsh connectivity: OK"
 else
   log_message "Cqlsh connectivity: FAILED"

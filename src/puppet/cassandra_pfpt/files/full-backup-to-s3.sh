@@ -179,8 +179,15 @@ fi
 # 6. Archive the schema
 log_message "Backing up schema..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
+# Determine if SSL is needed for cqlsh
+CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+CQLSH_SSL_OPT=""
+if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+    log_message "INFO: SSL section found in cqlshrc, using --ssl for cqlsh schema dump."
+    CQLSH_SSL_OPT="--ssl"
+fi
 # Use a timeout to prevent cqlsh from hanging indefinitely
-timeout 30 cqlsh -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"
+timeout 30 cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"
 if [ $? -ne 0 ]; then
   log_message "WARNING: Failed to dump schema. Backup will continue without it."
 else

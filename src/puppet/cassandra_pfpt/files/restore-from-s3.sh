@@ -67,6 +67,13 @@ fi
 # --- Function for Schema-Only Restore ---
 do_schema_restore() {
     local MANIFEST_JSON="$1"
+    
+    local CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+    local CQLSH_SSL_OPT=""
+    if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+        CQLSH_SSL_OPT="--ssl"
+    fi
+
     log_message "--- Starting Schema-Only Restore for Backup ID: $BACKUP_ID ---"
 
     log_message "Downloading backup to extract schema..."
@@ -76,7 +83,7 @@ do_schema_restore() {
     fi
     if aws s3 cp "$S3_PATH" - | tar -xzf - --to-stdout schema.cql > /tmp/schema.cql 2>/dev/null; then
         log_message "SUCCESS: Schema extracted to /tmp/schema.cql"
-        log_message "Please review this file, then apply it to your cluster using: cqlsh -u <user> -p <password> -f /tmp/schema.cql"
+        log_message "Please review this file, then apply it to your cluster using: cqlsh -u <user> -p <password> ${CQLSH_SSL_OPT} -f /tmp/schema.cql"
     else
         log_message "ERROR: Failed to extract schema.cql from the backup. The backup may be corrupted or may not contain a schema file."
         exit 1
@@ -285,14 +292,22 @@ do_granular_restore() {
     log_message "Found data to restore at: $restore_path"
     log_message "Streaming data to cluster nodes ($LOADER_NODES) with sstableloader..."
 
+    # Define SSL option based on cqlshrc
+    local CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+    local CQLSH_SSL_OPT=""
+    if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+        log_message "INFO: SSL section found in cqlshrc, using --ssl for cqlsh commands."
+        CQLSH_SSL_OPT="--ssl"
+    fi
+
     # Ensure the schema exists before loading data
     log_message "Verifying schema exists..."
-    if ! cqlsh -e "DESCRIBE KEYSPACE $KEYSPACE_NAME;" &>/dev/null; then
+    if ! cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE KEYSPACE $KEYSPACE_NAME;" &>/dev/null; then
         log_message "ERROR: Keyspace '$KEYSPACE_NAME}' does not exist in the cluster."
         log_message "You must restore the schema before you can load data."
         log_message "Use the --schema-only flag to extract the schema from your backup:"
         log_message "  $0 --schema-only <backup_id>"
-        log_message "Then apply it using: cqlsh -f /tmp/schema.cql"
+        log_message "Then apply it using: cqlsh ${CQLSH_SSL_OPT} -f /tmp/schema.cql"
         exit 1
     fi
 

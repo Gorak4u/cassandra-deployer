@@ -252,9 +252,16 @@ check_schema_objects() {
         return
     fi
     
+    local CQLSH_CONFIG="/root/.cassandra/cqlshrc"
+    local CQLSH_SSL_OPT=""
+    if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
+        log_info "SSL section found in cqlshrc, using --ssl for cqlsh commands."
+        CQLSH_SSL_OPT="--ssl"
+    fi
+
     # Check for Materialized Views
     log_info "Querying for Materialized Views..."
-    local mv_count=$($CQLSH -e "SELECT count(*) FROM system_schema.views;" 2>/dev/null | awk 'NR==3 {print $1}')
+    local mv_count=$($CQLSH ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.views;" 2>/dev/null | awk 'NR==3 {print $1}')
     
     if [[ "$mv_count" =~ ^[0-9]+$ ]] && [[ "$mv_count" -gt 0 ]]; then
         log_fail "Found $mv_count Materialized Views (MVs)."
@@ -267,7 +274,7 @@ check_schema_objects() {
 
     # Check for Secondary Indexes
     log_info "Querying for Secondary Indexes..."
-    local idx_count=$($CQLSH -e "SELECT count(*) FROM system_schema.indexes;" 2>/dev/null | awk 'NR==3 {print $1}')
+    local idx_count=$($CQLSH ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.indexes;" 2>/dev/null | awk 'NR==3 {print $1}')
     if [[ "$idx_count" =~ ^[0-9]+$ ]] && [[ "$idx_count" -gt 0 ]]; then
         log_warn "Found $idx_count Secondary Indexes. Ensure application logic handles latency if indexes rebuild on startup."
     elif ! [[ "$idx_count" =~ ^[0-9]+$ ]]; then
