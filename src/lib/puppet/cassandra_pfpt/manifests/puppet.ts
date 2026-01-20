@@ -6,24 +6,21 @@ class cassandra_pfpt::puppet inherits cassandra_pfpt {
   $cron_minute_1 = fqdn_rand(30)
   $cron_minute_2 = $cron_minute_1 + 30
 
-  # Helper: parse minute field — turn "1,31,42" into [1,31,42]; keep other expressions as-is.
-  $parse_csv_minutes = |$field| {
-    # purely digits and commas (no spaces), e.g., "1,31,42"
-    if $field =~ %r{^\\d+(,\\d+)*$} {
-      $field.split(',').map |$m| { Integer($m) }
-    } else {
-      $field
-    }
-  }
-
   if $puppet_cron_schedule and $puppet_cron_schedule != '' {
     # Split on any whitespace to tolerate multiple spaces/tabs
     $schedule_parts = split($puppet_cron_schedule, %r{\\s+})
     if size($schedule_parts) != 5 {
-      fail("Invalid cron schedule \\"\${puppet_cron_schedule}\\". Expected 5 fields, e.g. '*/30 * * * *'.")
+      fail("Invalid cron schedule '\${puppet_cron_schedule}'. Expected 5 fields, e.g. '*/30 * * * *'.")
     }
 
-    $minute   = $parse_csv_minutes($schedule_parts[0])
+    # Inline the logic to parse the minute field.
+    $raw_minute_field = $schedule_parts[0]
+    if $raw_minute_field =~ %r{^\\d+(,\\d+)*$} {
+      $minute = $raw_minute_field.split(',').map |$m| { Integer($m) }
+    } else {
+      $minute = $raw_minute_field
+    }
+
     $hour     = $schedule_parts[1]
     $monthday = $schedule_parts[2]
     $month    = $schedule_parts[3]
