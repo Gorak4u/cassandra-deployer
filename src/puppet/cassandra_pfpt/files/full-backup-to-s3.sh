@@ -41,7 +41,7 @@ fi
 SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
-BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG"
+BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/${HOSTNAME}_$SNAPSHOT_TAG"
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
