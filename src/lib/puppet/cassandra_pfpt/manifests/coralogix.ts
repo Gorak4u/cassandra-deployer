@@ -2,14 +2,14 @@
 export const coralogix = `
 # @summary Manages Coralogix agent installation and configuration.
 class cassandra_pfpt::coralogix inherits cassandra_pfpt {
-  if $facts['os']['family'] == 'RedHat' {
-    $repo_url = $coralogix_baseurl ? {
+  if \$facts['os']['family'] == 'RedHat' {
+    \$repo_url = \$coralogix_baseurl ? {
       undef   => 'https://yum.coralogix.com/coralogix-el8-x86_64',
-      default => $coralogix_baseurl,
+      default => \$coralogix_baseurl,
     }
     yumrepo { 'coralogix':
       ensure   => 'present',
-      baseurl  => $repo_url,
+      baseurl  => \$repo_url,
       descr    => 'coralogix repo',
       enabled  => 1,
       gpgcheck => 0,

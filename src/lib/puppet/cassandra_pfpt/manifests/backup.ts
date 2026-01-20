@@ -5,7 +5,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
   # This class is responsible for scheduling the execution of the backup scripts.
   # The backup scripts themselves are managed by the main config class.
 
-  if $manage_full_backups or $manage_incremental_backups {
+  if \$manage_full_backups or \$manage_incremental_backups {
     # Ensure the backup config directory exists
     file { '/etc/backup':
       ensure => 'directory',
@@ -25,7 +25,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
     }
   }
 
-  if $manage_full_backups {
+  if \$manage_full_backups {
     # Full Backup Service and Timer
     file { '/etc/systemd/system/cassandra-full-backup.service':
       ensure  => 'file',
@@ -54,7 +54,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
     }
   }
 
-  if $manage_incremental_backups {
+  if \$manage_incremental_backups {
     # Incremental Backup Service and Timer
     file { '/etc/systemd/system/cassandra-incremental-backup.service':
       ensure  => 'file',
