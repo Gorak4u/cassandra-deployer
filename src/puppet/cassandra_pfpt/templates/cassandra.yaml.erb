@@ -1,94 +1,123 @@
 # This file is managed by Puppet. DO NOT EDIT.
+#
+# See https://cassandra.apache.org/doc/latest/cassandra/configuration/cassandra_yaml.html
+# for a description of all options.
+
 cluster_name: '<%= @cluster_name %>'
 num_tokens: <%= @num_tokens %>
 initial_token: <%= @initial_token %>
-hinted_handoff_enabled: true
-max_hint_window_in_ms: 10800000
-hinted_handoff_throttle_in_kb: 1024
-max_hints_delivery_threads: <%= @max_hints_delivery_threads %>
-authenticator: <%= @authenticator %>
-authorizer: <%= @authorizer %>
-role_manager: <%= @role_manager %>
-permissions_validity_in_ms: 2000
-partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+
+# Directories
 data_file_directories:
   - <%= @data_dir %>
+saved_caches_directory: <%= @saved_caches_dir %>
 commitlog_directory: <%= @commitlog_dir %>
 hints_directory: <%= @hints_directory %>
-saved_caches_directory: <%= @saved_caches_dir %>
-commitlog_sync: <%= @commitlog_sync %>
-commitlog_sync_period_in_ms: <%= @commitlog_sync_period_in_ms %>
-commit_failure_policy: <%= @commit_failure_policy %>
-disk_failure_policy: <%= @disk_failure_policy %>
-key_cache_size_in_mb: <%= @key_cache_size_in_mb %>
-counter_cache_size_in_mb: <%= @counter_cache_size_in_mb %>
+
+# For transient replication
+enable_transient_replication: <%= @enable_transient_replication %>
+
+# Networking
+listen_address: <%= @listen_address %>
+<% if @listen_interface -%>
+listen_interface: <%= @listen_interface %>
+<% end -%>
+<% if @broadcast_address -%>
+broadcast_address: <%= @broadcast_address %>
+<% end -%>
+
+start_native_transport: <%= @start_native_transport %>
+native_transport_port: 9042
+
+<% if @start_rpc -%>
+start_rpc: <%= @start_rpc %>
+rpc_address: 0.0.0.0
+rpc_port: <%= @rpc_port %>
+rpc_keepalive: <%= @rpc_keepalive %>
+<% if @rpc_interface -%>
+rpc_interface: <%= @rpc_interface %>
+<% end -%>
+<% if @broadcast_rpc_address -%>
+broadcast_rpc_address: <%= @broadcast_rpc_address %>
+<% end -%>
+<% end -%>
+
 seed_provider:
   - class_name: org.apache.cassandra.locator.SimpleSeedProvider
     parameters:
       - seeds: "<%= @seeds.join(',') %>"
+
+# Snitch
 endpoint_snitch: <%= @endpoint_snitch %>
+<% if @dynamic_snitch -%>
 dynamic_snitch: <%= @dynamic_snitch %>
+<% end -%>
+
+# Security
+authenticator: <%= @authenticator %>
+authorizer: <%= @authorizer %>
+role_manager: <%= @role_manager %>
+
+# Encryption
+<% if @ssl_enabled -%>
+server_encryption_options:
+    internode_encryption: <%= @internode_encryption %>
+    keystore: <%= @keystore_path %>
+    keystore_password: <%= @keystore_password %>
+    truststore: <%= @truststore_path %>
+    truststore_password: <%= @truststore_password %>
+    require_client_auth: <%= @internode_require_client_auth %>
+    cipher_suites: [TLS_RSA_WITH_AES_128_CBC_SHA]
+
+client_encryption_options:
+    enabled: <%= @client_optional %>
+    keystore: <%= @client_keystore_path %>
+    keystore_password: <%= @keystore_password %>
+    require_client_auth: <%= @client_require_client_auth %>
+    truststore: <%= @client_truststore_path %>
+    truststore_password: <%= @client_truststore_password %>
+<% end -%>
+
+# Performance and Tuning
 concurrent_reads: <%= @concurrent_reads %>
 concurrent_writes: <%= @concurrent_writes %>
 concurrent_counter_writes: <%= @concurrent_counter_writes %>
-memtable_allocation_type: <%= @memtable_allocation_type %>
-index_summary_capacity_in_mb: <%= @index_summary_capacity_in_mb %>
-file_cache_size_in_mb: <%= @file_cache_size_in_mb %>
-tombstone_warn_threshold: <%= @tombstone_warn_threshold %>
-tombstone_failure_threshold: <%= @tombstone_failure_threshold %>
-column_index_size_in_kb: 64
-compaction_throughput_mb_per_sec: <%= @compaction_throughput_mb_per_sec %>
 concurrent_compactors: <%= @concurrent_compactors %>
+compaction_throughput_mb_per_sec: <%= @compaction_throughput_mb_per_sec %>
+
+# Timeouts
 range_request_timeout_in_ms: <%= @range_request_timeout_in_ms %>
 read_request_timeout_in_ms: <%= @read_request_timeout_in_ms %>
 write_request_timeout_in_ms: <%= @write_request_timeout_in_ms %>
 truncate_request_timeout_in_ms: <%= @truncate_request_timeout_in_ms %>
 request_timeout_in_ms: <%= @request_timeout_in_ms %>
-cross_node_timeout: false
-phi_convict_threshold: <%= @phi_convict_threshold %>
-listen_address: <%= @listen_address %>
-listen_interface: <%= @listen_interface %>
-broadcast_address: <%= @broadcast_address %>
-start_native_transport: <%= @start_native_transport %>
-native_transport_port: 9042
-native_transport_max_frame_size_in_mb: <%= @native_transport_max_frame_size_in_mb %>
-native_transport_flush_in_batches_legacy: <%= @native_transport_flush_in_batches_legacy %>
-start_rpc: <%= @start_rpc %>
-rpc_address: <%= @listen_address %>
-rpc_interface: <%= @rpc_interface %>
-rpc_port: <%= @rpc_port %>
-rpc_keepalive: <%= @rpc_keepalive %>
-broadcast_rpc_address: <%= @broadcast_rpc_address %>
-thrift_framed_transport_size_in_mb: <%= @thrift_framed_transport_size_in_mb %>
-internode_compression: dc
-disk_optimization_strategy: <%= @disk_optimization_strategy %>
+
+# Tombstones
+tombstone_warn_threshold: <%= @tombstone_warn_threshold %>
+tombstone_failure_threshold: <%= @tombstone_failure_threshold %>
+
+# Caches
+<% if @counter_cache_size_in_mb -%>
+counter_cache_size_in_mb: <%= @counter_cache_size_in_mb %>
+<% end -%>
+<% if @key_cache_size_in_mb -%>
+key_cache_size_in_mb: <%= @key_cache_size_in_mb %>
+<% end -%>
+<% if @file_cache_size_in_mb -%>
+file_cache_size_in_mb: <%= @file_cache_size_in_mb %>
+<% end -%>
+
+# Other
+commitlog_sync: <%= @commitlog_sync %>
+commitlog_sync_period_in_ms: <%= @commitlog_sync_period_in_ms %>
+commit_failure_policy: <%= @commit_failure_policy %>
+disk_failure_policy: <%= @disk_failure_policy %>
 incremental_backups: <%= @incremental_backups %>
 auto_snapshot: <%= @auto_snapshot %>
-enable_materialized_views: <%= @enable_materialized_views %>
-enable_transient_replication: <%= @enable_transient_replication %>
-cdc_raw_directory: <%= @cdc_raw_directory %>
-<% if @ssl_enabled %>
-server_encryption_options:
-  internode_encryption: <%= @internode_encryption %>
-  keystore: <%= @keystore_path %>
-  keystore_password: <%= @keystore_password %>
-  truststore: <%= @truststore_path %>
-  truststore_password: <%= @truststore_password %>
-  require_client_auth: <%= @internode_require_client_auth %>
-  cipher_suites: [TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA]
-  protocol: <%= @tls_protocol %>
-  algorithm: <%= @tls_algorithm %>
-  store_type: <%= @store_type %>
 
-client_encryption_options:
-  enabled: <%= @client_optional %>
-  keystore: <%= @client_keystore_path %>
-  keystore_password: <%= @keystore_password %>
-  require_client_auth: <%= @client_require_client_auth %>
-  truststore: <%= @client_truststore_path %>
-  truststore_password: <%= @client_truststore_password %>
-  cipher_suites: [TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA]
-  protocol: <%= @tls_protocol %>
-  algorithm: <%= @tls_algorithm %>
-  store_type: <%= @store_type %>
-<% end %>
+# If replacing a node
+replace_address: '<%= @replace_address %>'
+
+<% if @enable_materialized_views -%>
+enable_materialized_views: <%= @enable_materialized_views %>
+<% end -%>

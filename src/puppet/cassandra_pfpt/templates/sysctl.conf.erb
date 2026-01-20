@@ -1,0 +1,7 @@
+# This file is managed by Puppet. DO NOT EDIT.
+#
+# Cassandra OS tuning recommendations
+#
+<%- @merged_sysctl.each do |key, value| -%>
+<%= key %> = <%= value %>
+<%- end -%>

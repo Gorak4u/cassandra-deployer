@@ -1,4 +1,13 @@
-; This file is managed by Puppet. DO NOT EDIT.
+# This file is managed by Puppet. DO NOT EDIT.
+
 [authentication]
 username = cassandra
 password = <%= @cassandra_password %>
+
+[connection]
+factory = cqlshlib.ssl.ssl_transport_factory
+ssl = true
+
+[ssl]
+certfile = /root/.cassandra/certs/cert.pem
+validate = false

@@ -1,0 +1,7 @@
+# This file is managed by Puppet. DO NOT EDIT.
+#
+# Settings for Cassandra user resource limits
+
+<%- @limits_settings.each do |key, value| -%>
+<%= @user %> - <%= key %> <%= value %>
+<%- end -%>

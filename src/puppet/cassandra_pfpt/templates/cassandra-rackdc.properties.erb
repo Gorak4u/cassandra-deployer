@@ -1,6 +1,7 @@
 # This file is managed by Puppet. DO NOT EDIT.
 #
-# Location of this node in the cassandra ring.
-#
+# These properties are used by the GossipingPropertyFileSnitch to determine
+# the datacenter and rack that this node belongs to.
+
 dc=<%= @datacenter %>
 rack=<%= @rack %>
