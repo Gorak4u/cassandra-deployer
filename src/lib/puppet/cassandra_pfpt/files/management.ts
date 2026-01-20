@@ -72,7 +72,7 @@ NODE_IP="\\$1"
 
 if [ -z "\\$NODE_IP" ]; then
   log_message "Error: Node IP address must be provided as an argument."
-  log_message "Usage: \$0 <ip_address_of_dead_node>"
+  log_message "Usage: \\$0 <ip_address_of_dead_node>"
   exit 1
 fi
 
@@ -107,7 +107,7 @@ log_message() {
 
 if [ -z "\\$SOURCE_DC" ]; then
     log_message "ERROR: Source datacenter must be provided as the first argument."
-    log_message "Usage: \$0 <source_datacenter_name>"
+    log_message "Usage: \\$0 <source_datacenter_name>"
     exit 1
 fi
 
@@ -142,7 +142,7 @@ log_message() {
 
 if [ -z "\\$DEAD_NODE_IP" ]; then
     log_message "ERROR: IP address of the dead node to replace must be provided."
-    log_message "Usage: \$0 <ip_of_dead_node>"
+    log_message "Usage: \\$0 <ip_of_dead_node>"
     exit 1
 fi
 

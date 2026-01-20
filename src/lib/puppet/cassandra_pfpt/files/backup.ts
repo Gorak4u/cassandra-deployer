@@ -21,7 +21,7 @@ if ! command -v jq &> /dev/null; then
   exit 1
 fi
 if [ ! -f "\\$CONFIG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at \$CONFIG_FILE"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at \\$CONFIG_FILE"
   exit 1
 fi
 
@@ -35,7 +35,7 @@ KEEP_DAYS=\\$(jq -r '.clearsnapshot_keep_days // 0' "\\$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "\\$S3_BUCKET_NAME" ] || [ -z "\\$CASSANDRA_DATA_DIR" ] || [ -z "\\$LOG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: One or more required configuration values are missing from \$CONFIG_FILE"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: One or more required configuration values are missing from \\$CONFIG_FILE"
   exit 1
 fi
 
@@ -48,12 +48,12 @@ BACKUP_TEMP_DIR="\$BACKUP_ROOT_DIR/\\\${HOSTNAME}_\$SNAPSHOT_TAG"
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
     if ! [[ "\\$KEEP_DAYS" =~ ^[0-9]+$ ]] || [ "\\$KEEP_DAYS" -le 0 ]; then
-        log_message "INFO: Snapshot retention is not configured to a positive number (\$KEEP_DAYS). Skipping old snapshot cleanup."
+        log_message "INFO: Snapshot retention is not configured to a positive number (\\$KEEP_DAYS). Skipping old snapshot cleanup."
         return
     fi
 
     log_message "--- Starting Old Snapshot Cleanup ---"
-    log_message "Retention period: \$KEEP_DAYS days"
+    log_message "Retention period: \\$KEEP_DAYS days"
     local cutoff_date
     cutoff_date=\\$(date -d "-\$KEEP_DAYS days" +%Y%m%d)
 
@@ -67,9 +67,9 @@ cleanup_old_snapshots() {
 
         if [ -n "\\$snapshot_date" ]; then
           if [ "\\$snapshot_date" -lt "\\$cutoff_date" ]; then
-            log_message "Deleting old snapshot: \$tag (date: \$snapshot_date is older than cutoff: \$cutoff_date)"
+            log_message "Deleting old snapshot: \\$tag (date: \\$snapshot_date is older than cutoff: \\$cutoff_date)"
             if ! nodetool clearsnapshot -t "\\$tag"; then
-              log_message "ERROR: Failed to delete snapshot \$tag"
+              log_message "ERROR: Failed to delete snapshot \\$tag"
             fi
           fi
         fi
@@ -82,7 +82,7 @@ cleanup_old_snapshots() {
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
   if [ -d "\\$BACKUP_TEMP_DIR" ]; then
-    log_message "Cleaning up temporary directory: \$BACKUP_TEMP_DIR"
+    log_message "Cleaning up temporary directory: \\$BACKUP_TEMP_DIR"
     rm -rf "\\$BACKUP_TEMP_DIR"
   fi
 }
@@ -105,15 +105,15 @@ fi
 cleanup_old_snapshots
 
 log_message "--- Starting Full Cassandra Snapshot Backup Process ---"
-log_message "S3 Bucket: \$S3_BUCKET_NAME"
-log_message "Snapshot Tag: \$SNAPSHOT_TAG"
+log_message "S3 Bucket: \\$S3_BUCKET_NAME"
+log_message "Snapshot Tag: \\$SNAPSHOT_TAG"
 
 # 1. Create temporary directory structure
 mkdir -p "\\$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directories."; exit 1; }
 
 # 2. Create Backup Manifest
 MANIFEST_FILE="\$BACKUP_TEMP_DIR/backup_manifest.json"
-log_message "Creating backup manifest at \$MANIFEST_FILE..."
+log_message "Creating backup manifest at \\$MANIFEST_FILE..."
 
 CLUSTER_NAME=\\$(nodetool describecluster | grep 'Name:' | awk '{print \$2}')
 
@@ -123,10 +123,10 @@ else
     NODE_IP="\\\$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=\\$(nodetool status | grep "\\\\b\$NODE_IP\\\\b")
+NODE_STATUS_LINE=\\$(nodetool status | grep "\\\\b\\$NODE_IP\\\\b")
 NODE_DC=\\$(echo "\\$NODE_STATUS_LINE" | awk '{print \$5}')
 NODE_RACK=\\$(echo "\\$NODE_STATUS_LINE" | awk '{print \$6}')
-NODE_TOKENS=\\$(nodetool ring | grep "\\\\b\$NODE_IP\\\\b" | awk '{print \$NF}' | tr '\\\\n' ',' | sed 's/,\$//')
+NODE_TOKENS=\\$(nodetool ring | grep "\\\\b\\$NODE_IP\\\\b" | awk '{print \$NF}' | tr '\\\\n' ',' | sed 's/,\$//')
 
 jq -n \\\\
   --arg cluster_name "\\$CLUSTER_NAME" \\\\
@@ -154,7 +154,7 @@ log_message "Manifest created successfully."
 
 
 # 3. Take a node-local snapshot
-log_message "Taking full snapshot with tag: \$SNAPSHOT_TAG..."
+log_message "Taking full snapshot with tag: \\$SNAPSHOT_TAG..."
 if ! nodetool snapshot -t "\\$SNAPSHOT_TAG"; then
   log_message "ERROR: Failed to take Cassandra snapshot. Aborting backup."
   exit 1
@@ -162,12 +162,12 @@ fi
 log_message "Full snapshot taken successfully."
 
 # 4. Collect snapshot file paths
-find "\\$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/\$SNAPSHOT_TAG/*" > "\\$BACKUP_TEMP_DIR/snapshot_files.list"
+find "\\$CASSANDRA_DATA_DIR" -type f -path "*/snapshots/\\$SNAPSHOT_TAG/*" > "\\$BACKUP_TEMP_DIR/snapshot_files.list"
 
 # 5. Archive the files
 TARBALL_PATH_UNCOMPRESSED="\$BACKUP_ROOT_DIR/\\\${HOSTNAME}_\$SNAPSHOT_TAG.tar"
 TARBALL_PATH="\$TARBALL_PATH_UNCOMPRESSED.gz"
-log_message "Archiving snapshot data to \$TARBALL_PATH..."
+log_message "Archiving snapshot data to \\$TARBALL_PATH..."
 
 if [ ! -s "\\$BACKUP_TEMP_DIR/snapshot_files.list" ]; then
     log_message "WARNING: No snapshot files found. The cluster may be empty. Aborting backup."
@@ -200,14 +200,14 @@ log_message "Archive compressed successfully."
 # 8. Upload to S3 and Cleanup
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
-    log_message "Backup archive is available at: \$TARBALL_PATH"
-    log_message "Snapshot is available with tag: \$SNAPSHOT_TAG"
+    log_message "Backup archive is available at: \\$TARBALL_PATH"
+    log_message "Snapshot is available with tag: \\$SNAPSHOT_TAG"
     log_message "Skipping S3 upload and local cleanup."
 else
     if [ "\\$BACKUP_BACKEND" == "s3" ]; then
         BACKUP_DATE=\\$(date +%Y-%m-%d)
-        UPLOAD_PATH="s3://\$S3_BUCKET_NAME/cassandra/\$HOSTNAME/\$BACKUP_DATE/full/\$SNAPSHOT_TAG.tar.gz"
-        log_message "Simulating S3 upload to: \$UPLOAD_PATH"
+        UPLOAD_PATH="s3://\\$S3_BUCKET_NAME/cassandra/\\$HOSTNAME/\\$BACKUP_DATE/full/\\$SNAPSHOT_TAG.tar.gz"
+        log_message "Simulating S3 upload to: \\$UPLOAD_PATH"
         # In a real environment, the following line would be active:
         # if ! aws s3 cp "\\$TARBALL_PATH" "\\$UPLOAD_PATH"; then
         #   log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
@@ -219,9 +219,9 @@ else
         log_message "Cleaning up local archive file..."
         rm -f "\\$TARBALL_PATH"
     else
-        log_message "INFO: Backup backend is set to '\$BACKUP_BACKEND', not 's3'. Skipping upload."
-        log_message "Backup archive is available at: \$TARBALL_PATH"
-        log_message "Snapshot is available with tag: \$SNAPSHOT_TAG"
+        log_message "INFO: Backup backend is set to '\\$BACKUP_BACKEND', not 's3'. Skipping upload."
+        log_message "Backup archive is available at: \\$TARBALL_PATH"
+        log_message "Snapshot is available with tag: \\$SNAPSHOT_TAG"
         log_message "Local files will NOT be cleaned up."
     fi
 fi
@@ -251,7 +251,7 @@ if ! command -v jq &> /dev/null; then
 fi
 
 if [ ! -f "\\$CONFIG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at \$CONFIG_FILE"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at \\$CONFIG_FILE"
   exit 1
 fi
 
@@ -265,7 +265,7 @@ LISTEN_ADDRESS=\\$(jq -r '.listen_address' "\\$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "\\$S3_BUCKET_NAME" ] || [ -z "\\$CASSANDRA_DATA_DIR" ] || [ -z "\\$LOG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: One or more required configuration values are missing from \$CONFIG_FILE"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: One or more required configuration values are missing from \\$CONFIG_FILE"
   exit 1
 fi
 
@@ -279,7 +279,7 @@ BACKUP_TEMP_DIR="\$BACKUP_ROOT_DIR/\\\${HOSTNAME}_\$BACKUP_TAG"
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
   if [ -d "\\$BACKUP_TEMP_DIR" ]; then
-    log_message "Cleaning up temporary directory: \$BACKUP_TEMP_DIR"
+    log_message "Cleaning up temporary directory: \\$BACKUP_TEMP_DIR"
     rm -rf "\\$BACKUP_TEMP_DIR"
   fi
 }
@@ -299,8 +299,8 @@ if [ -f "/var/lib/backup-disabled" ]; then
 fi
 
 log_message "--- Starting Incremental Cassandra Backup Process ---"
-log_message "S3 Bucket: \$S3_BUCKET_NAME"
-log_message "Backup Tag: \$BACKUP_TAG"
+log_message "S3 Bucket: \\$S3_BUCKET_NAME"
+log_message "Backup Tag: \\$BACKUP_TAG"
 
 # 1. Create temporary directory structure
 mkdir -p "\\$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
@@ -317,7 +317,7 @@ fi
 
 # 4. Create Backup Manifest
 MANIFEST_FILE="\$BACKUP_TEMP_DIR/backup_manifest.json"
-log_message "Creating backup manifest at \$MANIFEST_FILE..."
+log_message "Creating backup manifest at \\$MANIFEST_FILE..."
 
 CLUSTER_NAME=\\$(nodetool describecluster | grep 'Name:' | awk '{print \$2}')
 
@@ -327,10 +327,10 @@ else
     NODE_IP="\\\$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=\\$(nodetool status | grep "\\\\b\$NODE_IP\\\\b")
+NODE_STATUS_LINE=\\$(nodetool status | grep "\\\\b\\$NODE_IP\\\\b")
 NODE_DC=\\$(echo "\\$NODE_STATUS_LINE" | awk '{print \$5}')
 NODE_RACK=\\$(echo "\\$NODE_STATUS_LINE" | awk '{print \$6}')
-NODE_TOKENS=\\$(nodetool ring | grep "\\\\b\$NODE_IP\\\\b" | awk '{print \$NF}' | tr '\\\\n' ',' | sed 's/,\$//')
+NODE_TOKENS=\\$(nodetool ring | grep "\\\\b\\$NODE_IP\\\\b" | awk '{print \$NF}' | tr '\\\\n' ',' | sed 's/,\$//')
 
 jq -n \\\\
   --arg cluster_name "\\$CLUSTER_NAME" \\\\
@@ -360,7 +360,7 @@ log_message "Manifest created successfully."
 # 5. Archive the files
 TARBALL_PATH_UNCOMPRESSED="\$BACKUP_ROOT_DIR/\\\${HOSTNAME}_\$BACKUP_TAG.tar"
 TARBALL_PATH="\$TARBALL_PATH_UNCOMPRESSED.gz"
-log_message "Archiving incremental data to \$TARBALL_PATH..."
+log_message "Archiving incremental data to \\$TARBALL_PATH..."
 
 tar -cf "\\$TARBALL_PATH_UNCOMPRESSED" --absolute-names -T "\\$BACKUP_TEMP_DIR/incremental_files.list"
 tar -rf "\\$TARBALL_PATH_UNCOMPRESSED" -C "\\$BACKUP_TEMP_DIR" "backup_manifest.json"
@@ -375,13 +375,13 @@ log_message "Archive compressed successfully."
 # 7. Upload to S3 and Cleanup
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
-    log_message "Backup archive is available at: \$TARBALL_PATH"
+    log_message "Backup archive is available at: \\$TARBALL_PATH"
     log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
 else
     if [ "\\$BACKUP_BACKEND" == "s3" ]; then
         BACKUP_DATE=\\$(date +%Y-%m-%d)
-        UPLOAD_PATH="s3://\$S3_BUCKET_NAME/cassandra/\$HOSTNAME/\$BACKUP_DATE/incremental/\$BACKUP_TAG.tar.gz"
-        log_message "Simulating S3 upload to: \$UPLOAD_PATH"
+        UPLOAD_PATH="s3://\\$S3_BUCKET_NAME/cassandra/\\$HOSTNAME/\\$BACKUP_DATE/incremental/\\$BACKUP_TAG.tar.gz"
+        log_message "Simulating S3 upload to: \\$UPLOAD_PATH"
         # In a real environment: aws s3 cp "\\$TARBALL_PATH" "\\$UPLOAD_PATH"
         log_message "S3 upload simulated successfully."
 
@@ -392,8 +392,8 @@ else
         rm -f "\\$TARBALL_PATH"
         log_message "Local tarball deleted."
     else
-        log_message "INFO: Backup backend is set to '\$BACKUP_BACKEND', not 's3'. Skipping upload."
-        log_message "Backup archive is available at: \$TARBALL_PATH"
+        log_message "INFO: Backup backend is set to '\\$BACKUP_BACKEND', not 's3'. Skipping upload."
+        log_message "Backup archive is available at: \\$TARBALL_PATH"
         log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
     fi
 fi
@@ -423,11 +423,11 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "Usage: \$0 [mode] [backup_id] [keyspace] [table]"
+    log_message "Usage: \\$0 [mode] [backup_id] [keyspace] [table]"
     log_message "Modes:"
-    log_message "  Full Restore (destructive): \$0 <backup_id>"
-    log_message "  Granular Restore:           \$0 <backup_id> <keyspace_name> [table_name]"
-    log_message "  Schema-Only Restore:        \$0 --schema-only <backup_id>"
+    log_message "  Full Restore (destructive): \\$0 <backup_id>"
+    log_message "  Granular Restore:           \\$0 <backup_id> <keyspace_name> [table_name]"
+    log_message "  Schema-Only Restore:        \\$0 --schema-only <backup_id>"
     exit 1
 }
 
@@ -440,13 +440,13 @@ fi
 
 for tool in jq aws sstableloader; do
     if ! command -v \\$tool &>/dev/null; then
-        log_message "ERROR: Required tool '\$tool' is not installed or not in PATH."
+        log_message "ERROR: Required tool '\\$tool' is not installed or not in PATH."
         exit 1
     fi
 done
 
 if [ ! -f "\\$CONFIG_FILE" ]; then
-    log_message "ERROR: Backup configuration file not found at \$CONFIG_FILE"
+    log_message "ERROR: Backup configuration file not found at \\$CONFIG_FILE"
     exit 1
 fi
 
@@ -471,11 +471,11 @@ fi
 # --- Function for Schema-Only Restore ---
 do_schema_restore() {
     local MANIFEST_JSON="\$1"
-    log_message "--- Starting Schema-Only Restore for Backup ID: \$BACKUP_ID ---"
+    log_message "--- Starting Schema-Only Restore for Backup ID: \\$BACKUP_ID ---"
 
     log_message "Downloading backup to extract schema..."
     if [ "\\$BACKUP_BACKEND" != "s3" ]; then
-        log_message "ERROR: Cannot restore from backend '\$BACKUP_BACKEND'. This script only supports 's3'."
+        log_message "ERROR: Cannot restore from backend '\\$BACKUP_BACKEND'. This script only supports 's3'."
         exit 1
     fi
     if aws s3 cp "\\$S3_PATH" - | tar -xzf - --to-stdout schema.cql > /tmp/schema.cql 2>/dev/null; then
@@ -492,7 +492,7 @@ do_schema_restore() {
 # --- Function for Full Node Restore ---
 do_full_restore() {
     local MANIFEST_JSON="\$1"
-    log_message "--- Starting FULL DESTRUCTIVE Node Restore for Backup ID: \$BACKUP_ID ---"
+    log_message "--- Starting FULL DESTRUCTIVE Node Restore for Backup ID: \\$BACKUP_ID ---"
 
     log_message "This is a DESTRUCTIVE operation. It will:"
     log_message "1. STOP the Cassandra service."
@@ -532,10 +532,10 @@ do_full_restore() {
 
     log_message "4. Downloading and extracting backup..."
     if [ "\\$BACKUP_BACKEND" != "s3" ]; then
-        log_message "ERROR: Cannot restore from backend '\$BACKUP_BACKEND'. This script only supports 's3'."
+        log_message "ERROR: Cannot restore from backend '\\$BACKUP_BACKEND'. This script only supports 's3'."
         exit 1
     fi
-    if ! aws s3 cp "\\$S3_PATH" - | tar -xzf - -P; then
+    if ! aws s3 cp "\\$S3_PATH" - | tar -xzf - --absolute-names; then
         log_message "ERROR: Failed to download or extract backup from S3."
         exit 1
     fi
@@ -548,7 +548,7 @@ do_full_restore() {
     local NODETOOL_HOSTS
     NODETOOL_HOSTS=\\$(echo "\\$LOADER_NODES" | sed 's/,/ -h /g')
 
-    log_message "Determining restore strategy by checking seed nodes: \$LOADER_NODES"
+    log_message "Determining restore strategy by checking seed nodes: \\$LOADER_NODES"
     # Use nodetool on a list of seeds. If any seed is reachable, we are not the first node.
     if nodetool -h \\$NODETOOL_HOSTS status &>/dev/null; then
         IS_FIRST_NODE=false
@@ -578,8 +578,8 @@ do_full_restore() {
         sed -i '/^initial_token:/d' "\\$CASSANDRA_YAML_FILE"
 
         # Add new token settings
-        echo "num_tokens: \$NUM_TOKENS" >> "\\$CASSANDRA_YAML_FILE"
-        echo "initial_token: '\$TOKENS_FROM_BACKUP'" >> "\\$CASSANDRA_YAML_FILE"
+        echo "num_tokens: \\$NUM_TOKENS" >> "\\$CASSANDRA_YAML_FILE"
+        echo "initial_token: '\\$TOKENS_FROM_BACKUP'" >> "\\$CASSANDRA_YAML_FILE"
         log_message "Successfully configured num_tokens and initial_token."
 
     else
@@ -614,7 +614,7 @@ do_full_restore() {
             CASSANDRA_READY=true
             break
         fi
-        log_message "Waiting for Cassandra to be ready... (attempt \$i of 30)"
+        log_message "Waiting for Cassandra to be ready... (attempt \\$i of 30)"
         sleep 10
     done
 
@@ -644,15 +644,15 @@ do_granular_restore() {
     local restore_type
 
     if [ -n "\\$TABLE_NAME" ]; then
-        restore_type="Table '\$TABLE_NAME' in Keyspace '\$KEYSPACE_NAME'"
+        restore_type="Table '\\$TABLE_NAME' in Keyspace '\\$KEYSPACE_NAME'"
     else
-        restore_type="Keyspace '\$KEYSPACE_NAME'"
+        restore_type="Keyspace '\\$KEYSPACE_NAME'"
     fi
 
-    log_message "--- Starting GRANULAR Restore for \$restore_type from Backup ID: \$BACKUP_ID ---"
+    log_message "--- Starting GRANULAR Restore for \\$restore_type from Backup ID: \\$BACKUP_ID ---"
     log_message "This will stream data into the LIVE cluster using sstableloader."
 
-    local RESTORE_TEMP_DIR="/tmp/restore_\$BACKUP_ID_\$KEYSPACE_NAME"
+    local RESTORE_TEMP_DIR="/tmp/restore_\\$BACKUP_ID_\\$KEYSPACE_NAME"
     trap 'rm -rf "\\$RESTORE_TEMP_DIR"' EXIT
     
     log_message "Performing pre-restore disk space check for temporary directory /tmp..."
@@ -671,40 +671,40 @@ do_granular_restore() {
 
     log_message "Downloading and extracting backup to temporary directory..."
     if [ "\\$BACKUP_BACKEND" != "s3" ]; then
-        log_message "ERROR: Cannot restore from backend '\$BACKUP_BACKEND'. This script only supports 's3'."
+        log_message "ERROR: Cannot restore from backend '\\$BACKUP_BACKEND'. This script only supports 's3'."
         exit 1
     fi
     aws s3 cp "\\$S3_PATH" - | tar -xzf - -C "\\$RESTORE_TEMP_DIR"
     
     # sstableloader needs the path to be .../keyspace/table/
     # The backup preserves the full path, so we can find it.
-    local extracted_data_path="\$RESTORE_TEMP_DIR\$CASSANDRA_DATA_DIR"
+    local extracted_data_path="\\$RESTORE_TEMP_DIR\\$CASSANDRA_DATA_DIR"
 
     if [ -n "\\$TABLE_NAME" ]; then
         # Find the specific table directory (it has a UUID suffix)
         restore_path=\\$(find "\\$extracted_data_path/\\$KEYSPACE_NAME" -maxdepth 1 -type d -name "\\$TABLE_NAME-*")
         if [ -z "\\$restore_path" ] || [ ! -d "\\$restore_path" ]; then
-            log_message "ERROR: Could not find table '\$TABLE_NAME' in the backup for keyspace '\$KEYSPACE_NAME'."
+            log_message "ERROR: Could not find table '\\$TABLE_NAME' in the backup for keyspace '\\$KEYSPACE_NAME'."
             exit 1
         fi
     else
-        restore_path="\$extracted_data_path/\\$KEYSPACE_NAME"
+        restore_path="\\$extracted_data_path/\\$KEYSPACE_NAME"
         if [ ! -d "\\$restore_path" ]; then
-            log_message "ERROR: Could not find keyspace '\$KEYSPACE_NAME' in the backup."
+            log_message "ERROR: Could not find keyspace '\\$KEYSPACE_NAME' in the backup."
             exit 1
         fi
     fi
 
-    log_message "Found data to restore at: \$restore_path"
-    log_message "Streaming data to cluster nodes (\$LOADER_NODES) with sstableloader..."
+    log_message "Found data to restore at: \\$restore_path"
+    log_message "Streaming data to cluster nodes (\\$LOADER_NODES) with sstableloader..."
 
     # Ensure the schema exists before loading data
     log_message "Verifying schema exists..."
     if ! cqlsh -e "DESCRIBE KEYSPACE \\$KEYSPACE_NAME;" &>/dev/null; then
-        log_message "ERROR: Keyspace '\$KEYSPACE_NAME}' does not exist in the cluster."
+        log_message "ERROR: Keyspace '\\$KEYSPACE_NAME}' does not exist in the cluster."
         log_message "You must restore the schema before you can load data."
         log_message "Use the --schema-only flag to extract the schema from your backup:"
-        log_message "  \$0 --schema-only <backup_id>"
+        log_message "  \\$0 --schema-only <backup_id>"
         log_message "Then apply it using: cqlsh -f /tmp/schema.cql"
         exit 1
     fi
@@ -757,28 +757,28 @@ fi
 # Determine backup type to find the right S3 path
 BACKUP_TYPE=\\$(echo "\\$BACKUP_ID" | cut -d'_' -f1)
 if [[ "\\$BACKUP_TYPE" != "full" && "\\$BACKUP_TYPE" != "incremental" ]]; then
-    log_message "ERROR: Backup ID must start with 'full_' or 'incremental_'. Invalid ID: \$BACKUP_ID"
+    log_message "ERROR: Backup ID must start with 'full_' or 'incremental_'. Invalid ID: \\$BACKUP_ID"
     exit 1
 fi
 
 # Extract date from backup ID like 'type_YYYYMMDDHHMMSS'
 BACKUP_DATE_STR=\\$(echo "\\$BACKUP_ID" | sed -n 's/.*_\\\\([0-9]\\\\{8\\\\}\\\\).*/\\\\1/p')
 if [ -z "\\$BACKUP_DATE_STR" ]; then
-    log_message "ERROR: Could not extract date from backup ID '\$BACKUP_ID'. Expected format: type_YYYYMMDDHHMMSS."
+    log_message "ERROR: Could not extract date from backup ID '\\$BACKUP_ID'. Expected format: type_YYYYMMDDHHMMSS."
     exit 1
 fi
 BACKUP_DATE_FOLDER=\\$(date -d "\\$BACKUP_DATE_STR" '+%Y-%m-%d')
 
 
-TARBALL_NAME="\\\${HOSTNAME}_\$BACKUP_ID.tar.gz"
-S3_PATH="s3://\$S3_BUCKET_NAME/cassandra/\$HOSTNAME/\$BACKUP_DATE_FOLDER/\$BACKUP_TYPE/\$TARBALL_NAME"
+TARBALL_NAME="\\\${HOSTNAME}_\\$BACKUP_ID.tar.gz"
+S3_PATH="s3://\\$S3_BUCKET_NAME/cassandra/\\$HOSTNAME/\\$BACKUP_DATE_FOLDER/\\$BACKUP_TYPE/\\$TARBALL_NAME"
 
-log_message "Preparing to restore from S3 path: \$S3_PATH"
+log_message "Preparing to restore from S3 path: \\$S3_PATH"
 
 # --- Fetch and verify manifest first ---
 log_message "Fetching backup manifest for verification..."
 if [ "\\$BACKUP_BACKEND" != "s3" ]; then
-    log_message "ERROR: Cannot fetch manifest from backend '\$BACKUP_BACKEND'. This script only supports 's3'."
+    log_message "ERROR: Cannot fetch manifest from backend '\\$BACKUP_BACKEND'. This script only supports 's3'."
     exit 1
 fi
 MANIFEST_JSON=\\$(aws s3 cp "\\$S3_PATH" - | tar -xzf - --to-stdout backup_manifest.json 2>/dev/null)
@@ -827,19 +827,19 @@ log_message() {
 }
 
 log_message "--- Taking Cassandra Snapshot ---"
-log_message "Snapshot Tag: \$SNAPSHOT_TAG"
+log_message "Snapshot Tag: \\$SNAPSHOT_TAG"
 
-CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
+CMD="nodetool snapshot -t \\$SNAPSHOT_TAG"
 
 if [ -n "\\$KEYSPACES" ]; then
-    log_message "Targeting keyspaces: \$KEYSPACES"
+    log_message "Targeting keyspaces: \\$KEYSPACES"
     # Convert comma-separated to space-separated
     CMD+=" -- \\\$(echo \\$KEYSPACES | sed 's/,/ /g')"
 fi
 
-log_message "Executing: \$CMD"
+log_message "Executing: \\$CMD"
 if \\$CMD; then
-    log_message "SUCCESS: Snapshot '\$SNAPSHOT_TAG' created successfully."
+    log_message "SUCCESS: Snapshot '\\$SNAPSHOT_TAG' created successfully."
     exit 0
 else
     log_message "ERROR: Failed to create snapshot."
@@ -862,18 +862,18 @@ log_message() {
 }
 
 log_message "--- Starting Robust Local Snapshot ---"
-log_message "Snapshot Tag: \$SNAPSHOT_TAG"
+log_message "Snapshot Tag: \\$SNAPSHOT_TAG"
 
 # Build command
-CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
+CMD="nodetool snapshot -t \\$SNAPSHOT_TAG"
 if [ -n "\\$KEYSPACES" ]; then
-    log_message "Targeting keyspaces: \$KEYSPACES"
+    log_message "Targeting keyspaces: \\$KEYSPACES"
     # Convert comma-separated to space-separated for the command
     CMD+=" -- \\\$(echo \\$KEYSPACES | sed 's/,/ /g')"
 fi
 
 # 1. Take snapshot
-log_message "Executing: \$CMD"
+log_message "Executing: \\$CMD"
 if ! \\$CMD; then
     log_message "ERROR: Failed to take snapshot. Aborting."
     exit 1
@@ -882,24 +882,24 @@ log_message "Snapshot created successfully."
 
 # 2. Verify snapshot
 log_message "Verifying snapshot files..."
-SNAPSHOT_PATH_COUNT=\\$(find "\\$BACKUP_DIR" -type d -path "*/snapshots/\$SNAPSHOT_TAG" | wc -l)
+SNAPSHOT_PATH_COUNT=\\$(find "\\$BACKUP_DIR" -type d -path "*/snapshots/\\$SNAPSHOT_TAG" | wc -l)
 
 if [ "\\$SNAPSHOT_PATH_COUNT" -eq 0 ]; then
     log_message "WARNING: No snapshot directories found. This may be expected if the targeted keyspaces have no data."
 else
-    log_message "Found \$SNAPSHOT_PATH_COUNT snapshot directories. Checking for content..."
+    log_message "Found \\$SNAPSHOT_PATH_COUNT snapshot directories. Checking for content..."
     # A simple verification: check that there are SSTable files in the snapshot dirs
-    SSTABLE_COUNT=\\$(find "\\$BACKUP_DIR" -type f -path "*/snapshots/\$SNAPSHOT_TAG/*" -name "*.db" | wc -l)
+    SSTABLE_COUNT=\\$(find "\\$BACKUP_DIR" -type f -path "*/snapshots/\\$SNAPSHOT_TAG/*" -name "*.db" | wc -l)
     if [ "\\$SSTABLE_COUNT" -gt 0 ]; then
-        log_message "OK: Found \$SSTABLE_COUNT SSTable files. Snapshot appears valid."
+        log_message "OK: Found \\$SSTABLE_COUNT SSTable files. Snapshot appears valid."
     else
         log_message "WARNING: No SSTable (.db) files found in snapshot directories. The snapshot might be empty."
     fi
 fi
 
 log_message "--- Robust Local Snapshot Finished ---"
-log_message "Snapshot tag '\$SNAPSHOT_TAG' is available on disk."
-log_message "To clear this snapshot, run: nodetool clearsnapshot -t \$SNAPSHOT_TAG"
+log_message "Snapshot tag '\\$SNAPSHOT_TAG' is available on disk."
+log_message "To clear this snapshot, run: nodetool clearsnapshot -t \\$SNAPSHOT_TAG"
 exit 0
 `,
     };

@@ -13,17 +13,17 @@ log_message() {
 # 1. Check nodetool status for 'UN' (Up, Normal)
 log_message "Checking nodetool status..."
 NODETOOL_STATUS=\$(nodetool status 2>&1)
-if echo "\$NODETOOL_STATUS" | grep -q 'UN'; then
+if echo "\\$NODETOOL_STATUS" | grep -q 'UN'; then
   log_message "Nodetool status: OK - At least one Up/Normal node found."
 else
   log_message "Nodetool status: WARNING - No Up/Normal nodes found or nodetool failed."
-  echo "\$NODETOOL_STATUS"
+  echo "\\$NODETOOL_STATUS"
   # return 1 # Don't exit here, might be starting up
 fi
 
 # 2. Check cqlsh connectivity
-log_message "Checking cqlsh connectivity using \$CQLSH_CONFIG..."
-if cqlsh --cqlshrc "\$CQLSH_CONFIG" "\\\${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
+log_message "Checking cqlsh connectivity using \\$CQLSH_CONFIG..."
+if cqlsh --cqlshrc "\\$CQLSH_CONFIG" "\\\${IP_ADDRESS}" -e "SELECT cluster_name FROM system.local;" >/dev/null 2>&1; then
   log_message "Cqlsh connectivity: OK"
 else
   log_message "Cqlsh connectivity: FAILED"
@@ -65,9 +65,9 @@ Checks the available disk space for a directory (defaults to '\$CASSANDRA_DATADI
 Thresholds are percentages of FREE space.
 
 Flags:
-   -p PATH  Path to check disk space for. Default: \$CASSANDRA_DATADIR
-   -w INT   Warning threshold (percent free). Default: \$WARNING_THRESHOLD
-   -c INT   Critical threshold (percent free). Default: \$CRITICAL_THRESHOLD
+   -p PATH  Path to check disk space for. Default: \\$CASSANDRA_DATADIR
+   -w INT   Warning threshold (percent free). Default: \\$WARNING_THRESHOLD
+   -c INT   Critical threshold (percent free). Default: \\$CRITICAL_THRESHOLD
    -h       Show this help message.
 
 Exit Codes:
@@ -92,32 +92,32 @@ function get_free_disk_space() {
   local mountpoint="\$1"
   local used_percent
   
-  used_percent=\$(df "\$mountpoint" --output=pcent | tail -1 | tr -cd '[:digit:]')
-  rc=\$?
+  used_percent=\\$(df "\$mountpoint" --output=pcent | tail -1 | tr -cd '[:digit:]')
+  rc=\\$?
 
-  if [[ -z "\$used_percent" ]] || [[ \$rc != 0 ]]; then
-    error "Failed to get disk space for path '\$mountpoint'."
+  if [[ -z "\\$used_percent" ]] || [[ \\$rc != 0 ]]; then
+    error "Failed to get disk space for path '\\$mountpoint'."
     exit 3
   fi
 
-  echo \$(( 100 - used_percent ))
+  echo \\$(( 100 - used_percent ))
 }
 
 # --- Main Logic ---
 while getopts "hp:w:c:" arg; do
-  case \$arg in
+  case \\$arg in
     h)
       usage
       exit 0
       ;;
     p)
-      CASSANDRA_DATADIR=\$OPTARG
+      CASSANDRA_DATADIR=\\$OPTARG
       ;;
     w)
-      WARNING_THRESHOLD=\$OPTARG
+      WARNING_THRESHOLD=\\$OPTARG
       ;;
     c)
-      CRITICAL_THRESHOLD=\$OPTARG
+      CRITICAL_THRESHOLD=\\$OPTARG
       ;;
     *)
       usage
@@ -126,20 +126,20 @@ while getopts "hp:w:c:" arg; do
   esac
 done
 
-free_space=\$(get_free_disk_space "\$CASSANDRA_DATADIR")
-exit_code=\$?
+free_space=\\$(get_free_disk_space "\\$CASSANDRA_DATADIR")
+exit_code=\\$?
 
-if [[ \$free_space -lt \$CRITICAL_THRESHOLD ]]; then
-  error "Free disk space for '\$CASSANDRA_DATADIR' is \$free_space%, which is below the critical threshold of \$CRITICAL_THRESHOLD%."
+if [[ \\$free_space -lt \\$CRITICAL_THRESHOLD ]]; then
+  error "Free disk space for '\\$CASSANDRA_DATADIR' is \\$free_space%, which is below the critical threshold of \\$CRITICAL_THRESHOLD%."
   exit 2
 fi
 
-if [[ \$free_space -lt \$WARNING_THRESHOLD ]]; then
-  warning "Free disk space for '\$CASSANDRA_DATADIR' is \$free_space%, which is below the warning threshold of \$WARNING_THRESHOLD%."
+if [[ \\$free_space -lt \\$WARNING_THRESHOLD ]]; then
+  warning "Free disk space for '\\$CASSANDRA_DATADIR' is \\$free_space%, which is below the warning threshold of \\$WARNING_THRESHOLD%."
   exit 1
 fi
 
-printf "OK: Free disk space for '\$CASSANDRA_DATADIR' is \$free_space%%, which is above all thresholds.\\n"
+printf "OK: Free disk space for '\\$CASSANDRA_DATADIR' is \\$free_space%%, which is above all thresholds.\\n"
 exit 0
 `,
       'node_health_check.sh': `#!/bin/bash
@@ -163,7 +163,7 @@ log_warning() {
 }
 
 log_message "--- Starting Node Health Check ---"
-LOCAL_IP=\$(hostname -i)
+LOCAL_IP=\\$(hostname -i)
 
 # 1. Disk Space Check
 log_message "1. Checking disk space..."
@@ -175,7 +175,7 @@ fi
 
 # 2. Node Status Check
 log_message "2. Checking local node status..."
-NODE_STATUS=\$(nodetool status | grep "\\$LOCAL_IP" | awk '{print \\$1}')
+NODE_STATUS=\\$(nodetool status | grep "\\$LOCAL_IP" | awk '{print \\$1}')
 
 if [ "\\$NODE_STATUS" == "UN" ]; then
     log_ok "Node status is UN (Up/Normal)."
@@ -187,7 +187,7 @@ fi
 
 # 3. Gossip Check
 log_message "3. Checking gossip status..."
-GOSSIP_STATUS=\$(nodetool gossipinfo | grep "STATUS" | grep "\\$LOCAL_IP" | cut -d':' -f2)
+GOSSIP_STATUS=\\$(nodetool gossipinfo | grep "STATUS" | grep "\\$LOCAL_IP" | cut -d':' -f2)
 if [[ "\\$GOSSIP_STATUS" == "NORMAL" ]]; then
     log_ok "Gossip state is NORMAL."
 else
@@ -246,7 +246,7 @@ log_version() {
 
     echo "--- Checking \\$component_name ---"
     if command -v \$(echo "\\$command_to_run" | awk '{print \\$1}') >/dev/null 2>&1; then
-        output=\$(eval "\\$command_to_run" 2>&1)
+        output=\\$(eval "\\$command_to_run" 2>&1)
         if [ \\$? -eq 0 ]; then
             echo "Version:"
             echo "\\$output" | head -n 5 # Limit output to relevant lines

@@ -180,8 +180,8 @@ check_data_health() {
 
     # Active Compactions
     local compact_count=\\$(\\$NODETOOL compactionstats | grep "pending tasks:" | awk '{print \\$3}')
-    local active_lines=\\$(\\$NODETOOL compactionstats | grep -v "pending tasks" | grep -v "compaction type" | grep -v "^-" | wc -l)
-    
+    local active_lines=\\$(grep -v "pending tasks" <(\\$NODETOOL compactionstats) | grep -v "compaction type" | grep -v "^-" | wc -l)
+
     if [[ "\\$compact_count" -gt 0 ]] || [[ "\\$active_lines" -gt 0 ]]; then
         log_warn "Compactions are currently active or pending (\\$compact_count tasks)."
         log_warn "It is HIGHLY recommended to stop compactions ('nodetool stop COMPACTION') before shutting down for upgrade."
@@ -371,7 +371,7 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "Usage: \$0 [OPTIONS]"
+    log_message "Usage: \\$0 [OPTIONS]"
     log_message "Safely runs 'nodetool cleanup' with pre-flight disk space checks."
     log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
     log_message "  -t, --table <name>          Specify a table to clean up. Can be used multiple times."
@@ -470,7 +470,7 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "Usage: \$0 [OPTIONS]"
+    log_message "Usage: \\$0 [OPTIONS]"
     log_message "Safely runs 'nodetool garbagecollect' with pre-flight disk space checks."
     log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
     log_message "  -t, --table <name>          Specify a table to collect. Can be used multiple times."
@@ -482,10 +482,10 @@ usage() {
     log_message "  -h, --help                  Show this help message."
     log_message ""
     log_message "Examples:"
-    log_message "  Collect on entire node:       \$0"
-    log_message "  Collect on a keyspace:        \$0 -k my_keyspace"
-    log_message "  Collect on specific tables:   \$0 -k my_keyspace -t users -t audit_log"
-    log_message "  Collect with cell granularity: \$0 -k my_keyspace -t users -g CELL"
+    log_message "  Collect on entire node:       \\$0"
+    log_message "  Collect on a keyspace:        \\$0 -k my_keyspace"
+    log_message "  Collect on specific tables:   \\$0 -k my_keyspace -t users -t audit_log"
+    log_message "  Collect with cell granularity: \\$0 -k my_keyspace -t users -g CELL"
     exit 1
 }
 
@@ -578,7 +578,7 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "Usage: \$0 [OPTIONS]"
+    log_message "Usage: \\$0 [OPTIONS]"
     log_message "Safely runs 'nodetool upgradesstables' with pre-flight disk space checks."
     log_message "This is typically run after a major version upgrade of Cassandra."
     log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
@@ -679,7 +679,7 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "Usage: \$0 [OPTIONS]"
+    log_message "Usage: \\$0 [OPTIONS]"
     log_message "Manages Cassandra compaction with disk space monitoring."
     log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Required for -t)"
     log_message "  -t, --table <name>       Specify the table to compact."
@@ -689,9 +689,9 @@ usage() {
     log_message "  -h, --help               Show this help message."
     log_message ""
     log_message "Examples:"
-    log_message "  Full node compaction:       \$0"
-    log_message "  Keyspace compaction:        \$0 -k my_keyspace"
-    log_message "  Table compaction:           \$0 -k my_keyspace -t my_table"
+    log_message "  Full node compaction:       \\$0"
+    log_message "  Keyspace compaction:        \\$0 -k my_keyspace"
+    log_message "  Table compaction:           \\$0 -k my_keyspace -t my_table"
     exit 1
 }
 
