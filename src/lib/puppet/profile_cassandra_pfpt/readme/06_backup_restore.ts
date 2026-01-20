@@ -11,17 +11,19 @@ This profile provides a fully automated, S3-based backup solution using \`system
 2.  **Puppet Setup:** Puppet creates \`systemd\` timer and service units on each Cassandra node.
 3.  **Scheduling:** \`systemd\` automatically triggers the backup scripts based on the \`OnCalendar\` schedule you define.
 4.  **Execution & Metadata Capture:** The scripts first generate a \`backup_manifest.json\` file containing critical metadata like the cluster name, node IP, datacenter, rack, and the node's token ranges. They then create a data snapshot, archive everything (data, schema, and manifest), and upload it to your specified S3 bucket.
+5.  **Local Snapshot Cleanup:** Before a new backup is taken, the script automatically cleans up any local snapshots that are older than the configured retention period (\`profile_cassandra_pfpt::clearsnapshot_keep\`). This provides a window for fast, local restores without filling up the disk.
 
 #### Configuration Examples
 
 ##### Scenario 1: Full Backups Only (for Dev/Test)
-This is ideal for development environments or clusters where a daily recovery point is sufficient.
+This is ideal for development environments or clusters where a daily recovery point is sufficient. It will keep 3 days of local snapshots by default.
 
 \`\`\`yaml
 # Hiera:
 profile_cassandra_pfpt::manage_full_backups: true
 profile_cassandra_pfpt::backup_s3_bucket: 'my-dev-cassandra-backups'
 profile_cassandra_pfpt::full_backup_schedule: '*-*-* 02:00:00' # Daily at 2 AM
+profile_cassandra_pfpt::clearsnapshot_keep: 7 # Keep local snapshots for a week
 \`\`\`
 
 ##### Scenario 2: Both Full and Incremental Backups (Recommended for Production)
@@ -66,6 +68,7 @@ profile_cassandra_pfpt::incremental_backup_schedule:
 *   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
 *   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The \`systemd\` OnCalendar schedule(s) for incremental backups. Default: \`'0 */4 * * *'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.
+*   \`profile_cassandra_pfpt::clearsnapshot_keep\` (Integer): The number of days to keep snapshots locally on the node before they are automatically deleted. Set to 0 to disable local retention. Default: \`3\`.
 *   \`profile_cassandra_pfpt::full_backup_log_file\` (String): Log file path for the full backup script. Default: \`'/var/log/cassandra/full_backup.log'\`.
 *   \`profile_cassandra_pfpt::incremental_backup_log_file\` (String): Log file path for the incremental backup script. Default: \`'/var/log/cassandra/incremental_backup.log'\`.
 
@@ -81,7 +84,7 @@ This mode is for recovering a completely failed node or for disaster recovery. I
 
 ##### Usage
 1.  SSH into the node you want to restore.
-2.  Identify the backup you want to restore. You need the full backup identifier (e.g., \`full_snapshot_20231027120000\`).
+2.  Identify the backup you want to restore. You need the full backup identifier (e.g., \`full_snapshot_20231027120000\`). You can restore from a local snapshot if it still exists, or from S3.
 3.  Run the script with only the backup ID:
     \`\`\`bash
     sudo /usr/local/bin/restore-from-s3.sh <backup_identifier>
@@ -172,3 +175,5 @@ Now, simply restore each node, one at a time. The script handles the complexity.
 
 Once all nodes have been restored, your cluster is fully recovered. The restore script automatically cleans up any temporary configuration changes (\`initial_token\` or \`replace_address\` flags) after each successful node start.
 `.trim();
+
+    

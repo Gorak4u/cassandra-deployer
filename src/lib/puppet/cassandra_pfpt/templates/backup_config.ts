@@ -9,6 +9,9 @@ export const backup_config = `
   "full_backup_log_file": "<%= @full_backup_log_file %>",
   "incremental_backup_log_file": "<%= @incremental_backup_log_file %>",
   "listen_address": "<%= @listen_address %>",
-  "seeds_list": <%= @seeds.to_json %>
+  "seeds_list": <%= @seeds.to_json %>,
+  "clearsnapshot_keep_days": <%= @clearsnapshot_keep_days %>
 }
 `.trim();
+
+    

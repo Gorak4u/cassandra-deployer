@@ -139,14 +139,15 @@ class cassandra_pfpt (
   String $incremental_backup_log_file = '/var/log/cassandra/incremental_backup.log',
   Optional[String] $puppet_cron_schedule = undef,
   String $backup_backend = 's3',
+  Integer $clearsnapshot_keep_days = 3,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
   if Integer($cassandra_major_version) >= 4 and Integer($java_version) < 11 {
-    fail("Cassandra version \${cassandra_version} requires Java 11 or newer, but Java \${java_version} was specified.")
+    fail("Cassandra version \\\${cassandra_version} requires Java 11 or newer, but Java \\\${java_version} was specified.")
   }
   if Integer($cassandra_major_version) <= 3 and Integer($java_version) > 11 {
-    fail("Cassandra version \${cassandra_version} is not compatible with Java versions newer than 11, but Java \${java_version} was specified.")
+    fail("Cassandra version \\\${cassandra_version} is not compatible with Java versions newer than 11, but Java \\\${java_version} was specified.")
   }
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
   $seeds = if empty($seeds_list) {
@@ -209,3 +210,5 @@ class cassandra_pfpt (
   ~> Class['cassandra_pfpt::service']
 }
 `.trim();
+
+    

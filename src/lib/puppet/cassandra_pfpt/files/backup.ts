@@ -31,6 +31,7 @@ BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
+KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -43,6 +44,39 @@ SNAPSHOT_TAG="full_snapshot_$(date +%Y%m%d%H%M%S)"
 HOSTNAME=$(hostname -s)
 BACKUP_ROOT_DIR="/tmp/cassandra_backups"
 BACKUP_TEMP_DIR="$BACKUP_ROOT_DIR/$HOSTNAME_$SNAPSHOT_TAG"
+
+# --- Cleanup Snapshot Function ---
+cleanup_old_snapshots() {
+    if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || [ "$KEEP_DAYS" -le 0 ]; then
+        log_message "INFO: Snapshot retention is not configured to a positive number ($KEEP_DAYS). Skipping old snapshot cleanup."
+        return
+    fi
+
+    log_message "--- Starting Old Snapshot Cleanup ---"
+    log_message "Retention period: $KEEP_DAYS days"
+    local cutoff_date
+    cutoff_date=$(date -d "-$KEEP_DAYS days" +%Y%m%d)
+
+    nodetool listsnapshots | while read -r snapshot_line; do
+      if [[ "$snapshot_line" =~ ^(full_snapshot_|adhoc_snapshot_|snapshot_) ]]; then
+        local tag
+        tag=$(echo "$snapshot_line" | awk '{print $1}')
+        # Extract date from tag like 'full_snapshot_YYYYMMDDHHMMSS'
+        local snapshot_date
+        snapshot_date=$(echo "$tag" | sed -n 's/^.*_\\([0-9]\\{8\\}\\)[0-9]\\{6\\}$/\\1/p')
+
+        if [ -n "$snapshot_date" ]; then
+          if [ "$snapshot_date" -lt "$cutoff_date" ]; then
+            log_message "Deleting old snapshot: $tag (date: $snapshot_date is older than cutoff: $cutoff_date)"
+            if ! nodetool clearsnapshot -t "$tag"; then
+              log_message "ERROR: Failed to delete snapshot $tag"
+            fi
+          fi
+        fi
+      fi
+    done
+    log_message "--- Snapshot Cleanup Finished ---"
+}
 
 
 # --- Cleanup Functions ---
@@ -66,6 +100,9 @@ if [ -f "/var/lib/backup-disabled" ]; then
     log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
     exit 0
 fi
+
+# Run cleanup of old snapshots BEFORE taking a new one
+cleanup_old_snapshots
 
 log_message "--- Starting Full Cassandra Snapshot Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
@@ -171,8 +208,7 @@ else
         log_message "S3 upload simulated successfully."
 
         # 8. Cleanup (only after successful upload)
-        log_message "Cleaning up local snapshot and archive file..."
-        nodetool clearsnapshot -t "$SNAPSHOT_TAG"
+        log_message "Cleaning up local archive file..."
         rm -f "$TARBALL_PATH"
     else
         log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping upload."
@@ -490,9 +526,11 @@ do_full_restore() {
     log_message "Backup extracted."
     
     # CRITICAL STEP: Determine restore strategy (Initial Seed vs. Replace)
-    local ORIGINAL_IP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.ip_address')
+    local ORIGINAL_IP
+    ORIGINAL_IP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.ip_address')
     local IS_FIRST_NODE=true
-    local NODETOOL_HOSTS=$(echo "$LOADER_NODES" | sed 's/,/ -h /g')
+    local NODETOOL_HOSTS
+    NODETOOL_HOSTS=$(echo "$LOADER_NODES" | sed 's/,/ -h /g')
 
     log_message "Determining restore strategy by checking seed nodes: $LOADER_NODES"
     # Use nodetool on a list of seeds. If any seed is reachable, we are not the first node.
@@ -509,8 +547,10 @@ do_full_restore() {
     if [ "$IS_FIRST_NODE" = true ]; then
         # FIRST NODE STRATEGY: Use initial_token in cassandra.yaml
         log_message "Applying FIRST NODE strategy: Writing initial_token to cassandra.yaml"
-        local TOKENS_FROM_BACKUP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.tokens | join(",")')
-        local NUM_TOKENS=$(echo "$MANIFEST_JSON" | jq -r '.source_node.tokens | length')
+        local TOKENS_FROM_BACKUP
+        TOKENS_FROM_BACKUP=$(echo "$MANIFEST_JSON" | jq -r '.source_node.tokens | join(",")')
+        local NUM_TOKENS
+        NUM_TOKENS=$(echo "$MANIFEST_JSON" | jq -r '.source_node.tokens | length')
 
         if [ -z "$TOKENS_FROM_BACKUP" ] || [ "$NUM_TOKENS" -eq 0 ]; then
             log_message "ERROR: Cannot use initial_token strategy because token data is missing from backup manifest."
@@ -758,23 +798,23 @@ SNAPSHOT_TAG="\${1:-snapshot_$(date +%Y%m%d%H%M%S)}"
 KEYSPACES="\${2:-}" # Optional: comma-separated list of keyspaces
 
 log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
 log_message "--- Taking Cassandra Snapshot ---"
-log_message "Snapshot Tag: \$SNAPSHOT_TAG"
+log_message "Snapshot Tag: $SNAPSHOT_TAG"
 
-CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
+CMD="nodetool snapshot -t $SNAPSHOT_TAG"
 
-if [ -n "\$KEYSPACES" ]; then
-    log_message "Targeting keyspaces: \$KEYSPACES"
+if [ -n "$KEYSPACES" ]; then
+    log_message "Targeting keyspaces: $KEYSPACES"
     # Convert comma-separated to space-separated
-    CMD+=" -- $(echo \$KEYSPACES | sed 's/,/ /g')"
+    CMD+=" -- $(echo $KEYSPACES | sed 's/,/ /g')"
 fi
 
-log_message "Executing: \$CMD"
-if \$CMD; then
-    log_message "SUCCESS: Snapshot '\$SNAPSHOT_TAG' created successfully."
+log_message "Executing: $CMD"
+if $CMD; then
+    log_message "SUCCESS: Snapshot '$SNAPSHOT_TAG' created successfully."
     exit 0
 else
     log_message "ERROR: Failed to create snapshot."
@@ -793,23 +833,23 @@ BACKUP_DIR="/var/lib/cassandra/data"
 LOG_FILE="/var/log/cassandra/robust_backup.log"
 
 log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] \$1" | tee -a "\$LOG_FILE"
+  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 log_message "--- Starting Robust Local Snapshot ---"
-log_message "Snapshot Tag: \$SNAPSHOT_TAG"
+log_message "Snapshot Tag: $SNAPSHOT_TAG"
 
 # Build command
-CMD="nodetool snapshot -t \$SNAPSHOT_TAG"
-if [ -n "\$KEYSPACES" ]; then
-    log_message "Targeting keyspaces: \$KEYSPACES"
+CMD="nodetool snapshot -t $SNAPSHOT_TAG"
+if [ -n "$KEYSPACES" ]; then
+    log_message "Targeting keyspaces: $KEYSPACES"
     # Convert comma-separated to space-separated for the command
-    CMD+=" -- $(echo \$KEYSPACES | sed 's/,/ /g')"
+    CMD+=" -- $(echo $KEYSPACES | sed 's/,/ /g')"
 fi
 
 # 1. Take snapshot
-log_message "Executing: \$CMD"
-if ! \$CMD; then
+log_message "Executing: $CMD"
+if ! $CMD; then
     log_message "ERROR: Failed to take snapshot. Aborting."
     exit 1
 fi
@@ -817,26 +857,28 @@ log_message "Snapshot created successfully."
 
 # 2. Verify snapshot
 log_message "Verifying snapshot files..."
-SNAPSHOT_PATH_COUNT=$(find "\$BACKUP_DIR" -type d -path "*/snapshots/\$SNAPSHOT_TAG" | wc -l)
+SNAPSHOT_PATH_COUNT=$(find "$BACKUP_DIR" -type d -path "*/snapshots/$SNAPSHOT_TAG" | wc -l)
 
-if [ "\$SNAPSHOT_PATH_COUNT" -eq 0 ]; then
+if [ "$SNAPSHOT_PATH_COUNT" -eq 0 ]; then
     log_message "WARNING: No snapshot directories found. This may be expected if the targeted keyspaces have no data."
 else
-    log_message "Found \$SNAPSHOT_PATH_COUNT snapshot directories. Checking for content..."
+    log_message "Found $SNAPSHOT_PATH_COUNT snapshot directories. Checking for content..."
     # A simple verification: check that there are SSTable files in the snapshot dirs
-    SSTABLE_COUNT=$(find "\$BACKUP_DIR" -type f -path "*/snapshots/\$SNAPSHOT_TAG/*" -name "*.db" | wc -l)
-    if [ "\$SSTABLE_COUNT" -gt 0 ]; then
-        log_message "OK: Found \$SSTABLE_COUNT SSTable files. Snapshot appears valid."
+    SSTABLE_COUNT=$(find "$BACKUP_DIR" -type f -path "*/snapshots/$SNAPSHOT_TAG/*" -name "*.db" | wc -l)
+    if [ "$SSTABLE_COUNT" -gt 0 ]; then
+        log_message "OK: Found $SSTABLE_COUNT SSTable files. Snapshot appears valid."
     else
         log_message "WARNING: No SSTable (.db) files found in snapshot directories. The snapshot might be empty."
     fi
 fi
 
 log_message "--- Robust Local Snapshot Finished ---"
-log_message "Snapshot tag '\$SNAPSHOT_TAG' is available on disk."
-log_message "To clear this snapshot, run: nodetool clearsnapshot -t \$SNAPSHOT_TAG"
+log_message "Snapshot tag '$SNAPSHOT_TAG' is available on disk."
+log_message "To clear this snapshot, run: nodetool clearsnapshot -t $SNAPSHOT_TAG"
 exit 0
 `,
     };
+
+    
 
     
