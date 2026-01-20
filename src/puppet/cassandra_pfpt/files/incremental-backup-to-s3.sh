@@ -142,14 +142,17 @@ else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         BACKUP_DATE=$(date +%Y-%m-%d)
         UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/$BACKUP_DATE/incremental/$BACKUP_TAG.tar.gz"
-        log_message "Simulating S3 upload to: $UPLOAD_PATH"
-        # In a real environment: aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"
-        log_message "S3 upload simulated successfully."
+        log_message "Uploading incremental backup to: $UPLOAD_PATH"
+        if ! aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"; then
+            log_message "ERROR: Failed to upload incremental backup to S3. Local files will NOT be cleaned up."
+            exit 1
+        fi
+        log_message "S3 upload completed successfully."
 
         # 7. Cleanup (only after successful upload)
         log_message "Cleaning up archived incremental backup files and local tarball..."
-        xargs -a "$BACKUP_TEMP_DIR/incremental_files.list" rm -f
-        log_message "Source incremental files deleted."
+        xargs --no-run-if-empty -a "$BACKUP_TEMP_DIR/incremental_files.list" rm -f
+        log_message "Source incremental files from backups/ directory have been deleted."
         rm -f "$TARBALL_PATH"
         log_message "Local tarball deleted."
     else
