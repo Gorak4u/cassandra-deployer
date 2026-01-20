@@ -115,7 +115,7 @@ if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
     log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
     exit 1
 fi
-echo "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 # Check for global backup disable flag
 if [ -f "/var/lib/backup-disabled" ]; then

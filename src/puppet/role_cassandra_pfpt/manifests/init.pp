@@ -1,4 +1,6 @@
-# Defines a machine as a Cassandra Server by including the necessary profile.
+#
+# @summary A role for a Cassandra server
+#
 class role_cassandra_pfpt {
   include profile_cassandra_pfpt
 }

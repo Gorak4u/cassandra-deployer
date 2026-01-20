@@ -117,7 +117,7 @@ if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
     log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
     exit 1
 fi
-echo "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 
 # --- Core Logic Functions ---
@@ -175,10 +175,10 @@ find_backup_chain() {
         local backup_type
         backup_type=$(echo "$manifest" | jq -r '.backup_type')
         
-        if [ "$backup_type" == "full" ]; {
+        if [ "$backup_type" == "full" ]; then
             BASE_FULL_BACKUP="$backup_ts"
             break
-        }
+        fi
     done
 
     if [ -z "$BASE_FULL_BACKUP" ]; then

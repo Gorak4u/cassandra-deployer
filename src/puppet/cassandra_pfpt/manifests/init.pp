@@ -1,14 +1,21 @@
-# Manages the core components of Cassandra, including packages, config, and service.
+#
+# @summary This is the main component module for installing and configuring Cassandra.
+#
+# @param cluster_name The name of the Cassandra cluster.
+# @param seeds An array of seed node IP addresses.
+# @param backup_config_content A JSON string containing the backup configuration.
+#
 class cassandra_pfpt (
-  # This parameter receives the JSON content for the backup config file.
-  # It's marked as Sensitive because it contains the key.
+  String            $cluster_name,
+  Array[String]     $seeds,
   Sensitive[String] $backup_config_content,
 ) {
 
-  # This is a placeholder for all the other resources this module would manage,
-  # like packages, the main cassandra.yaml config, the service, etc.
+  # This is a placeholder for all the resources this module would manage,
+  # such as packages, configuration files (cassandra.yaml), and the service.
+  # For this specific task, we are focusing on the backup configuration.
 
-  # Ensure the /etc/backup directory exists
+  # Manages the directory where backup configurations are stored.
   file { '/etc/backup':
     ensure => directory,
     owner  => 'root',
@@ -16,13 +23,18 @@ class cassandra_pfpt (
     mode   => '0755',
   }
 
-  # Manage the backup configuration file itself
+  # Manages the /etc/backup/config.json file.
+  # It receives its content directly from the profile, ensuring data flows one way.
   file { '/etc/backup/config.json':
     ensure  => file,
     owner   => 'root',
     group   => 'root',
-    mode    => '0600', # Restrictive permissions as it contains the key
+    mode    => '0600', # Secure permissions, only root can read.
     content => $backup_config_content,
     require => File['/etc/backup'],
   }
+
+  # Example of how other resources would be declared:
+  # package { 'cassandra': ensure => installed }
+  # service { 'cassandra': ensure => running, enable => true }
 }
