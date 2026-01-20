@@ -27,6 +27,7 @@ fi
 
 # Source configuration from JSON
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -159,19 +160,26 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_message "Snapshot is available with tag: $SNAPSHOT_TAG"
     log_message "Skipping S3 upload and local cleanup."
 else
-    UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/full/$SNAPSHOT_TAG.tar.gz"
-    log_message "Simulating S3 upload to: $UPLOAD_PATH"
-    # In a real environment, the following line would be active:
-    # if ! aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"; then
-    #   log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
-    #   exit 1
-    # fi
-    log_message "S3 upload simulated successfully."
+    if [ "$BACKUP_BACKEND" == "s3" ]; then
+        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/full/$SNAPSHOT_TAG.tar.gz"
+        log_message "Simulating S3 upload to: $UPLOAD_PATH"
+        # In a real environment, the following line would be active:
+        # if ! aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"; then
+        #   log_message "ERROR: Failed to upload backup to S3. Local files will not be cleaned up."
+        #   exit 1
+        # fi
+        log_message "S3 upload simulated successfully."
 
-    # 8. Cleanup (only after successful upload)
-    log_message "Cleaning up local snapshot and archive file..."
-    nodetool clearsnapshot -t "$SNAPSHOT_TAG"
-    rm -f "$TARBALL_PATH"
+        # 8. Cleanup (only after successful upload)
+        log_message "Cleaning up local snapshot and archive file..."
+        nodetool clearsnapshot -t "$SNAPSHOT_TAG"
+        rm -f "$TARBALL_PATH"
+    else
+        log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping upload."
+        log_message "Backup archive is available at: $TARBALL_PATH"
+        log_message "Snapshot is available with tag: $SNAPSHOT_TAG"
+        log_message "Local files will NOT be cleaned up."
+    fi
 fi
 
 log_message "--- Full Cassandra Snapshot Backup Process Finished Successfully ---"
@@ -205,6 +213,7 @@ fi
 
 # Source configuration from JSON
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.incremental_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -318,17 +327,23 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_message "Backup archive is available at: $TARBALL_PATH"
     log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
 else
-    UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/incremental/$BACKUP_TAG.tar.gz"
-    log_message "Simulating S3 upload to: $UPLOAD_PATH"
-    # In a real environment: aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"
-    log_message "S3 upload simulated successfully."
+    if [ "$BACKUP_BACKEND" == "s3" ]; then
+        UPLOAD_PATH="s3://$S3_BUCKET_NAME/cassandra/$HOSTNAME/incremental/$BACKUP_TAG.tar.gz"
+        log_message "Simulating S3 upload to: $UPLOAD_PATH"
+        # In a real environment: aws s3 cp "$TARBALL_PATH" "$UPLOAD_PATH"
+        log_message "S3 upload simulated successfully."
 
-    # 7. Cleanup (only after successful upload)
-    log_message "Cleaning up archived incremental backup files and local tarball..."
-    xargs -a "$BACKUP_TEMP_DIR/incremental_files.list" rm -f
-    log_message "Source incremental files deleted."
-    rm -f "$TARBALL_PATH"
-    log_message "Local tarball deleted."
+        # 7. Cleanup (only after successful upload)
+        log_message "Cleaning up archived incremental backup files and local tarball..."
+        xargs -a "$BACKUP_TEMP_DIR/incremental_files.list" rm -f
+        log_message "Source incremental files deleted."
+        rm -f "$TARBALL_PATH"
+        log_message "Local tarball deleted."
+    else
+        log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping upload."
+        log_message "Backup archive is available at: $TARBALL_PATH"
+        log_message "Incremental backup files have NOT been cleaned up and will be included in the next run."
+    fi
 fi
 
 log_message "--- Incremental Cassandra Backup Process Finished Successfully ---"
@@ -385,6 +400,7 @@ fi
 
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
@@ -406,6 +422,10 @@ do_schema_restore() {
     log_message "--- Starting Schema-Only Restore for Backup ID: $BACKUP_ID ---"
 
     log_message "Downloading backup to extract schema..."
+    if [ "$BACKUP_BACKEND" != "s3" ]; then
+        log_message "ERROR: Cannot restore from backend '$BACKUP_BACKEND'. This script only supports 's3'."
+        exit 1
+    fi
     if aws s3 cp "$S3_PATH" - | tar -xzf - --to-stdout schema.cql > /tmp/schema.cql 2>/dev/null; then
         log_message "SUCCESS: Schema extracted to /tmp/schema.cql"
         log_message "Please review this file, then apply it to your cluster using: cqlsh -u <user> -p <password> -f /tmp/schema.cql"
@@ -459,6 +479,10 @@ do_full_restore() {
     log_message "Old directories cleaned."
 
     log_message "4. Downloading and extracting backup..."
+    if [ "$BACKUP_BACKEND" != "s3" ]; then
+        log_message "ERROR: Cannot restore from backend '$BACKUP_BACKEND'. This script only supports 's3'."
+        exit 1
+    fi
     if ! aws s3 cp "$S3_PATH" - | tar -xzf - -P; then
         log_message "ERROR: Failed to download or extract backup from S3."
         exit 1
@@ -590,6 +614,10 @@ do_granular_restore() {
     mkdir -p "$RESTORE_TEMP_DIR"
 
     log_message "Downloading and extracting backup to temporary directory..."
+    if [ "$BACKUP_BACKEND" != "s3" ]; then
+        log_message "ERROR: Cannot restore from backend '$BACKUP_BACKEND'. This script only supports 's3'."
+        exit 1
+    fi
     aws s3 cp "$S3_PATH" - | tar -xzf - -C "$RESTORE_TEMP_DIR"
     
     # sstableloader needs the path to be .../keyspace/table/
@@ -684,6 +712,10 @@ log_message "Preparing to restore from S3 path: $S3_PATH"
 
 # --- Fetch and verify manifest first ---
 log_message "Fetching backup manifest for verification..."
+if [ "$BACKUP_BACKEND" != "s3" ]; then
+    log_message "ERROR: Cannot fetch manifest from backend '$BACKUP_BACKEND'. This script only supports 's3'."
+    exit 1
+fi
 MANIFEST_JSON=$(aws s3 cp "$S3_PATH" - | tar -xzf - --to-stdout backup_manifest.json 2>/dev/null)
 
 if [ -z "$MANIFEST_JSON" ]; then

@@ -140,6 +140,7 @@ class profile_cassandra_pfpt {
   $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
   $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
   $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
+  $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
   $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
@@ -278,6 +279,7 @@ class profile_cassandra_pfpt {
     full_backup_schedule             => $full_backup_schedule,
     incremental_backup_schedule      => $incremental_backup_schedule,
     backup_s3_bucket                 => $backup_s3_bucket,
+    backup_backend                   => $backup_backend,
     full_backup_script_path          => $full_backup_script_path,
     incremental_backup_script_path   => $incremental_backup_script_path,
     full_backup_log_file             => $full_backup_log_file,

@@ -62,6 +62,7 @@ profile_cassandra_pfpt::incremental_backup_schedule:
 *   \`profile_cassandra_pfpt::incremental_backups\` (Boolean): **Required for incremental backups.** Enables Cassandra's built-in feature to create hard links to new SSTables. Default: \`false\`.
 *   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Enables the scheduled \`full-backup-to-s3.sh\` script. Default: \`false\`.
 *   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Enables the scheduled \`incremental-backup-to-s3.sh\` script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::backup_backend\` (String): The storage backend to use for uploads. Currently only supports \`'s3'\`. If set to any other value, backups will be created locally but not uploaded or cleaned up, allowing for an external process to handle them. Default: \`'s3'\`.
 *   \`profile_cassandra_pfpt::full_backup_schedule\` (String): The \`systemd\` OnCalendar schedule for full snapshot backups. Default: \`'daily'\`.
 *   \`profile_cassandra_pfpt::incremental_backup_schedule\` (String | Array[String]): The \`systemd\` OnCalendar schedule(s) for incremental backups. Default: \`'0 */4 * * *'\`.
 *   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to upload backups to. Default: \`'puppet-cassandra-backups'\`.

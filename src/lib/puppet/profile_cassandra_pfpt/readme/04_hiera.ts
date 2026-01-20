@@ -75,4 +75,11 @@ This section documents every available Hiera key for this profile.
 
 *   \`profile_cassandra_pfpt::manage_repo\` (Boolean): Whether Puppet should manage the Cassandra YUM repository. Default: \`true\`.
 *   \`profile_cassandra_pfpt::package_dependencies\` (Array[String]): An array of dependency packages to install. Default: \`['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli']\`.
+
+### Backup and Restore
+
+*   \`profile_cassandra_pfpt::manage_full_backups\` (Boolean): Enables the scheduled full backup script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::manage_incremental_backups\` (Boolean): Enables the scheduled incremental backup script. Default: \`false\`.
+*   \`profile_cassandra_pfpt::backup_backend\` (String): The storage backend to use for uploads. Currently only supports \`'s3'\`. If set to another value, backups will be created locally but not uploaded. Default: \`'s3'\`.
+*   \`profile_cassandra_pfpt::backup_s3_bucket\` (String): The name of the S3 bucket to use when \`backup_backend\` is \`'s3'\`. Default: \`'puppet-cassandra-backups'\`.
 `.trim();

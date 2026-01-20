@@ -138,6 +138,7 @@ class cassandra_pfpt (
   String $full_backup_log_file = '/var/log/cassandra/full_backup.log',
   String $incremental_backup_log_file = '/var/log/cassandra/incremental_backup.log',
   Optional[String] $puppet_cron_schedule = undef,
+  String $backup_backend = 's3',
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]

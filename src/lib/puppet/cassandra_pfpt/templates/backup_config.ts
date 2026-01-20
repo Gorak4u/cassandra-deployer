@@ -2,6 +2,7 @@
 export const backup_config = `
 {
   "s3_bucket_name": "<%= @backup_s3_bucket %>",
+  "backup_backend": "<%= @backup_backend %>",
   "cassandra_data_dir": "<%= @data_dir %>",
   "commitlog_dir": "<%= @commitlog_dir %>",
   "saved_caches_dir": "<%= @saved_caches_dir %>",
