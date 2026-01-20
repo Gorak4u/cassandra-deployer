@@ -1,49 +1,31 @@
-# @summary Manages backup configuration and cron jobs.
+# @summary Manages backup scripts, configuration, and cron jobs.
 class cassandra_pfpt::backup {
 
-  file { '/etc/backup':
-    ensure => directory,
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
-  }
-
-  $backup_config_hash = {
-    's3_bucket_name'                => $cassandra_pfpt::backup_s3_bucket,
-    'backup_backend'                => $cassandra_pfpt::backup_backend,
-    'cassandra_data_dir'            => $cassandra_pfpt::data_dir,
-    'full_backup_log_file'          => $cassandra_pfpt::full_backup_log_file,
-    'incremental_backup_log_file'   => $cassandra_pfpt::incremental_backup_log_file,
-    'listen_address'                => $cassandra_pfpt::listen_address,
-    'clearsnapshot_keep_days'       => $cassandra_pfpt::clearsnapshot_keep_days,
-  }
-
+  # Backup configuration file used by the shell scripts
+  file { '/etc/backup': ensure => directory }
   file { '/etc/backup/config.json':
     ensure  => file,
-    content => to_json_pretty($backup_config_hash),
     owner   => 'root',
     group   => 'root',
-    mode    => '0644',
+    mode    => '0600',
+    content => template('cassandra_pfpt/backup-config.json.erb'),
     require => File['/etc/backup'],
   }
 
   if $cassandra_pfpt::manage_full_backups {
-    # Translate schedule keywords to cron values
-    $full_schedule = $cassandra_pfpt::full_backup_schedule ? {
-      'daily'   => { 'minute' => '30', 'hour' => '2' },
-      'weekly'  => { 'minute' => '30', 'hour' => '2', 'weekday' => '0' },
-      default   => undef,
-    }
-
-    if $full_schedule {
-      cron { 'cassandra_full_backup':
-        command  => $cassandra_pfpt::full_backup_script_path,
-        user     => 'root',
-        minute   => $full_schedule['minute'],
-        hour     => $full_schedule['hour'],
-        weekday  => $full_schedule['weekday'],
-        require  => File['/etc/backup/config.json'],
-      }
+    cron { 'cassandra_full_backup':
+      command  => $cassandra_pfpt::full_backup_script_path,
+      user     => 'root',
+      hour     => $cassandra_pfpt::full_backup_schedule ? {
+        'daily'   => '2',
+        default   => '2', # Default to 2 AM daily
+      },
+      minute   => '0',
+      weekday  => $cassandra_pfpt::full_backup_schedule ? {
+        'weekly'  => '0', # Sunday
+        default   => undef,
+      },
+      require => [File[$cassandra_pfpt::full_backup_script_path], File['/etc/backup/config.json']],
     }
   }
 
@@ -51,8 +33,21 @@ class cassandra_pfpt::backup {
     cron { 'cassandra_incremental_backup':
       command  => $cassandra_pfpt::incremental_backup_script_path,
       user     => 'root',
-      schedule => $cassandra_pfpt::incremental_backup_schedule,
-      require  => File['/etc/backup/config.json'],
+      # Handle special cron schedules like @hourly
+      special  => $cassandra_pfpt::incremental_backup_schedule ? {
+        /^\@/    => $cassandra_pfpt::incremental_backup_schedule,
+        default => undef,
+      },
+      # Handle standard cron schedules
+      hour     => $cassandra_pfpt::incremental_backup_schedule ? {
+        /^\@/    => undef,
+        default => split($cassandra_pfpt::incremental_backup_schedule, ' ')[1],
+      },
+      minute   => $cassandra_pfpt::incremental_backup_schedule ? {
+        /^\@/    => undef,
+        default => split($cassandra_pfpt::incremental_backup_schedule, ' ')[0],
+      },
+      require => [File[$cassandra_pfpt::incremental_backup_script_path], File['/etc/backup/config.json']],
     }
   }
 }

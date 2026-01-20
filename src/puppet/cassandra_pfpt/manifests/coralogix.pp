@@ -1,16 +1,24 @@
-# @summary Manages Coralogix agent installation and configuration.
+# @summary Manages the Coralogix agent.
 class cassandra_pfpt::coralogix {
-  if $cassandra_pfpt::manage_coralogix_agent {
-    # This is a placeholder for a real Coralogix agent management module.
-    # In a real scenario, you would use the Coralogix Puppet module.
-    $install_script_url = "https://raw.githubusercontent.com/coralogix/coralogix-agent/main/install.sh"
-    $install_command = "bash <(curl -sL ${install_script_url}) --key ${cassandra_pfpt::coralogix_api_key} --region ${cassandra_pfpt::coralogix_region}"
+  # This is a placeholder for where the Coralogix agent installation
+  # and configuration would go. It might be a package, a docker container,
+  # or a script-based install. A real implementation would be more complex.
 
-    exec { 'install-coralogix-agent':
-      command => $install_command,
-      path    => ['/bin', '/usr/bin'],
-      creates => '/opt/coralogix/logs/coralogix.log', # Simple check to see if it's installed
-      logoutput => true,
-    }
+  # Assuming a config file location
+  file { '/etc/coralogix':
+    ensure => directory,
+  }
+
+  file { '/etc/coralogix/config.yaml':
+    ensure  => file,
+    content => template('cassandra_pfpt/coralogix_config.yaml.erb'),
+    require => File['/etc/coralogix'],
+    notify  => Service['coralogix-agent'], # Assuming a service name
+  }
+
+  # Placeholder for the service
+  service { 'coralogix-agent':
+    ensure => running,
+    enable => true,
   }
 }

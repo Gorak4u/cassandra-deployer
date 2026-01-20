@@ -1,12 +1,4 @@
-# This file is managed by Puppet
+; This file is managed by Puppet. DO NOT EDIT.
 [authentication]
 username = cassandra
-password = cassandra
-
-[cql]
-version = 3.4.5
-
-[connection]
-hostname = <%= @listen_address %>
-port = 9042
-ssl = false
+password = <%= @cassandra_password %>

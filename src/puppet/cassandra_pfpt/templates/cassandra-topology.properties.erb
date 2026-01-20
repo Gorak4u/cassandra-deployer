@@ -1,0 +1,13 @@
+# This file is managed by Puppet. DO NOT EDIT.
+#
+# GossipingPropertyFileSnitch properties
+#
+# Every node in the cluster must be listed here, with its DC and rack.
+# For example:
+# 10.0.0.1=DC1:RAC1
+# 10.0.0.2=DC1:RAC2
+# 10.0.1.1=DC2:RAC1
+
+<% @racks.each do |node_ip, details| -%>
+<%= node_ip %>=<%= details['dc'] %>:<%= details['rack'] %>
+<% end -%>

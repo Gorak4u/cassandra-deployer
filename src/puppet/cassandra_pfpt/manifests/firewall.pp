@@ -1,20 +1,40 @@
-# @summary Manages firewall rules for Cassandra.
+# @summary Manages basic firewall rules for Cassandra.
+# This is a placeholder and should be adapted to your specific firewall solution
+# (e.g., firewalld, iptables, ufw) and security zones.
 class cassandra_pfpt::firewall {
-  # This is a basic example using firewalld.
-  # For a production system, you might use a more specific firewall module.
-  $ports_to_open = [
-    $cassandra_pfpt::storage_port,              # Inter-node communication
-    $cassandra_pfpt::ssl_storage_port,          # Inter-node SSL communication
-    7199,                                       # JMX
-    $cassandra_pfpt::rpc_port,                  # Thrift
-    $cassandra_pfpt::native_transport_port,     # CQL
-  ]
+  # This class is intentionally left blank.
+  # In a real environment, you would add resources for your chosen firewall tool.
 
-  $ports_to_open.each |Integer $port| {
-    exec { "firewalld-open-port-${port}":
-      command => "/usr/bin/firewall-cmd --permanent --add-port=${port}/tcp && /usr/bin/firewall-cmd --reload",
-      unless  => "/usr/bin/firewall-cmd --list-ports | /bin/grep -qw ${port}/tcp",
-      path    => ['/bin/', '/sbin/', '/usr/bin/', '/usr/sbin/'],
-    }
-  }
+  # Example for firewalld (requires puppetlabs/firewalld module):
+  #
+  # firewalld_port { 'cassandra-jmx':
+  #   ensure   => present,
+  #   port     => '7199',
+  #   protocol => 'tcp',
+  #   zone     => 'internal',
+  # }
+  # firewalld_port { 'cassandra-internode':
+  #   ensure   => present,
+  #   port     => '7000',
+  #   protocol => 'tcp',
+  #   zone     => 'internal',
+  # }
+  # firewalld_port { 'cassandra-internode-ssl':
+  #   ensure   => present,
+  #   port     => '7001',
+  #   protocol => 'tcp',
+  #   zone     => 'internal',
+  # }
+  # firewalld_port { 'cassandra-cql':
+  #   ensure   => present,
+  #   port     => '9042',
+  #   protocol => 'tcp',
+  #   zone     => 'public',
+  # }
+  # firewalld_port { 'cassandra-thrift':
+  #   ensure   => present,
+  #   port     => '9160',
+  #   protocol => 'tcp',
+  #   zone     => 'public',
+  # }
 }

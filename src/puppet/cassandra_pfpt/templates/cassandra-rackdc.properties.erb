@@ -1,3 +1,6 @@
 # This file is managed by Puppet. DO NOT EDIT.
-dc=<%= @cassandra_pfpt::datacenter %>
-rack=<%= @cassandra_pfpt::rack %>
+#
+# Location of this node in the cassandra ring.
+#
+dc=<%= @datacenter %>
+rack=<%= @rack %>

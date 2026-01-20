@@ -1,0 +1,39 @@
+# This file is managed by Puppet. DO NOT EDIT.
+# This is a basic configuration. For a full list of options, see the
+# JMX Exporter documentation.
+---
+startDelaySeconds: 0
+hostPort: <%= @listen_address %>:<%= @jmx_exporter_port %>
+ssl: false
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+rules:
+  # Default JVM metrics
+  - pattern: "java.lang<type=OperatingSystem><>(ProcessCpuLoad|SystemCpuLoad|FreePhysicalMemorySize|TotalPhysicalMemorySize|FreeSwapSpaceSize|TotalSwapSpaceSize|OpenFileDescriptorCount|MaxFileDescriptorCount)"
+  - pattern: "java.lang<type=Threading><>ThreadCount"
+  - pattern: "java.lang<type=Memory><HeapMemoryUsage>(\\w+)"
+    name: "jvm_memory_bytes_$1"
+    labels:
+      area: "heap"
+  - pattern: "java.lang<type=Memory><NonHeapMemoryUsage>(\\w+)"
+    name: "jvm_memory_bytes_$1"
+    labels:
+      area: "nonheap"
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>(CollectionCount|CollectionTime)'
+    name: 'jvm_gc_collection_seconds_$2'
+    labels:
+      gc: '$1'
+  # Basic Cassandra metrics
+  - pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\\w+), name=(\\w+)><>Count"
+    name: "cassandra_client_requests_total"
+    labels:
+      type: "$1"
+      request: "$2"
+  - pattern: "org.apache.cassandra.metrics<type=Storage, name=Load><>Value"
+    name: "cassandra_storage_load_bytes"
+  - pattern: "org.apache.cassandra.metrics<type=Storage, name=Exceptions><>Count"
+    name: "cassandra_storage_exceptions_total"
+  - pattern: "org.apache.cassandra.metrics<type=Compaction, name=PendingTasks><>Value"
+    name: "cassandra_compaction_pending_tasks"
+  - pattern: "org.apache.cassandra.metrics<type=Compaction, name=BytesCompacted><>Count"
+    name: "cassandra_compaction_bytes_compacted_total"

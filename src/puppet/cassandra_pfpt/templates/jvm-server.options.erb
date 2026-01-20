@@ -1,13 +1,49 @@
 # This file is managed by Puppet. DO NOT EDIT.
--Xms<%= @cassandra_pfpt::max_heap_size %>
--Xmx<%= @cassandra_pfpt::max_heap_size %>
--Dcassandra.replace_address=<%= @cassandra_pfpt::replace_address %>
-# Add any additional JVM args from Hiera
-<%- @cassandra_pfpt::extra_jvm_args.each do |arg| -%>
+-Xms<%= @max_heap_size %>
+-Xmx<%= @max_heap_size %>
+
+<% if @use_shenandoah_gc -%>
+-XX:+UseShenandoahGC
+-XX:+AlwaysPreTouch
+-Xss256k
+<% else -%>
+<% @extra_jvm_args.each do |arg| -%>
 <%= arg %>
-<%- end -%>
-<% if @cassandra_pfpt::manage_jmx_security -%>
--Dcom.sun.management.jmxremote.authenticate=true
--Dcom.sun.management.jmxremote.password.file=<%= @cassandra_pfpt::jmx_password_file_path %>
--Dcom.sun.management.jmxremote.access.file=<%= @cassandra_pfpt::jmx_access_file_path %>
-<%- end -%>
+<% end -%>
+<% end -%>
+
+-XX:+HeapDumpOnOutOfMemoryError
+
+# Per-thread stack size.
+-Xss256k
+
+# Larger page sizes get a performance boost.
+-XX:+UseLargePages
+
+# A hint to the JVM to not use biased locking.
+-XX:-UseBiasedLocking
+
+# This is a good default for most systems.
+-XX:CompileThreshold=100
+
+# Other recommended settings
+-XX:StringTableSize=1000003
+-XX:+UseThreadPriorities
+-XX:ThreadPriorityPolicy=42
+-XX:+UseCondCardMark
+
+# JMX Settings
+-Djava.rmi.server.hostname=<%= @listen_address %>
+-Dcom.sun.management.jmxremote.port=7199
+-Dcom.sun.management.jmxremote.rmi.port=7199
+-Dcom.sun.management.jmxremote.local.only=false
+-Dcom.sun.management.jmxremote.authenticate=<%= @manage_jmx_security %>
+<% if @manage_jmx_security -%>
+-Dcom.sun.management.jmxremote.password.file=<%= @jmx_password_file_path %>
+-Dcom.sun.management.jmxremote.access.file=<%= @jmx_access_file_path %>
+<% end -%>
+
+# JMX Exporter agent for Prometheus
+<% if @manage_jmx_exporter -%>
+-javaagent:<%= @jmx_exporter_jar_target %>=<%= @jmx_exporter_port %>:<%= @jmx_exporter_config_target %>
+<% end -%>

@@ -206,9 +206,4 @@ class cassandra_pfpt (
   -> Class['cassandra_pfpt::install']
   -> Class['cassandra_pfpt::config']
   ~> Class['cassandra_pfpt::service']
-  -> Class['cassandra_pfpt::firewall']
-
-  Class['cassandra_pfpt::service'] -> Class['cassandra_pfpt::system_keyspaces']
-  Class['cassandra_pfpt::service'] -> Class['cassandra_pfpt::roles']
-
 }
