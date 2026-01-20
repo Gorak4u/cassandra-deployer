@@ -1,9 +1,13 @@
-# This file is managed by Puppet
-# For G1GC
--XX:+UseG1GC
--XX:G1RSetUpdatingPauseTimePercent=5
--XX:MaxGCPauseMillis=500
-
-# Heap size
--Xms4G
--Xmx4G
+# This file is managed by Puppet. DO NOT EDIT.
+-Xms<%= @cassandra_pfpt::max_heap_size %>
+-Xmx<%= @cassandra_pfpt::max_heap_size %>
+-Dcassandra.replace_address=<%= @cassandra_pfpt::replace_address %>
+# Add any additional JVM args from Hiera
+<%- @cassandra_pfpt::extra_jvm_args.each do |arg| -%>
+<%= arg %>
+<%- end -%>
+<% if @cassandra_pfpt::manage_jmx_security -%>
+-Dcom.sun.management.jmxremote.authenticate=true
+-Dcom.sun.management.jmxremote.password.file=<%= @cassandra_pfpt::jmx_password_file_path %>
+-Dcom.sun.management.jmxremote.access.file=<%= @cassandra_pfpt::jmx_access_file_path %>
+<%- end -%>

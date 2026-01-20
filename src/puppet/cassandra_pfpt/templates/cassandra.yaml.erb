@@ -1,14 +1,77 @@
-# This file is managed by Puppet
-cluster_name: '<%= @cluster_name %>'
-num_tokens: 256
+# This file is managed by Puppet. DO NOT EDIT.
+cluster_name: '<%= @cassandra_pfpt::cluster_name %>'
+num_tokens: <%= @cassandra_pfpt::num_tokens ? @cassandra_pfpt::num_tokens : 256 %>
+initial_token: <%= @cassandra_pfpt::initial_token ? @cassandra_pfpt::initial_token : '' %>
 seed_provider:
   - class_name: org.apache.cassandra.locator.SimpleSeedProvider
     parameters:
-      - seeds: "<%= @seeds %>"
-storage_port: 7000
-ssl_storage_port: 7001
-listen_address: <%= @listen_address %>
-rpc_address: <%= @rpc_address %>
-endpoint_snitch: GossipingPropertyFileSnitch
-# Other configurations can be added here
-incremental_backups: true
+      - seeds: "<%= @cassandra_pfpt::seeds.join(',') %>"
+listen_address: <%= @cassandra_pfpt::listen_address %>
+storage_port: <%= @cassandra_pfpt::storage_port %>
+ssl_storage_port: <%= @cassandra_pfpt::ssl_storage_port %>
+start_native_transport: <%= @cassandra_pfpt::start_native_transport %>
+native_transport_port: <%= @cassandra_pfpt::native_transport_port %>
+start_rpc: <%= @cassandra_pfpt::start_rpc %>
+rpc_address: <%= @cassandra_pfpt::rpc_interface ? @cassandra_pfpt::rpc_interface : @cassandra_pfpt::listen_address %>
+rpc_port: <%= @cassandra_pfpt::rpc_port %>
+rpc_keepalive: <%= @cassandra_pfpt::rpc_keepalive %>
+broadcast_address: <%= @cassandra_pfpt::broadcast_address ? @cassandra_pfpt::broadcast_address : @cassandra_pfpt::listen_address %>
+broadcast_rpc_address: <%= @cassandra_pfpt::broadcast_rpc_address ? @cassandra_pfpt::broadcast_rpc_address : @cassandra_pfpt::rpc_address %>
+endpoint_snitch: <%= @cassandra_pfpt::endpoint_snitch ? @cassandra_pfpt::endpoint_snitch : 'GossipingPropertyFileSnitch' %>
+dynamic_snitch: <%= @cassandra_pfpt::dynamic_snitch %>
+authenticator: <%= @cassandra_pfpt::authenticator ? @cassandra_pfpt::authenticator : 'PasswordAuthenticator' %>
+authorizer: <%= @cassandra_pfpt::authorizer ? @cassandra_pfpt::authorizer : 'CassandraAuthorizer' %>
+role_manager: <%= @cassandra_pfpt::role_manager %>
+data_file_directories:
+  - <%= @cassandra_pfpt::data_dir %>
+commitlog_directory: <%= @cassandra_pfpt::commitlog_dir %>
+saved_caches_directory: <%= @cassandra_pfpt::saved_caches_dir %>
+hints_directory: <%= @cassandra_pfpt::hints_directory %>
+cdc_raw_directory: <%= @cassandra_pfpt::cdc_raw_directory %>
+commitlog_sync: <%= @cassandra_pfpt::commitlog_sync %>
+commitlog_sync_period_in_ms: <%= @cassandra_pfpt::commitlog_sync_period_in_ms %>
+commit_failure_policy: <%= @cassandra_pfpt::commit_failure_policy %>
+disk_failure_policy: <%= @cassandra_pfpt::disk_failure_policy %>
+concurrent_reads: <%= @cassandra_pfpt::concurrent_reads ? @cassandra_pfpt::concurrent_reads : 32 %>
+concurrent_writes: <%= @cassandra_pfpt::concurrent_writes ? @cassandra_pfpt::concurrent_writes : 32 %>
+concurrent_counter_writes: <%= @cassandra_pfpt::concurrent_counter_writes ? @cassandra_pfpt::concurrent_counter_writes : 32 %>
+concurrent_compactors: <%= @cassandra_pfpt::concurrent_compactors %>
+compaction_throughput_mb_per_sec: <%= @cassandra_pfpt::compaction_throughput_mb_per_sec %>
+memtable_allocation_type: <%= @cassandra_pfpt::memtable_allocation_type ? @cassandra_pfpt::memtable_allocation_type : 'heap_buffers' %>
+index_summary_capacity_in_mb: <%= @cassandra_pfpt::index_summary_capacity_in_mb ? @cassandra_pfpt::index_summary_capacity_in_mb : '' %>
+file_cache_size_in_mb: <%= @cassandra_pfpt::file_cache_size_in_mb ? @cassandra_pfpt::file_cache_size_in_mb : '' %>
+counter_cache_size_in_mb: <%= @cassandra_pfpt::counter_cache_size_in_mb ? @cassandra_pfpt::counter_cache_size_in_mb : '' %>
+key_cache_size_in_mb: <%= @cassandra_pfpt::key_cache_size_in_mb ? @cassandra_pfpt::key_cache_size_in_mb : '' %>
+tombstone_warn_threshold: <%= @cassandra_pfpt::tombstone_warn_threshold %>
+tombstone_failure_threshold: <%= @cassandra_pfpt::tombstone_failure_threshold %>
+request_timeout_in_ms: <%= @cassandra_pfpt::request_timeout_in_ms %>
+range_request_timeout_in_ms: <%= @cassandra_pfpt::range_request_timeout_in_ms %>
+read_request_timeout_in_ms: <%= @cassandra_pfpt::read_request_timeout_in_ms %>
+write_request_timeout_in_ms: <%= @cassandra_pfpt::write_request_timeout_in_ms %>
+truncate_request_timeout_in_ms: <%= @cassandra_pfpt::truncate_request_timeout_in_ms %>
+incremental_backups: <%= @cassandra_pfpt::incremental_backups %>
+auto_snapshot: <%= @cassandra_pfpt::auto_snapshot ? @cassandra_pfpt::auto_snapshot : true %>
+max_hints_delivery_threads: <%= @cassandra_pfpt::max_hints_delivery_threads %>
+native_transport_flush_in_batches_legacy: <%= @cassandra_pfpt::native_transport_flush_in_batches_legacy %>
+native_transport_max_frame_size_in_mb: <%= @cassandra_pfpt::native_transport_max_frame_size_in_mb %>
+phi_convict_threshold: <%= @cassandra_pfpt::phi_convict_threshold ? @cassandra_pfpt::phi_convict_threshold : 8 %>
+thrift_framed_transport_size_in_mb: <%= @cassandra_pfpt::thrift_framed_transport_size_in_mb %>
+enable_transient_replication: <%= @cassandra_pfpt::enable_transient_replication %>
+enable_materialized_views: <%= @cassandra_pfpt::enable_materialized_views %>
+<% if @cassandra_pfpt::ssl_enabled { -%>
+server_encryption_options:
+    internode_encryption: <%= @cassandra_pfpt::internode_encryption %>
+    keystore: <%= @cassandra_pfpt::keystore_path %>
+    keystore_password: <%= @cassandra_pfpt::keystore_password %>
+    truststore: <%= @cassandra_pfpt::truststore_path %>
+    truststore_password: <%= @cassandra_pfpt::truststore_password %>
+    require_client_auth: <%= @cassandra_pfpt::internode_require_client_auth %>
+    cipher_suites: [TLS_RSA_WITH_AES_128_CBC_SHA]
+client_encryption_options:
+    enabled: <%= @cassandra_pfpt::client_optional %>
+    keystore: <%= @cassandra_pfpt::client_keystore_path %>
+    keystore_password: <%= @cassandra_pfpt::keystore_password %>
+    require_client_auth: <%= @cassandra_pfpt::client_require_client_auth %>
+    truststore: <%= @cassandra_pfpt::client_truststore_path %>
+    truststore_password: <%= @cassandra_pfpt::client_truststore_password %>
+<% } -%>
