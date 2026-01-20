@@ -74,6 +74,7 @@ profile_cassandra_pfpt::jvm_additional_opts:
   'print_flame_graphs': '-XX:+PreserveFramePointer'
 
 # --- Backup Configuration ---
+profile_cassandra_pfpt::backup_encryption_key: 'Your-Super-Secret-32-Character-Key' # IMPORTANT: Use Hiera-eyaml for this in production
 profile_cassandra_pfpt::manage_full_backups: true
 profile_cassandra_pfpt::full_backup_schedule: 'daily' # systemd timer spec
 profile_cassandra_pfpt::manage_incremental_backups: true
@@ -337,7 +338,7 @@ The restore script handles the complexity of determining whether to start as a f
     *   The script will download and apply the full backup and all necessary incrementals. It will then start Cassandra.
     *   Wait for the node to come online and report `UN` in `nodetool status` before moving to the next node.
 
-2.  Repeat for all remaining nodes until the entire cluster is recovered.
+2.  Repeat for all remaining nodes until the entire new cluster is recovered.
 
 ---
 
@@ -398,6 +399,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::repair_keyspace` (String): If set, the automated repair job will only repair this specific keyspace. If unset, it repairs all non-system keyspaces. Default: `undef`.
 *   `profile_cassandra_pfpt::manage_full_backups` (Boolean): Enables the scheduled full backup script. Default: `false`.
 *   `profile_cassandra_pfpt::manage_incremental_backups` (Boolean): Enables the scheduled incremental backup script. Default: `false`.
+*   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. This MUST be set in Hiera for backups to function. There is no default.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
