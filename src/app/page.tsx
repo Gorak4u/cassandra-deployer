@@ -31,6 +31,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarHeader,
+  SidebarContent,
+  SidebarFooter,
+  SidebarTrigger,
+  SidebarInset,
+} from '@/components/ui/sidebar';
+import { Separator } from '@/components/ui/separator';
 
 
 type PuppetFile = {
@@ -72,7 +82,6 @@ const getPuppetFiles = (): PuppetFile[] => {
 };
 
 const allPuppetFiles = getPuppetFiles();
-
 const REPO_NAMES = Object.keys(puppetCode);
 
 const getRepoFilesByGroup = (repoName: string) => {
@@ -85,7 +94,7 @@ const getRepoFilesByGroup = (repoName: string) => {
         return acc;
     }, {} as Record<string, PuppetFile[]>);
 
-    const groupOrder = ['root', 'manifests', 'templates', 'scripts', 'files'];
+    const groupOrder = ['root', 'manifests', 'templates', 'files', 'scripts'];
     return Object.entries(filesByGroup).sort(
         ([a], [b]) => groupOrder.indexOf(a) - groupOrder.indexOf(b)
     );
@@ -94,8 +103,8 @@ const getRepoFilesByGroup = (repoName: string) => {
 
 export default function Home() {
   const [selectedRepo, setSelectedRepo] = useState<string>(REPO_NAMES[0]);
-  const [selectedFile, setSelectedFile] = useState<PuppetFile>(
-    allPuppetFiles.find(f => f.repo === selectedRepo && f.name === 'init.pp')!
+   const [selectedFile, setSelectedFile] = useState<PuppetFile | null>(
+    allPuppetFiles.find(f => f.repo === selectedRepo && f.name === 'init.pp' && f.group === 'manifests')!
   );
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -138,42 +147,30 @@ export default function Home() {
 
   const handleRepoChange = (repoName: string) => {
     setSelectedRepo(repoName);
-    const firstFile = allPuppetFiles.find(f => f.repo === repoName);
+    const firstFile = allPuppetFiles.find(f => f.repo === repoName && f.name === 'init.pp' && f.group === 'manifests');
     if(firstFile) {
         setSelectedFile(firstFile);
+    } else {
+        setSelectedFile(allPuppetFiles.find(f => f.repo === repoName) ?? null);
     }
   };
 
   const sortedGroups = getRepoFilesByGroup(selectedRepo);
 
   return (
-    <main className="min-h-screen bg-background font-body text-foreground">
-      <div className="container mx-auto p-4 md:p-8">
-        <header className="flex items-center justify-between gap-4 mb-8">
-          <div className="flex items-center gap-4">
-            <div className="bg-primary text-primary-foreground p-3 rounded-lg shadow-md">
-              <RocketIcon className="w-8 h-8" />
-            </div>
-            <div>
-              <h1 className="text-3xl md:text-4xl font-headline font-bold text-primary">
-                Cassandra Deployer
-              </h1>
-              <p className="text-muted-foreground mt-1">
-                Generate a modern Puppet architecture for deploying Apache Cassandra.
-              </p>
-            </div>
+    <SidebarProvider>
+      <Sidebar className="border-r bg-card text-card-foreground">
+        <SidebarHeader className="p-2">
+            <div className="flex items-center gap-3">
+             <div className="bg-primary text-primary-foreground p-2 rounded-lg shadow-md">
+                <RocketIcon className="w-6 h-6" />
+             </div>
+             <h2 className="text-xl font-semibold text-primary">Cassandra Deployer</h2>
           </div>
-          <Button onClick={handleDownload} disabled={isDownloading}>
-            <Download className="mr-2 h-4 w-4" />
-            {isDownloading ? 'Downloading...' : `Download All Modules`}
-          </Button>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1">
-            <Card className="shadow-lg sticky top-8">
-              <CardHeader>
-                <CardTitle>Puppet Repositories</CardTitle>
+        </SidebarHeader>
+        <Separator />
+        <SidebarContent className="p-0">
+            <div className="p-4">
                  <Select value={selectedRepo} onValueChange={handleRepoChange}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select a repository" />
@@ -183,110 +180,128 @@ export default function Home() {
                       <SelectItem key={repo} value={repo}>
                         <div className="flex items-center gap-2">
                            <Package className="h-4 w-4" /> 
-                           {repo}
+                           <span>{repo}</span>
                         </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </CardHeader>
-              <CardContent>
-                <Accordion
-                  type="multiple"
-                  defaultValue={['root', 'manifests', 'templates', 'scripts', 'files']}
-                  className="w-full"
-                >
-                  {sortedGroups.map(([group, files]) => (
-                    <AccordionItem value={group} key={group}>
-                      <AccordionTrigger>
-                        <div className="flex items-center gap-2">
-                          <Folder className="h-5 w-5 text-primary" />
-                          <span className="font-semibold">{group}</span>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className="flex flex-col gap-1 pl-4">
-                          {files.map((file) => (
-                            <Button
-                              key={file.name}
-                              variant="ghost"
-                              className={cn(
-                                'justify-start gap-2',
-                                selectedFile?.name === file.name && selectedFile?.group === file.group &&
-                                  'bg-accent text-accent-foreground'
-                              )}
-                              onClick={() => setSelectedFile(file)}
-                            >
-                              <FileIcon className="h-4 w-4" />
-                              {file.name}
-                            </Button>
-                          ))}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </CardContent>
-            </Card>
-          </div>
-          <div className="lg:col-span-2">
-           {selectedFile && (
-            <Card className="w-full shadow-lg">
-              <CardHeader>
-                <CardTitle>{selectedFile.name}</CardTitle>
-                <CardDescription>
-                  <span className="font-mono text-sm bg-muted px-1 py-0.5 rounded">
-                    {selectedFile.repo}/{selectedFile.group === 'root'
-                      ? selectedFile.name
-                      : `${selectedFile.group}/${selectedFile.name}`}
-                  </span>
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {selectedFile.name === 'init.pp' && selectedFile.repo === 'cassandra_pfpt' && (
-                  <Alert className="mb-6 border-accent">
-                    <Terminal className="h-4 w-4 text-accent" />
-                    <AlertTitle>Component Module</AlertTitle>
-                    <AlertDescription>
-                      This is the main component module. It is highly parameterized and should not contain direct Hiera lookups.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                 {selectedFile.name === 'init.pp' && selectedFile.repo === 'profile_cassandra_pfpt' && (
-                  <Alert className="mb-6 border-accent">
-                    <Terminal className="h-4 w-4 text-accent" />
-                    <AlertTitle>Profile Module</AlertTitle>
-                    <AlertDescription>
-                      This profile wraps the component module and provides its data via Hiera.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                 {selectedFile.name === 'init.pp' && selectedFile.repo === 'role_cassandra_pfpt' && (
-                  <Alert className="mb-6 border-accent">
-                    <Terminal className="h-4 w-4 text-accent" />
-                    <AlertTitle>Role Module</AlertTitle>
-                    <AlertDescription>
-                      This role includes the profile to define a complete Cassandra server. This is what you assign to nodes.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                <CodeBlock
-                  code={
-                    selectedFile.group === 'root'
-                    ? (puppetCode as any)[selectedFile.repo][selectedFile.name]
-                    : (puppetCode as any)[selectedFile.repo]?.[selectedFile.group]?.[selectedFile.name] ?? `// ${selectedFile.name} is not available in the preview.`
-                  }
-                />
-              </CardContent>
-            </Card>
-           )}
-          </div>
-        </div>
+            </div>
+             <Accordion
+              type="multiple"
+              defaultValue={['root', 'manifests', 'templates', 'files']}
+              className="w-full px-4"
+            >
+              {sortedGroups.map(([group, files]) => (
+                <AccordionItem value={group} key={group} className="border-b-0">
+                  <AccordionTrigger className="px-2 py-1.5 text-sm hover:bg-muted rounded-md hover:no-underline">
+                    <div className="flex items-center gap-2">
+                      <Folder className="h-5 w-5 text-primary" />
+                      <span className="font-semibold">{group}</span>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="pl-4">
+                    <div className="flex flex-col gap-1 mt-1">
+                      {files.map((file) => (
+                        <Button
+                          key={`${file.group}-${file.name}`}
+                          variant="ghost"
+                          size="sm"
+                          className={cn(
+                            'justify-start gap-2 h-8 font-normal',
+                            selectedFile?.name === file.name && selectedFile?.group === file.group &&
+                              'bg-accent text-accent-foreground hover:bg-accent/90 hover:text-accent-foreground'
+                          )}
+                          onClick={() => setSelectedFile(file)}
+                        >
+                          <FileIcon className="h-4 w-4" />
+                          {file.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+        </SidebarContent>
+        <SidebarFooter className="p-4 border-t">
+             <Button onClick={handleDownload} disabled={isDownloading} className="w-full">
+                <Download className="mr-2 h-4 w-4" />
+                {isDownloading ? 'Downloading...' : `Download All Modules`}
+              </Button>
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <main className="min-h-screen bg-background font-body text-foreground">
+            <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur-sm px-4 lg:h-[60px] lg:px-6">
+                <SidebarTrigger className="md:hidden" />
+                <div className="flex-1">
+                     {selectedFile && (
+                        <span className="font-mono text-sm bg-muted px-2 py-1 rounded">
+                            {selectedFile.repo}/{selectedFile.group === 'root'
+                            ? selectedFile.name
+                            : `${selectedFile.group}/${selectedFile.name}`}
+                        </span>
+                     )}
+                </div>
+            </header>
 
-        <footer className="text-center mt-8 text-sm text-muted-foreground">
-          <p>Built for stability and scale.</p>
-        </footer>
-      </div>
-    </main>
+            <div className="flex-1 p-4 md:p-6 lg:p-8">
+                {selectedFile ? (
+                    <Card className="w-full shadow-md border">
+                        <CardHeader>
+                            <CardTitle>{selectedFile.name}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            {selectedFile.name === 'init.pp' && selectedFile.repo === 'cassandra_pfpt' && (
+                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                                <Terminal className="h-4 w-4 text-accent" />
+                                <AlertTitle>Component Module</AlertTitle>
+                                <AlertDescription>
+                                This is the main component module. It is highly parameterized and should not contain direct Hiera lookups.
+                                </AlertDescription>
+                            </Alert>
+                            )}
+                            {selectedFile.name === 'init.pp' && selectedFile.repo === 'profile_cassandra_pfpt' && (
+                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                                <Terminal className="h-4 w-4 text-accent" />
+                                <AlertTitle>Profile Module</AlertTitle>
+                                <AlertDescription>
+                                This profile wraps the component module and provides its data via Hiera.
+                                </AlertDescription>
+                            </Alert>
+                            )}
+                            {selectedFile.name === 'init.pp' && selectedFile.repo === 'role_cassandra_pfpt' && (
+                            <Alert className="mb-6 border-accent text-accent-foreground bg-accent/10">
+                                <Terminal className="h-4 w-4 text-accent" />
+                                <AlertTitle>Role Module</AlertTitle>
+                                <AlertDescription>
+                                This role includes the profile to define a complete Cassandra server. This is what you assign to nodes.
+                                </AlertDescription>
+                            </Alert>
+                            )}
+                            <CodeBlock
+                            code={
+                                selectedFile.group === 'root'
+                                ? (puppetCode as any)[selectedFile.repo][selectedFile.name]
+                                : (puppetCode as any)[selectedFile.repo]?.[selectedFile.group]?.[selectedFile.name] ?? `// ${selectedFile.name} is not available in the preview.`
+                            }
+                            />
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <div className="flex flex-col items-center justify-center h-[60vh] text-center text-muted-foreground rounded-lg border-2 border-dashed">
+                        <Package className="mx-auto h-16 w-16" />
+                        <h2 className="mt-4 text-xl font-semibold">Welcome to the Cassandra Deployer</h2>
+                        <p className="mt-2 max-w-md">Select a file from the sidebar to explore the Puppet modules that power your Cassandra deployment architecture.</p>
+                    </div>
+                )}
+            </div>
+            <footer className="text-center p-4 text-sm text-muted-foreground">
+                <p>Built for stability and scale.</p>
+            </footer>
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
