@@ -144,14 +144,14 @@ class cassandra_pfpt (
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
   if Integer($cassandra_major_version) >= 4 and Integer($java_version) < 11 {
-    fail("Cassandra version \\\${cassandra_version} requires Java 11 or newer, but Java \\\${java_version} was specified.")
+    fail("Cassandra version $\\{cassandra_version} requires Java 11 or newer, but Java $\\{java_version} was specified.")
   }
   if Integer($cassandra_major_version) <= 3 and Integer($java_version) > 11 {
-    fail("Cassandra version \\\${cassandra_version} is not compatible with Java versions newer than 11, but Java \\\${java_version} was specified.")
+    fail("Cassandra version $\\{cassandra_version} is not compatible with Java versions newer than 11, but Java $\\{java_version} was specified.")
   }
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
   $seeds = if empty($seeds_list) {
-    [$facts['networking']['ip']]
+    [$\\{facts}['networking']['ip']]
   } else {
     $seeds_list
   }
@@ -190,14 +190,14 @@ class cassandra_pfpt (
   contain cassandra_pfpt::firewall
   contain cassandra_pfpt::system_keyspaces
   contain cassandra_pfpt::roles
-  if $manage_jmx_exporter {
+  if $\\{manage_jmx_exporter} {
     contain cassandra_pfpt::jmx_exporter
   }
-  if $manage_coralogix_agent {
+  if $\\{manage_coralogix_agent} {
     contain cassandra_pfpt::coralogix
     Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
   }
-  if $manage_full_backups or $manage_incremental_backups {
+  if $\\{manage_full_backups} or $\\{manage_incremental_backups} {
     contain cassandra_pfpt::backup
   }
   
@@ -210,5 +210,3 @@ class cassandra_pfpt (
   ~> Class['cassandra_pfpt::service']
 }
 `.trim();
-
-    

@@ -7,10 +7,11 @@ class cassandra_pfpt::puppet inherits cassandra_pfpt {
   $cron_minute_2 = $cron_minute_1 + 30
   
   # Default schedule: runs twice an hour, staggered.
-  $default_schedule = "\\\${cron_minute_1},\\\${cron_minute_2} * * * *"
+  $default_schedule = "$\\{cron_minute_1},$\\{cron_minute_2} * * * *"
   
   # Use the schedule from the parameter if provided, otherwise use the staggered default.
-  $final_schedule = pick($puppet_cron_schedule, $default_schedule)
+  $final_schedule = pick($\\
+{puppet_cron_schedule}, $default_schedule)
 
   cron { 'scheduled_puppet_run':
     command  => '[ ! -f /var/lib/puppet-disabled ] && /opt/puppetlabs/bin/puppet agent -v --onetime',
