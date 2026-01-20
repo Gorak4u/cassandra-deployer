@@ -138,6 +138,7 @@ class cassandra_pfpt (
   Optional[String] $puppet_cron_schedule = undef,
   String $backup_backend = 's3',
   Integer $clearsnapshot_keep_days = 3,
+  Boolean $backup_upload_streaming = false,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
