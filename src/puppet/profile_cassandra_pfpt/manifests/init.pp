@@ -144,7 +144,7 @@ class profile_cassandra_pfpt {
   $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
   $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
-  $backup_encryption_key            = lookup('profile_cassandra_pfpt::backup_encryption_key')
+  $backup_encryption_key            = lookup('profile_cassandra_pfpt::backup_encryption_key', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('MustBeChanged-ChangeMe-ChangeMe!!') })
   # Scheduled Repair Settings
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
@@ -289,9 +289,9 @@ class profile_cassandra_pfpt {
     backup_backend                   => $backup_backend,
     clearsnapshot_keep_days          => $clearsnapshot_keep_days,
     backup_upload_streaming          => $backup_upload_streaming,
+    backup_encryption_key            => $backup_encryption_key,
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
     repair_keyspace                  => $repair_keyspace,
-    backup_encryption_key            => $backup_encryption_key,
   }
 }

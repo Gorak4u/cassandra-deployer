@@ -399,7 +399,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::repair_keyspace` (String): If set, the automated repair job will only repair this specific keyspace. If unset, it repairs all non-system keyspaces. Default: `undef`.
 *   `profile_cassandra_pfpt::manage_full_backups` (Boolean): Enables the scheduled full backup script. Default: `false`.
 *   `profile_cassandra_pfpt::manage_incremental_backups` (Boolean): Enables the scheduled incremental backup script. Default: `false`.
-*   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. This MUST be set in Hiera for backups to function. There is no default.
+*   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. **WARNING:** This has an insecure default value to prevent Puppet runs from failing. You **MUST** override this with a strong, unique secret in your production Hiera data. Default: `'MustBeChanged-ChangeMe-ChangeMe!!'`.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
