@@ -47,6 +47,25 @@ HOSTNAME=$(hostname -s)
 BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$" # Use PID to ensure uniqueness
 LOCK_FILE="/var/run/cassandra_backup.lock"
 
+# --- AWS Credential Check Function ---
+check_aws_credentials() {
+  # Skip check if backend isn't S3 or if uploads are disabled via flag file
+  if [ "$BACKUP_BACKEND" != "s3" ] || [ -f "/var/lib/upload-disabled" ]; then
+    return 0
+  fi
+  
+  log_message "INFO: Verifying AWS credentials..."
+  if ! aws sts get-caller-identity > /dev/null 2>&1; then
+    log_message "ERROR: AWS credentials not found or invalid."
+    log_message "Please configure credentials for this node, e.g., via an IAM role."
+    log_message "Aborting backup before taking a snapshot to prevent wasted effort."
+    return 1
+  fi
+  log_message "INFO: AWS credentials are valid."
+  return 0
+}
+
+
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
     if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || [ "$KEEP_DAYS" -le 0 ]; then
@@ -69,21 +88,20 @@ cleanup_old_snapshots() {
       local tag
       tag=$(echo "$snapshot_line" | awk '{print $1}')
       local snapshot_timestamp=0
-
+      
+      # Try to parse YYYY-MM-DD-HH-MM format
       if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
-          # Convert YYYY-MM-DD-HH-MM to a standard "YYYY-MM-DD HH:MM" format for `date` command
           local parsable_date
           parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
           snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
-      elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
-          local snapshot_date_str=${BASH_REMATCH[1]}
-          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
-      elif [[ "$tag" =~ ^backup_([0-9]{14}) ]]; then
-          local snapshot_date_str=${BASH_REMATCH[1]}
-          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
-      elif [[ "$tag" =~ ^adhoc_snapshot_([0-9]{14}) ]]; then
-          local snapshot_date_str=${BASH_REMATCH[1]}
-          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
+      # Try to parse legacy formats
+      elif [[ "$tag" =~ ^(full_snapshot_|backup_|adhoc_snapshot_)([0-9]{8}|[0-9]{14}) ]]; then
+          local snapshot_date_str=${BASH_REMATCH[2]}
+          if [ ${#snapshot_date_str} -eq 8 ]; then # YYYYMMDD
+              snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
+          elif [ ${#snapshot_date_str} -eq 14 ]; then # YYYYMMDDHHMMSS
+              snapshot_timestamp=$(date -d "${snapshot_date_str:0:8} ${snapshot_date_str:8:2}:${snapshot_date_str:10:2}:${snapshot_date_str:12:2}" +%s 2>/dev/null || echo 0)
+          fi
       fi
       
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
@@ -115,6 +133,16 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# Pre-flight checks before creating a lock or doing any work
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
+
+if ! check_aws_credentials; then
+    exit 1
+fi
+
 if [ -f "$LOCK_FILE" ]; then
     log_message "Lock file $LOCK_FILE exists. Checking if process is running..."
     OLD_PID=$(cat "$LOCK_FILE")
@@ -143,11 +171,6 @@ if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
 fi
 echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
-# Check for global backup disable flag
-if [ -f "/var/lib/backup-disabled" ]; then
-    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
-    exit 0
-fi
 
 # Run cleanup of old snapshots BEFORE taking a new one
 cleanup_old_snapshots
@@ -182,14 +205,14 @@ if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
 fi
 
 # Make keyspace discovery more robust by using cqlsh.
-KEYSPACES_LIST=$(cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE KEYSPACES;" 2>/dev/null)
+KEYSPACES_LIST=$(cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE KEYSPACES;" 2>/dev/null | xargs)
 
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
 else
     # Use a for loop to iterate over the space-separated list from cqlsh
     for ks in $KEYSPACES_LIST; do
-        if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
+        if [[ " $SYSTEM_KEYSPACES " =~ " $ks " ]]; then
             continue
         fi
         log_message "Processing keyspace: $ks"

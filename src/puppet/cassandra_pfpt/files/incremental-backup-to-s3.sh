@@ -46,6 +46,26 @@ HOSTNAME=$(hostname -s)
 BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 
+
+# --- AWS Credential Check Function ---
+check_aws_credentials() {
+  # Skip check if backend isn't S3 or if uploads are disabled via flag file
+  if [ "$BACKUP_BACKEND" != "s3" ] || [ -f "/var/lib/upload-disabled" ]; then
+    return 0
+  fi
+  
+  log_message "INFO: Verifying AWS credentials..."
+  if ! aws sts get-caller-identity > /dev/null 2>&1; then
+    log_message "ERROR: AWS credentials not found or invalid."
+    log_message "Please configure credentials for this node, e.g., via an IAM role."
+    log_message "Aborting backup."
+    return 1
+  fi
+  log_message "INFO: AWS credentials are valid."
+  return 0
+}
+
+
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
   if [ -d "$BACKUP_TEMP_DIR" ]; then
@@ -59,6 +79,17 @@ if [ "$(id -u)" -ne 0 ]; then
   log_message "ERROR: This script must be run as root."
   exit 1
 fi
+
+# Pre-flight checks before creating a lock or doing any work
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
+
+if ! check_aws_credentials; then
+    exit 1
+fi
+
 
 if [ -f "$LOCK_FILE" ]; then
     log_message "Lock file $LOCK_FILE exists. Checking if process is running..."
@@ -91,12 +122,6 @@ fi
 echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 
-# Check for global backup disable flag
-if [ -f "/var/lib/backup-disabled" ]; then
-    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
-    exit 0
-fi
-
 log_message "--- Starting Granular Incremental Cassandra Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
 log_message "Backup Timestamp (Tag): $BACKUP_TAG"
@@ -122,7 +147,7 @@ echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
     relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
     ks_name=$(echo "$relative_path" | cut -d'/' -f1)
 
-    if [[ $SYSTEM_KEYSPACES =~ $ks_name ]]; then
+    if [[ " $SYSTEM_KEYSPACES " =~ " $ks_name " ]]; then
         continue
     fi
     
