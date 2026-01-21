@@ -59,8 +59,9 @@ cleanup_old_snapshots() {
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
-    nodetool listsnapshots | while read -r snapshot_line; do
-      if [[ -z "$snapshot_line" || "$snapshot_line" == *"Total snapshots"* ]]; then
+    # Filter out headers and footers from nodetool output before processing
+    nodetool listsnapshots | grep -Ev '^(Snapshot Details:|Snapshot name|Total snapshots:|There are no snapshots)$' | while read -r snapshot_line; do
+      if [[ -z "$snapshot_line" ]]; then
           continue
       fi
 
@@ -69,11 +70,14 @@ cleanup_old_snapshots() {
       local snapshot_timestamp=0
 
       if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
-          snapshot_timestamp=$(date -d "$(echo "$tag" | tr -d ' ')" +%s)
+          snapshot_timestamp=$(date -d "$(echo "$tag" | tr -d ' ')" +%s 2>/dev/null || echo 0)
       elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}
-          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s)
+          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
       elif [[ "$tag" =~ ^backup_([0-9]{14}) ]]; then
+          local snapshot_date_str=${BASH_REMATCH[1]}
+          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
+      elif [[ "$tag" =~ ^adhoc_snapshot_([0-9]{14}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}
           snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
       fi
@@ -164,7 +168,8 @@ KEYSPACES_LIST=$(nodetool keyspaces 2>/dev/null | grep -E '^[a-zA-Z][a-zA-Z0-9_]
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: 'nodetool keyspaces' returned no valid keyspaces or the command failed. Skipping table data backup."
 else
-    for ks in $KEYSPACES_LIST; do
+    # Use a while loop to read line by line to avoid word splitting issues from error messages
+    echo "$KEYSPACES_LIST" | while IFS= read -r ks; do
         if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
             continue
         fi
@@ -198,6 +203,7 @@ else
         done
     done
 fi
+
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
