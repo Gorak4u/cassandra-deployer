@@ -247,10 +247,14 @@ do_full_restore() {
     log_message "Old directories cleaned."
 
     log_message "3. Downloading and extracting data from backup chain..."
+    local temp_download_dir="/tmp/restore_$$"
+    mkdir -p "$temp_download_dir"
+    trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$temp_download_dir"' EXIT
+    
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
-        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.enc)$' | awk '{print $4}')
+        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
             local s3_path="s3://$S3_BUCKET_NAME/$archive_key"
@@ -261,10 +265,25 @@ do_full_restore() {
             log_message "Restoring to $target_dir from $s3_path"
             mkdir -p "$target_dir"
             
-            if ! aws s3 cp "$s3_path" - | openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | tar -xzf - -C "$target_dir"; then
-                 log_message "ERROR: Failed to download or extract $archive_key. Aborting restore."
+            local temp_enc_file="$temp_download_dir/data.tar.gz.enc"
+            local temp_tar_file="$temp_download_dir/data.tar.gz"
+
+            if ! aws s3 cp "$s3_path" "$temp_enc_file"; then
+                 log_message "ERROR: Failed to download $archive_key. Aborting restore."
                  exit 1
             fi
+            
+            if ! openssl enc -d -aes-256-cbc -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+                log_message "ERROR: Failed to decrypt $archive_key. 'bad decrypt' error likely. Aborting."
+                exit 1
+            fi
+            
+            if ! tar -xzf "$temp_tar_file" -C "$target_dir"; then
+                log_message "ERROR: Failed to extract $archive_key. Archive may be corrupt. Aborting."
+                exit 1
+            fi
+            
+            rm -f "$temp_enc_file" "$temp_tar_file"
         done
     done
     log_message "All data from backup chain extracted."
@@ -287,10 +306,12 @@ download_and_extract_table() {
     local ks_name="$2"
     local tbl_name="$3"
     local output_base_dir="$4"
+    local temp_download_dir="$5"
 
     local archive_path_base="$HOSTNAME/$backup_ts/$ks_name/$tbl_name"
-    local archive_path_full="$archive_path_base/$tbl_name.tar.enc"
-    local archive_path_incr="$archive_path_base/incremental.tar.enc"
+    # New file extension
+    local archive_path_full="$archive_path_base/$tbl_name.tar.gz.enc"
+    local archive_path_incr="$archive_path_base/incremental.tar.gz.enc"
     local archive_to_download=""
 
     if aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_full" >/dev/null 2>&1; then
@@ -303,17 +324,32 @@ download_and_extract_table() {
     fi
 
     # The actual output dir for this specific table's data
-    local table_output_dir="$output_base_dir/$ks_name/$tbl_name/$(basename "$archive_to_download" .tar.enc)"
+    local table_output_dir="$output_base_dir/$ks_name/$tbl_name/$(basename "$archive_to_download" .tar.gz.enc)"
     mkdir -p "$table_output_dir"
     
     log_message "Downloading data for $ks_name.$tbl_name from $archive_to_download"
     
-    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | tar -xzf - -C "$table_output_dir"; then
-        log_message "ERROR: Failed to download or extract $archive_to_download."
-        rm -rf "$table_output_dir" # Clean up partial data
+    local temp_enc_file="$temp_download_dir/$ks_name.$tbl_name.tar.gz.enc"
+    local temp_tar_file="$temp_download_dir/$ks_name.$tbl_name.tar.gz"
+
+    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" "$temp_enc_file"; then
+        log_message "ERROR: Failed to download $archive_to_download."
+        return 1
+    fi
+
+    if ! openssl enc -d -aes-256-cbc -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+        log_message "ERROR: Failed to decrypt $archive_to_download. Check encryption key and file integrity."
+        rm -f "$temp_enc_file"
+        return 1
+    fi
+
+    if ! tar -xzf "$temp_tar_file" -C "$table_output_dir"; then
+        log_message "ERROR: Failed to extract $archive_to_download. Archive is likely corrupt."
+        rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
     fi
     
+    rm -f "$temp_enc_file" "$temp_tar_file"
     echo "$table_output_dir"
     return 0
 }
@@ -342,7 +378,7 @@ do_granular_restore() {
         
         if [ -n "$TABLE_NAME" ]; then
             local restored_data_path
-            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir")
+            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_restore_dir")
             
             if [ -z "$restored_data_path" ]; then
                 continue
@@ -371,7 +407,7 @@ do_granular_restore() {
 
             for table_in_ks in $tables_in_backup; do
                 local restored_data_path
-                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir")
+                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_restore_dir")
 
                 if [ -z "$restored_data_path" ]; then
                     continue

@@ -225,22 +225,37 @@ else
             # Check if snapshot dir exists and is not empty
             if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
                 log_message "Backing up table: $ks.$table_name"
-                s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.enc"
+                s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.gz.enc"
                 
-                # Streaming pipeline: tar -> gzip -> openssl -> aws s3
-                tar -C "$snapshot_dir" -c . | \
-                gzip | \
-                openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
-                aws s3 cp - "$s3_path"
+                local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
+                local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
 
-                # Check the exit code of the aws cli command (the last in the pipe)
-                if [ ${PIPESTATUS[3]} -eq 0 ]; then
-                    log_message "Successfully uploaded backup for $ks.$table_name"
-                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
-                else
+                # Step 1: Archive and compress
+                if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
+                    log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
+                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                    continue
+                fi
+
+                # Step 2: Encrypt
+                if ! openssl enc -aes-256-cbc -salt -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+                    log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
+                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                    rm -f "$local_tar_file"
+                    continue
+                fi
+                
+                # Step 3: Upload
+                if ! aws s3 cp "$local_enc_file" "$s3_path"; then
                     log_message "ERROR: Failed to upload backup for $ks.$table_name"
                     UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                else
+                    log_message "Successfully uploaded backup for $ks.$table_name"
+                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
                 fi
+
+                # Step 4: Cleanup local temp files
+                rm -f "$local_tar_file" "$local_enc_file"
             fi
         done
     done

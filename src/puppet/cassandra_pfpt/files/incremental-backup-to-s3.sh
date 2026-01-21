@@ -156,16 +156,28 @@ echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
     
     log_message "Processing incremental backup for: $ks_name.$table_name"
     
-    s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/incremental.tar.enc"
+    s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/incremental.tar.gz.enc"
     
-    # Streaming pipeline: tar -> gzip -> openssl -> aws s3
-    tar -C "$backup_dir" -c . | \
-    gzip | \
-    openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
-    aws s3 cp - "$s3_path"
+    local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
+    local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
-    # Check the exit code of the aws cli command (the last in the pipe)
-    if [ ${PIPESTATUS[3]} -eq 0 ]; then
+    # Step 1: Archive and compress
+    if ! tar -C "$backup_dir" -czf "$local_tar_file" .; then
+        log_message "ERROR: Failed to archive incremental backup for $ks_name.$table_name. Skipping."
+        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+        continue
+    fi
+
+    # Step 2: Encrypt
+    if ! openssl enc -aes-256-cbc -salt -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+        log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
+        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+        rm -f "$local_tar_file"
+        continue
+    fi
+    
+    # Step 3: Upload
+    if aws s3 cp "$local_enc_file" "$s3_path"; then
         log_message "Successfully uploaded incremental backup for $ks_name.$table_name"
         TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name.$table_name\"]")
         
@@ -175,6 +187,9 @@ echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
         log_message "ERROR: Failed to upload incremental backup for $ks_name.$table_name. Local files will not be deleted."
         UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
     fi
+
+    # Step 4: Cleanup local temp files
+    rm -f "$local_tar_file" "$local_enc_file"
 done
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
