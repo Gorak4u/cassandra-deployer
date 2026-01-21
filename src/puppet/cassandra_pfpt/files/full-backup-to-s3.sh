@@ -3,6 +3,11 @@
 
 set -euo pipefail
 
+# This script needs to run with /bin/bash to support PIPESTATUS
+if [ -z "$BASH_VERSION" ]; then
+    exec /bin/bash "$0" "$@"
+fi
+
 # --- Configuration from JSON file ---
 CONFIG_FILE="/etc/backup/config.json"
 
@@ -233,7 +238,7 @@ else
                     # Streaming pipeline: tar -> gzip -> openssl -> aws s3
                     tar -C "$snapshot_dir" -c . | \
                     gzip | \
-                    openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
+                    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "file:$TMP_KEY_FILE" | \
                     aws s3 cp - "$s3_path"
                     
                     # Check all exit codes in the pipeline
@@ -258,7 +263,7 @@ else
                     fi
 
                     # Step 2: Encrypt
-                    if ! openssl enc -aes-256-cbc -salt -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+                    if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                         log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
                         UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         rm -f "$local_tar_file"
