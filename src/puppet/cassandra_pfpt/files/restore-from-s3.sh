@@ -31,6 +31,9 @@ usage() {
     log_message "Actions for Granular Restore (required if --keyspace is used):"
     log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
     log_message "  --download-and-restore             Download data and load it into the cluster via sstableloader."
+    log_message ""
+    log_message "Automation:"
+    log_message "  --yes                                Skips all interactive confirmation prompts. Use with caution."
     exit 1
 }
 
@@ -81,6 +84,7 @@ KEYSPACE_NAME=""
 TABLE_NAME=""
 MODE="" # Will be set to 'granular', 'full', or 'schema'
 RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
+AUTO_APPROVE=false
 
 if [ "$#" -eq 0 ]; then
     usage
@@ -95,6 +99,7 @@ while [[ "$#" -gt 0 ]]; do
         --schema-only) MODE="schema" ;;
         --download-only) RESTORE_ACTION="download_only" ;;
         --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
+        --yes) AUTO_APPROVE=true ;;
         *) log_message "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -257,10 +262,15 @@ do_full_restore() {
     log_message "1. STOP the Cassandra service."
     log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
     log_message "3. RESTORE data from the backup chain."
-    read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
-    if [[ "$confirmation" != "yes" ]]; then
-        log_message "Restore aborted by user."
-        exit 0
+    
+    if [ "$AUTO_APPROVE" = false ]; then
+        read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
+        if [[ "$confirmation" != "yes" ]]; then
+            log_message "Restore aborted by user."
+            exit 0
+        fi
+    else
+        log_message "Auto-approving destructive full restore via --yes flag."
     fi
 
     log_message "1. Stopping Cassandra service..."
@@ -482,10 +492,14 @@ log_message "Backup chain to be restored (chronological order):"
 printf " - %s\n" "${CHAIN_TO_RESTORE[@]}"
 log_message "Base full backup for this chain is: $BASE_FULL_BACKUP"
 
-read -p "Does the restore chain above look correct? Type 'yes' to proceed: " manifest_confirmation
-if [[ "$manifest_confirmation" != "yes" ]]; then
-    log_message "Restore aborted by user based on chain review."
-    exit 0
+if [ "$AUTO_APPROVE" = false ]; then
+    read -p "Does the restore chain above look correct? Type 'yes' to proceed: " manifest_confirmation
+    if [[ "$manifest_confirmation" != "yes" ]]; then
+        log_message "Restore aborted by user based on chain review."
+        exit 0
+    fi
+else
+    log_message "Auto-approving restore chain via --yes flag."
 fi
 
 case $MODE in
@@ -505,3 +519,5 @@ case $MODE in
 esac
 
 exit 0
+
+    
