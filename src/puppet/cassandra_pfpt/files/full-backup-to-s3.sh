@@ -45,6 +45,7 @@ fi
 BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
 HOSTNAME=$(hostname -s)
 BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$" # Use PID to ensure uniqueness
+LOCK_FILE="/var/run/cassandra_backup.lock"
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
@@ -113,10 +114,25 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# Create a temporary file for the encryption key and set a trap to clean it up
+if [ -f "$LOCK_FILE" ]; then
+    log_message "Lock file $LOCK_FILE exists. Checking if process is running..."
+    OLD_PID=$(cat "$LOCK_FILE")
+    if ps -p "$OLD_PID" > /dev/null; then
+        log_message "Backup process with PID $OLD_PID is still running. Exiting."
+        exit 1
+    else
+        log_message "Stale lock file found for dead PID $OLD_PID. Removing."
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+# Create a temporary file for the encryption key
 TMP_KEY_FILE=$(mktemp)
 chmod 600 "$TMP_KEY_FILE"
-trap 'rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
+
+# Create lock file and set combined trap for all cleanup actions
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"; rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
 
 # Extract key from config and write to temp file
 ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
