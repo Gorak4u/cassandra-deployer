@@ -43,7 +43,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for tool in jq aws sstableloader openssl; do
+for tool in jq aws sstableloader openssl pgrep ps; do
     if ! command -v $tool &>/dev/null; then
         log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
         exit 1
@@ -449,11 +449,25 @@ do_granular_restore() {
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
             
-            # Set the CASSANDRA_CONF environment variable as an alternative to --conf-path
-            export CASSANDRA_CONF="/etc/cassandra/conf"
-            log_message "Set CASSANDRA_CONF to $CASSANDRA_CONF"
+            CASSANDRA_CONF_DIR=""
+            # Try to discover the config path from the running Cassandra process
+            CASSANDRA_PID=$(pgrep -f "org.apache.cassandra.service.CassandraDaemon")
+            if [ -n "$CASSANDRA_PID" ]; then
+                CONFIG_PATH=$(ps -p $CASSANDRA_PID -o command= | grep -o -- "-Dcassandra.config=[^ ]*" | cut -d= -f2)
+                if [ -n "$CONFIG_PATH" ]; then
+                    CASSANDRA_CONF_DIR=$(dirname "$CONFIG_PATH")
+                fi
+            fi
 
-            # Use an array to build the command safely, avoiding eval.
+            # If dynamic discovery fails, fall back to the default path with a warning
+            if [ -z "$CASSANDRA_CONF_DIR" ]; then
+                log_message "WARNING: Could not dynamically determine Cassandra config directory. Falling back to default '/etc/cassandra/conf'."
+                CASSANDRA_CONF_DIR="/etc/cassandra/conf"
+            fi
+
+            export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
+            log_message "Using Cassandra config directory: $CASSANDRA_CONF"
+            
             local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
             
             local cqlshrc_path="/root/.cassandra/cqlshrc"
