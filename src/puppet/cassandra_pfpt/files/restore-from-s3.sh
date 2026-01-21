@@ -59,7 +59,9 @@ CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
-CASSANDRA_USER="cassandra"
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+
 
 # Derive restore paths from the main data directory parameter
 RESTORE_BASE_PATH="${CASSANDRA_DATA_DIR%/*}" # e.g., /var/lib/cassandra
@@ -228,7 +230,7 @@ do_schema_restore() {
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: cqlsh ${cqlsh_ssl_opt} -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: cqlsh -u ${CASSANDRA_USER} -p '${CASSANDRA_PASSWORD}' ${cqlsh_ssl_opt} -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
@@ -369,28 +371,30 @@ download_and_extract_table() {
 
 do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
-    
+
     local base_output_dir
-    
+    local temp_download_dir
+
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         base_output_dir="$DOWNLOAD_ONLY_PATH"
+        temp_download_dir="$DOWNLOAD_ONLY_PATH"
         log_message "Action: Download-Only. Data will be saved to $base_output_dir"
         mkdir -p "$base_output_dir"
     else # download_and_restore
         TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
         base_output_dir="$TEMP_RESTORE_DIR"
+        temp_download_dir="$TEMP_RESTORE_DIR"
         log_message "Action: Download & Restore. Using temporary directory $base_output_dir"
         mkdir -p "$base_output_dir"
     fi
-    
+
     # Step 1: Download and extract all data from the entire chain.
-    # This is the same logic for both 'download_only' and 'download_and_restore'.
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
         if [ -n "$TABLE_NAME" ]; then
             # If a specific table is requested, just download it.
-            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$base_output_dir"
+            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_download_dir"
         else
             # If a whole keyspace is requested, discover and download all tables.
             log_message "Discovering all tables in keyspace '$KEYSPACE_NAME' for backup '$backup_ts'..."
@@ -403,7 +407,7 @@ do_granular_restore() {
             fi
 
             for table_in_ks in $tables_in_backup; do
-                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$base_output_dir"
+                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_download_dir"
             done
         fi
     done
@@ -425,7 +429,7 @@ do_granular_restore() {
 
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
-            if sstableloader -d "$LOADER_NODES" "$path_to_load"; then
+            if sstableloader -u "$CASSANDRA_USER" -pw "$CASSANDRA_PASSWORD" -d "$LOADER_NODES" "$path_to_load"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
                 log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
