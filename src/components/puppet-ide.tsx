@@ -6,7 +6,6 @@ import { saveAs } from 'file-saver';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -31,6 +30,9 @@ import {
     Shell,
     FileText,
     FileCog,
+    ShieldCheck,
+    AlertTriangle,
+    CheckCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -52,7 +54,8 @@ import {
 } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
 import type { PuppetFile } from '@/lib/actions';
-import { getFileContent, getZippedModules } from '@/lib/actions';
+import { getFileContent, getZippedModules, validateCodeAction } from '@/lib/actions';
+import type { ValidateCodeOutput } from '@/ai/flows/validate-code-flow';
 import { MarkdownView } from './markdown-view';
 import { Skeleton } from './ui/skeleton';
 
@@ -91,6 +94,8 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
   const [fileContent, setFileContent] = useState('// Select a file to view its content');
   const [isDownloading, setIsDownloading] = useState(false);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<ValidateCodeOutput | null>(null);
 
   const getFileIcon = (lang: string) => {
     switch (lang) {
@@ -116,6 +121,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
   const handleFileSelect = async (file: PuppetFile) => {
     setSelectedFile(file);
     setIsLoadingFile(true);
+    setValidationResult(null);
     try {
       const content = await getFileContent(file.path);
       setFileContent(content);
@@ -123,6 +129,21 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
       setFileContent('// Error loading file');
     } finally {
       setIsLoadingFile(false);
+    }
+  };
+
+  const handleValidate = async () => {
+    if (!selectedFile || !fileContent) return;
+    setIsValidating(true);
+    setValidationResult(null);
+    try {
+      const result = await validateCodeAction(fileContent, selectedFile.lang);
+      setValidationResult(result);
+    } catch (error) {
+      console.error('Validation failed', error);
+      setValidationResult({ isValid: false, issues: ['An unexpected error occurred during validation.'] });
+    } finally {
+      setIsValidating(false);
     }
   };
   
@@ -141,6 +162,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
 
   const handleRepoChange = (repoName: string) => {
     setSelectedRepo(repoName);
+    setValidationResult(null);
     const firstFile = allFiles.find(f => f.repo === repoName && f.name.endsWith('init.pp'));
     if(firstFile) {
         handleFileSelect(firstFile);
@@ -236,9 +258,31 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                     </span>
                  )}
             </div>
+            {selectedFile && selectedFile.lang !== 'binary' && (
+              <Button variant="outline" size="sm" onClick={handleValidate} disabled={isValidating}>
+                {isValidating ? (
+                  <><FileCog className="mr-2 h-4 w-4 animate-spin" /> Validating...</>
+                ) : (
+                  <><ShieldCheck className="mr-2 h-4 w-4" /> Validate File</>
+                )}
+              </Button>
+            )}
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+            {validationResult && (
+              <Alert variant={validationResult.isValid ? 'default' : 'destructive'} className={cn("mb-6", validationResult.isValid && "border-green-500/50 bg-green-50 text-green-900 [&>svg]:text-green-500 dark:bg-green-950 dark:text-green-300 dark:border-green-900")}>
+                {validationResult.isValid ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                <AlertTitle>{validationResult.isValid ? 'Validation Successful' : 'Validation Failed'}</AlertTitle>
+                <AlertDescription>
+                  {validationResult.isValid ? 'The AI validator found no critical issues in the code.' : (
+                    <ul className="list-disc pl-5 mt-2 space-y-1">
+                      {validationResult.issues.map((issue, i) => <li key={i}>{issue}</li>)}
+                    </ul>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
             {selectedFile ? (
                 <Card className="w-full shadow-md border">
                     <CardHeader>

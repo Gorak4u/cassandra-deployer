@@ -5,6 +5,8 @@ import fs from 'fs/promises';
 import { glob } from 'glob';
 import archiver from 'archiver';
 import { Readable } from 'stream';
+import { validateCode } from '@/ai/flows/validate-code-flow';
+import type { ValidateCodeOutput } from '@/ai/flows/validate-code-flow';
 
 const puppetDir = path.join(process.cwd(), 'src', 'puppet');
 
@@ -136,4 +138,23 @@ export async function getZippedModules(): Promise<string> {
 
     const buffer = await streamToBuffer(archive);
     return buffer.toString('base64');
+}
+
+export async function validateCodeAction(code: string, language: string): Promise<ValidateCodeOutput> {
+  // Do not validate binary files or very large files to save costs
+  if (language === 'binary' || code.length > 20000) {
+    return { isValid: true, issues: [] };
+  }
+  try {
+    return await validateCode({ code, language });
+  } catch (error) {
+    console.error('Error validating code with Genkit flow:', error);
+    // Return a structured error that the client can display
+    return {
+      isValid: false,
+      issues: [
+        'The AI validator failed to process the request. This may be due to an API error or content safety restrictions.',
+      ],
+    };
+  }
 }
