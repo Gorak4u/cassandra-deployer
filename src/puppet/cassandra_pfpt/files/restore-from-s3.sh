@@ -9,13 +9,7 @@ set -euo pipefail
 CONFIG_FILE="/etc/backup/config.json"
 HOSTNAME=$(hostname -s)
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
-
-# --- CLI Arguments (to be parsed) ---
-TARGET_DATE=""
-KEYSPACE_NAME=""
-TABLE_NAME=""
-MODE="" # Will be set to 'granular', 'full', or 'schema'
-RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
+TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
 # --- Logging ---
 log_message() {
@@ -79,7 +73,13 @@ else
     LOADER_NODES="$LISTEN_ADDRESS"
 fi
 
-# --- Argument Parsing ---
+# --- Argument Parsing (to be parsed) ---
+TARGET_DATE=""
+KEYSPACE_NAME=""
+TABLE_NAME=""
+MODE="" # Will be set to 'granular', 'full', or 'schema'
+RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
+
 if [ "$#" -eq 0 ]; then
     usage
 fi
@@ -119,10 +119,19 @@ if [ "$MODE" = "granular" ]; then
     fi
 fi
 
-# Create a temporary file for the encryption key and set a trap to clean it up
+# --- Cleanup & Trap Logic ---
 TMP_KEY_FILE=$(mktemp)
 chmod 600 "$TMP_KEY_FILE"
-trap 'rm -f "$TMP_KEY_FILE"' EXIT
+
+cleanup() {
+    log_message "Running cleanup..."
+    rm -f "$TMP_KEY_FILE"
+    if [[ -n "$TEMP_RESTORE_DIR" && -d "$TEMP_RESTORE_DIR" ]]; then
+        log_message "Removing temporary restore directory: $TEMP_RESTORE_DIR"
+        rm -rf "$TEMP_RESTORE_DIR"
+    fi
+}
+trap cleanup EXIT
 
 # Extract key from config and write to temp file
 ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
@@ -251,9 +260,8 @@ do_full_restore() {
     log_message "Old directories cleaned."
 
     log_message "3. Downloading and extracting data from backup chain..."
-    local temp_download_dir="${RESTORE_BASE_PATH}/restore_temp_$$"
-    mkdir -p "$temp_download_dir"
-    trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$temp_download_dir"' EXIT
+    TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
+    mkdir -p "$TEMP_RESTORE_DIR"
     
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
@@ -269,8 +277,8 @@ do_full_restore() {
             log_message "Restoring to $target_dir from $s3_path"
             mkdir -p "$target_dir"
             
-            local temp_enc_file="$temp_download_dir/data.tar.gz.enc"
-            local temp_tar_file="$temp_download_dir/data.tar.gz"
+            local temp_enc_file="$TEMP_RESTORE_DIR/data.tar.gz.enc"
+            local temp_tar_file="$TEMP_RESTORE_DIR/data.tar.gz"
 
             if ! aws s3 cp "$s3_path" "$temp_enc_file"; then
                  log_message "ERROR: Failed to download $archive_key. Aborting restore."
@@ -363,18 +371,16 @@ do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
     
     local base_output_dir
-    local temp_restore_dir="${RESTORE_BASE_PATH}/restore_temp_$$"
     
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         base_output_dir="$DOWNLOAD_ONLY_PATH"
         log_message "Action: Download-Only. Data will be saved to $base_output_dir"
         mkdir -p "$base_output_dir"
-        trap 'rm -f "$TMP_KEY_FILE"' EXIT
     else # download_and_restore
-        base_output_dir="$temp_restore_dir"
+        TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
+        base_output_dir="$TEMP_RESTORE_DIR"
         log_message "Action: Download & Restore. Using temporary directory $base_output_dir"
         mkdir -p "$base_output_dir"
-        trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$base_output_dir"' EXIT
     fi
     
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
@@ -382,7 +388,7 @@ do_granular_restore() {
         
         if [ -n "$TABLE_NAME" ]; then
             local restored_data_path
-            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_restore_dir")
+            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$base_output_dir")
             
             if [ -z "$restored_data_path" ]; then
                 continue
@@ -411,7 +417,7 @@ do_granular_restore() {
 
             for table_in_ks in $tables_in_backup; do
                 local restored_data_path
-                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_restore_dir")
+                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$base_output_dir")
 
                 if [ -z "$restored_data_path" ]; then
                     continue
