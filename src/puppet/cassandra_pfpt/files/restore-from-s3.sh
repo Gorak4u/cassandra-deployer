@@ -16,7 +16,6 @@ KEYSPACE_NAME=""
 TABLE_NAME=""
 MODE="" # Will be set to 'granular', 'full', or 'schema'
 RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
-DOWNLOAD_ONLY_PATH="/var/lib/cassandra/restore"
 
 # --- Logging ---
 log_message() {
@@ -36,7 +35,7 @@ usage() {
     log_message "  --keyspace <ks> [--table <table>]  Targets a specific keyspace or table for a granular restore (requires an action)."
     log_message ""
     log_message "Actions for Granular Restore (required if --keyspace is used):"
-    log_message "  --download-only                      Download and decrypt data to $DOWNLOAD_ONLY_PATH."
+    log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
     log_message "  --download-and-restore             Download data and load it into the cluster via sstableloader."
     exit 1
 }
@@ -67,6 +66,11 @@ CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
 CASSANDRA_USER="cassandra"
+
+# Derive restore paths from the main data directory parameter
+RESTORE_BASE_PATH="${CASSANDRA_DATA_DIR%/*}" # e.g., /var/lib/cassandra
+DOWNLOAD_ONLY_PATH="${RESTORE_BASE_PATH}/restore_download"
+
 
 # Determine node list for sstableloader. Use seeds if available, otherwise localhost.
 if [ -n "$SEEDS" ]; then
@@ -247,7 +251,7 @@ do_full_restore() {
     log_message "Old directories cleaned."
 
     log_message "3. Downloading and extracting data from backup chain..."
-    local temp_download_dir="/tmp/restore_$$"
+    local temp_download_dir="${RESTORE_BASE_PATH}/restore_temp_$$"
     mkdir -p "$temp_download_dir"
     trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$temp_download_dir"' EXIT
     
@@ -359,7 +363,7 @@ do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
     
     local base_output_dir
-    local temp_restore_dir="/tmp/restore_$$"
+    local temp_restore_dir="${RESTORE_BASE_PATH}/restore_temp_$$"
     
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         base_output_dir="$DOWNLOAD_ONLY_PATH"

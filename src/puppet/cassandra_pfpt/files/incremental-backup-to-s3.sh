@@ -49,7 +49,7 @@ fi
 # --- Static Configuration ---
 BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M')
 HOSTNAME=$(hostname -s)
-BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$"
+BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 
 

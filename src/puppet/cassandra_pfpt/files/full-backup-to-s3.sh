@@ -50,7 +50,8 @@ fi
 # --- Static Configuration ---
 BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
 HOSTNAME=$(hostname -s)
-BACKUP_TEMP_DIR="/tmp/cassandra_backups_$$" # Use PID to ensure uniqueness
+# Derive temp dir from data dir to ensure it's on the correct large volume
+BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 
 # --- AWS Credential Check Function ---
@@ -187,7 +188,7 @@ log_message "Backup Timestamp (Tag): $BACKUP_TAG"
 log_message "Streaming Mode: $UPLOAD_STREAMING"
 
 # 1. Create temporary directory for manifest
-mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
+mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory on data volume."; exit 1; }
 
 # 2. Take a node-local snapshot
 log_message "Taking full snapshot with tag: $BACKUP_TAG..."
