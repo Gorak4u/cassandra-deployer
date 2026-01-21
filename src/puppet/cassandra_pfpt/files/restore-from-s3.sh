@@ -126,7 +126,9 @@ find_backup_chain() {
     log_message "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
     
     local target_date_seconds
-    target_date_seconds=$(date -d "$TARGET_DATE" +%s)
+    # Reformat date to be compatible with all 'date' command versions
+    local parsable_target_date="${TARGET_DATE:0:10} ${TARGET_DATE:11:2}:${TARGET_DATE:14:2}"
+    target_date_seconds=$(date -d "$parsable_target_date" +%s)
     if [ -z "$target_date_seconds" ]; then
         log_message "ERROR: Invalid date format for --date. Use 'YYYY-MM-DD-HH-MM'."
         exit 1
@@ -143,8 +145,10 @@ find_backup_chain() {
 
     local eligible_backups=()
     for backup_ts in $all_backups; do
+        # Also reformat the backup timestamp for date comparison
+        local parsable_backup_ts="${backup_ts:0:10} ${backup_ts:11:2}:${backup_ts:14:2}"
         local backup_date_seconds
-        backup_date_seconds=$(date -d "$backup_ts" +%s 2>/dev/null || continue)
+        backup_date_seconds=$(date -d "$parsable_backup_ts" +%s 2>/dev/null || continue)
         if [[ -n "$backup_date_seconds" && "$backup_date_seconds" -le "$target_date_seconds" ]]; then
             eligible_backups+=("$backup_ts")
         fi
