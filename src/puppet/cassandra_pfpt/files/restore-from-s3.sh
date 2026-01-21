@@ -336,7 +336,7 @@ download_and_extract_table() {
     fi
 
     # The actual output dir for this specific table's data
-    local table_output_dir="$output_base_dir/$ks_name/$tbl_name/$(basename "$archive_to_download" .tar.gz.enc)"
+    local table_output_dir="$output_base_dir/$ks_name/$tbl_name"
     mkdir -p "$table_output_dir"
     
     log_message "Downloading data for $ks_name.$tbl_name from $archive_to_download"
@@ -383,29 +383,16 @@ do_granular_restore() {
         mkdir -p "$base_output_dir"
     fi
     
+    # Step 1: Download and extract all data from the entire chain.
+    # This is the same logic for both 'download_only' and 'download_and_restore'.
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
         if [ -n "$TABLE_NAME" ]; then
-            local restored_data_path
-            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$base_output_dir")
-            
-            if [ -z "$restored_data_path" ]; then
-                continue
-            fi
-            
-            if [ "$RESTORE_ACTION" == "download_and_restore" ]; then
-                log_message "Loading data for $KEYSPACE_NAME.$TABLE_NAME into cluster..."
-                if sstableloader -d "$LOADER_NODES" "$restored_data_path"; then
-                    log_message "Successfully loaded data from backup $backup_ts for table $TABLE_NAME."
-                    rm -rf "$restored_data_path"
-                else
-                    log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $TABLE_NAME. Aborting."
-                    exit 1
-                fi
-            fi
+            # If a specific table is requested, just download it.
+            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$base_output_dir"
         else
-            # Restore all tables in the keyspace
+            # If a whole keyspace is requested, discover and download all tables.
             log_message "Discovering all tables in keyspace '$KEYSPACE_NAME' for backup '$backup_ts'..."
             local tables_in_backup
             tables_in_backup=$(aws s3 ls "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/" | awk '{print $2}' | sed 's/\///')
@@ -416,32 +403,37 @@ do_granular_restore() {
             fi
 
             for table_in_ks in $tables_in_backup; do
-                local restored_data_path
-                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$base_output_dir")
-
-                if [ -z "$restored_data_path" ]; then
-                    continue
-                fi
-
-                if [ "$RESTORE_ACTION" == "download_and_restore" ]; then
-                    log_message "Loading data for $KEYSPACE_NAME.$table_in_ks into cluster..."
-                    if sstableloader -d "$LOADER_NODES" "$restored_data_path"; then
-                        log_message "Successfully loaded data from backup $backup_ts for table $table_in_ks."
-                        rm -rf "$restored_data_path"
-                    else
-                        log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $table_in_ks. Aborting."
-                        exit 1
-                    fi
-                fi
+                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$base_output_dir"
             done
         fi
     done
     
+    # Step 2: Decide on the final action.
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         log_message "--- Granular Restore (Download Only) Finished Successfully ---"
         log_message "All data has been downloaded and decrypted to: $base_output_dir"
-    else
-        log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
+    else # download_and_restore
+        log_message "All data has been downloaded. Preparing to load into cluster..."
+        
+        # The path to load depends on whether we downloaded a single table or a whole keyspace.
+        # sstableloader is smart enough to find the data if we give it the keyspace directory.
+        local path_to_load="$base_output_dir/$KEYSPACE_NAME"
+        
+        if [ -n "$TABLE_NAME" ]; then
+            path_to_load="$path_to_load/$TABLE_NAME"
+        fi
+
+        if [ -d "$path_to_load" ]; then
+            log_message "Loading data from path: $path_to_load"
+            if sstableloader -d "$LOADER_NODES" "$path_to_load"; then
+                log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
+            else
+                log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
+                exit 1
+            fi
+        else
+            log_message "WARNING: No data was downloaded for the specified keyspace/table. Nothing to load."
+        fi
     fi
 }
 
