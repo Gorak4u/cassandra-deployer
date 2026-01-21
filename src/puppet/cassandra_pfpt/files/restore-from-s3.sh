@@ -271,6 +271,46 @@ do_full_restore() {
 }
 
 
+restore_single_table() {
+    local backup_ts="$1"
+    local ks_name="$2"
+    local tbl_name="$3"
+    local restore_temp_dir="$4"
+
+    local archive_path_base="$HOSTNAME/$backup_ts/$ks_name/$tbl_name"
+    local archive_path_full="$archive_path_base/$tbl_name.tar.enc"
+    local archive_path_incr="$archive_path_base/incremental.tar.enc"
+    local archive_to_download=""
+
+    if aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_full" >/dev/null 2>&1; then
+        archive_to_download="$archive_path_full"
+    elif aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_incr" >/dev/null 2>&1; then
+        archive_to_download="$archive_path_incr"
+    else
+        log_message "INFO: No data for $ks_name.$tbl_name found in backup $backup_ts. Skipping."
+        return 0 # Not a failure
+    fi
+
+    log_message "Restoring data for $ks_name.$tbl_name from $archive_to_download"
+    
+    local table_restore_dir="$restore_temp_dir/$ks_name/$tbl_name-$(date +%s)"
+    mkdir -p "$table_restore_dir"
+    
+    aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | \
+    openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | \
+    tar -xzf - -C "$table_restore_dir"
+
+    if sstableloader -d "$LOADER_NODES" "$table_restore_dir"; then
+        log_message "Successfully loaded data from backup $backup_ts for table $tbl_name."
+        rm -rf "$table_restore_dir"
+        return 0
+    else
+        log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $tbl_name. Aborting."
+        return 1
+    fi
+}
+
+
 do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
     
@@ -284,35 +324,29 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
-        local archive_path_base="$HOSTNAME/$backup_ts/$KEYSPACE_NAME/$TABLE_NAME"
-        local archive_path_full="$archive_path_base/$TABLE_NAME.tar.enc"
-        local archive_path_incr="$archive_path_base/incremental.tar.enc"
-        local archive_to_download=""
-
-        if aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_full" >/dev/null 2>&1; then
-            archive_to_download="$archive_path_full"
-        elif aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_incr" >/dev/null 2>&1; then
-            archive_to_download="$archive_path_incr"
+        if [ -n "$TABLE_NAME" ]; then
+            # Restore a single specified table
+            if ! restore_single_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$restore_temp_dir"; then
+                log_message "Halting restore due to previous error."
+                exit 1
+            fi
         else
-            log_message "INFO: No data for $KEYSPACE_NAME.$TABLE_NAME found in backup $backup_ts. Skipping."
-            continue
-        fi
+            # Restore all tables in the keyspace
+            log_message "Discovering all tables in keyspace '$KEYSPACE_NAME' for backup '$backup_ts'..."
+            local tables_in_backup
+            tables_in_backup=$(aws s3 ls "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/" | awk '{print $2}' | sed 's/\///')
+            
+            if [ -z "$tables_in_backup" ]; then
+                log_message "No tables found for keyspace '$KEYSPACE_NAME' in backup '$backup_ts'. Skipping."
+                continue
+            fi
 
-        log_message "Restoring data for $KEYSPACE_NAME.$TABLE_NAME from $archive_to_download"
-        
-        local table_restore_dir="$restore_temp_dir/$KEYSPACE_NAME/$TABLE_NAME-$(date +%s)"
-        mkdir -p "$table_restore_dir"
-        
-        aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | \
-        openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | \
-        tar -xzf - -C "$table_restore_dir"
-
-        if sstableloader -d "$LOADER_NODES" "$table_restore_dir"; then
-            log_message "Successfully loaded data from backup $backup_ts."
-            rm -rf "$table_restore_dir"
-        else
-            log_message "ERROR: sstableloader failed for data from backup $backup_ts. Aborting."
-            exit 1
+            for table_in_ks in $tables_in_backup; do
+                if ! restore_single_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$restore_temp_dir"; then
+                     log_message "Halting restore due to previous error."
+                     exit 1
+                fi
+            done
         fi
     done
     
