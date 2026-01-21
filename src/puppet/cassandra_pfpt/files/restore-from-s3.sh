@@ -15,6 +15,8 @@ TARGET_DATE=""
 KEYSPACE_NAME=""
 TABLE_NAME=""
 MODE="" # Will be set to 'granular', 'full', or 'schema'
+RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
+DOWNLOAD_ONLY_PATH="/var/lib/cassandra/restore"
 
 # --- Logging ---
 log_message() {
@@ -26,12 +28,16 @@ usage() {
     log_message "Usage: $0 --date <timestamp> [options]"
     log_message ""
     log_message "Required:"
-    log_message "  --date <timestamp>        Target UTC timestamp for recovery in 'YYYY-MM-DD-HH-MM' format."
+    log_message "  --date <timestamp>                   Target UTC timestamp for recovery in 'YYYY-MM-DD-HH-MM' format."
     log_message ""
     log_message "Modes (choose one):"
-    log_message "  --keyspace <ks> [--table <table>]  Restores a specific keyspace or table (non-destructive)."
     log_message "  --full-restore                       Performs a full, destructive restore of the entire node."
     log_message "  --schema-only                        Extracts only the schema from the relevant full backup."
+    log_message "  --keyspace <ks> [--table <table>]  Targets a specific keyspace or table for a granular restore (requires an action)."
+    log_message ""
+    log_message "Actions for Granular Restore (required if --keyspace is used):"
+    log_message "  --download-only                      Download and decrypt data to $DOWNLOAD_ONLY_PATH."
+    log_message "  --download-and-restore             Download data and load it into the cluster via sstableloader."
     exit 1
 }
 
@@ -81,6 +87,8 @@ while [[ "$#" -gt 0 ]]; do
         --table) TABLE_NAME="$2"; shift ;;
         --full-restore) MODE="full" ;;
         --schema-only) MODE="schema" ;;
+        --download-only) RESTORE_ACTION="download_only" ;;
+        --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
         *) log_message "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -92,18 +100,19 @@ if [ -z "$TARGET_DATE" ]; then
     usage
 fi
 
-if [ -z "$MODE" ]; then
-    if [ -n "$KEYSPACE_NAME" ]; then
-        MODE="granular"
-    else
-        log_message "ERROR: You must specify a mode: --full-restore, --schema-only, or --keyspace."
-        usage
-    fi
+if [ -n "$KEYSPACE_NAME" ] && [ -z "$MODE" ]; then
+    MODE="granular"
 fi
 
-if [ "$MODE" = "granular" ] && [ -z "$KEYSPACE_NAME" ]; then
-    log_message "ERROR: --keyspace must be specified for a granular restore."
-    usage
+if [ "$MODE" = "granular" ]; then
+    if [ -z "$KEYSPACE_NAME" ]; then
+        log_message "ERROR: --keyspace must be specified for a granular restore."
+        usage
+    fi
+    if [ -z "$RESTORE_ACTION" ]; then
+        log_message "ERROR: You must specify an action (--download-only or --download-and-restore) for a granular restore."
+        usage
+    fi
 fi
 
 # Create a temporary file for the encryption key and set a trap to clean it up
@@ -126,9 +135,8 @@ find_backup_chain() {
     log_message "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
     
     local target_date_seconds
-    # Reformat date to be compatible with all 'date' command versions
     local parsable_target_date="${TARGET_DATE:0:10} ${TARGET_DATE:11:2}:${TARGET_DATE:14:2}"
-    target_date_seconds=$(date -d "$parsable_target_date" +%s)
+    target_date_seconds=$(date -d "$parsable_target_date" +%s 2>/dev/null)
     if [ -z "$target_date_seconds" ]; then
         log_message "ERROR: Invalid date format for --date. Use 'YYYY-MM-DD-HH-MM'."
         exit 1
@@ -145,7 +153,6 @@ find_backup_chain() {
 
     local eligible_backups=()
     for backup_ts in $all_backups; do
-        # Also reformat the backup timestamp for date comparison
         local parsable_backup_ts="${backup_ts:0:10} ${backup_ts:11:2}:${backup_ts:14:2}"
         local backup_date_seconds
         backup_date_seconds=$(date -d "$parsable_backup_ts" +%s 2>/dev/null || continue)
@@ -275,11 +282,11 @@ do_full_restore() {
 }
 
 
-restore_single_table() {
+download_and_extract_table() {
     local backup_ts="$1"
     local ks_name="$2"
     local tbl_name="$3"
-    local restore_temp_dir="$4"
+    local output_base_dir="$4"
 
     local archive_path_base="$HOSTNAME/$backup_ts/$ks_name/$tbl_name"
     local archive_path_full="$archive_path_base/$tbl_name.tar.enc"
@@ -292,47 +299,64 @@ restore_single_table() {
         archive_to_download="$archive_path_incr"
     else
         log_message "INFO: No data for $ks_name.$tbl_name found in backup $backup_ts. Skipping."
-        return 0 # Not a failure
-    fi
-
-    log_message "Restoring data for $ks_name.$tbl_name from $archive_to_download"
-    
-    local table_restore_dir="$restore_temp_dir/$ks_name/$tbl_name-$(date +%s)"
-    mkdir -p "$table_restore_dir"
-    
-    aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | \
-    openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | \
-    tar -xzf - -C "$table_restore_dir"
-
-    if sstableloader -d "$LOADER_NODES" "$table_restore_dir"; then
-        log_message "Successfully loaded data from backup $backup_ts for table $tbl_name."
-        rm -rf "$table_restore_dir"
-        return 0
-    else
-        log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $tbl_name. Aborting."
         return 1
     fi
+
+    # The actual output dir for this specific table's data
+    local table_output_dir="$output_base_dir/$ks_name/$tbl_name/$(basename "$archive_to_download" .tar.enc)"
+    mkdir -p "$table_output_dir"
+    
+    log_message "Downloading data for $ks_name.$tbl_name from $archive_to_download"
+    
+    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" - | openssl enc -d -aes-256-cbc -pass "file:$TMP_KEY_FILE" | tar -xzf - -C "$table_output_dir"; then
+        log_message "ERROR: Failed to download or extract $archive_to_download."
+        rm -rf "$table_output_dir" # Clean up partial data
+        return 1
+    fi
+    
+    echo "$table_output_dir"
+    return 0
 }
 
 
 do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
     
-    local restore_temp_dir="/tmp/restore_$$"
-    # Overwrite the trap to include the new temp dir
-    trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$restore_temp_dir"' EXIT
-    mkdir -p "$restore_temp_dir"
-
-    log_message "Streaming data to cluster nodes ($LOADER_NODES) with sstableloader..."
+    local base_output_dir
+    local temp_restore_dir="/tmp/restore_$$"
+    
+    if [ "$RESTORE_ACTION" == "download_only" ]; then
+        base_output_dir="$DOWNLOAD_ONLY_PATH"
+        log_message "Action: Download-Only. Data will be saved to $base_output_dir"
+        mkdir -p "$base_output_dir"
+        trap 'rm -f "$TMP_KEY_FILE"' EXIT
+    else # download_and_restore
+        base_output_dir="$temp_restore_dir"
+        log_message "Action: Download & Restore. Using temporary directory $base_output_dir"
+        mkdir -p "$base_output_dir"
+        trap 'rm -f "$TMP_KEY_FILE"; rm -rf "$base_output_dir"' EXIT
+    fi
     
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
         if [ -n "$TABLE_NAME" ]; then
-            # Restore a single specified table
-            if ! restore_single_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$restore_temp_dir"; then
-                log_message "Halting restore due to previous error."
-                exit 1
+            local restored_data_path
+            restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir")
+            
+            if [ -z "$restored_data_path" ]; then
+                continue
+            fi
+            
+            if [ "$RESTORE_ACTION" == "download_and_restore" ]; then
+                log_message "Loading data for $KEYSPACE_NAME.$TABLE_NAME into cluster..."
+                if sstableloader -d "$LOADER_NODES" "$restored_data_path"; then
+                    log_message "Successfully loaded data from backup $backup_ts for table $TABLE_NAME."
+                    rm -rf "$restored_data_path"
+                else
+                    log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $TABLE_NAME. Aborting."
+                    exit 1
+                fi
             fi
         else
             # Restore all tables in the keyspace
@@ -346,15 +370,33 @@ do_granular_restore() {
             fi
 
             for table_in_ks in $tables_in_backup; do
-                if ! restore_single_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$restore_temp_dir"; then
-                     log_message "Halting restore due to previous error."
-                     exit 1
+                local restored_data_path
+                restored_data_path=$(download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir")
+
+                if [ -z "$restored_data_path" ]; then
+                    continue
+                fi
+
+                if [ "$RESTORE_ACTION" == "download_and_restore" ]; then
+                    log_message "Loading data for $KEYSPACE_NAME.$table_in_ks into cluster..."
+                    if sstableloader -d "$LOADER_NODES" "$restored_data_path"; then
+                        log_message "Successfully loaded data from backup $backup_ts for table $table_in_ks."
+                        rm -rf "$restored_data_path"
+                    else
+                        log_message "ERROR: sstableloader failed for data from backup $backup_ts for table $table_in_ks. Aborting."
+                        exit 1
+                    fi
                 fi
             done
         fi
     done
     
-    log_message "--- Granular Restore Process Finished Successfully ---"
+    if [ "$RESTORE_ACTION" == "download_only" ]; then
+        log_message "--- Granular Restore (Download Only) Finished Successfully ---"
+        log_message "All data has been downloaded and decrypted to: $base_output_dir"
+    else
+        log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
+    fi
 }
 
 # --- Main Execution ---
