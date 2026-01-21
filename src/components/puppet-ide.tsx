@@ -33,6 +33,7 @@ import {
     ShieldCheck,
     AlertTriangle,
     CheckCircle,
+    Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -270,6 +271,15 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+            {selectedFile && selectedFile.lang !== 'binary' && (
+              <Alert className="mb-6 border-blue-500/50 bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-900 [&>svg]:text-blue-500">
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>Note on AI Usage</AlertTitle>
+                  <AlertDescription>
+                  The "Validate File" feature uses an AI model. Please be aware that running this feature may incur costs from your cloud provider.
+                  </AlertDescription>
+              </Alert>
+            )}
             {validationResult && (
               <Alert variant={validationResult.isValid ? 'default' : 'destructive'} className={cn("mb-6", validationResult.isValid && "border-green-500/50 bg-green-50 text-green-900 [&>svg]:text-green-500 dark:bg-green-950 dark:text-green-300 dark:border-green-900")}>
                 {validationResult.isValid ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
