@@ -59,8 +59,8 @@ CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
-CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+CASSANDRA_USER_CONFIG=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD_CONFIG=$(jq -r '.cassandra_password' "$CONFIG_FILE")
 
 
 # Derive restore paths from the main data directory parameter
@@ -221,8 +221,19 @@ do_schema_restore() {
     
     local cqlsh_config="/root/.cassandra/cqlshrc"
     local cqlsh_ssl_opt=""
-    if [ -f "$cqlsh_config" ] && grep -q '\[ssl\]' "$cqlsh_config"; then
-        cqlsh_ssl_opt="--ssl"
+    local cqlsh_auth_opt=""
+
+    if [ -f "$cqlsh_config" ]; then
+        if grep -q '\[ssl\]' "$cqlsh_config"; then
+            cqlsh_ssl_opt="--ssl"
+        fi
+        if grep -q '\[authentication\]' "$cqlsh_config"; then
+             local cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlsh_config")
+             local cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlsh_config")
+             if [ -n "$cqlsh_user" ] && [ -n "$cqlsh_pass" ]; then
+                cqlsh_auth_opt="-u '${cqlsh_user}' -p '${cqlsh_pass}'"
+             fi
+        fi
     fi
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
@@ -230,7 +241,7 @@ do_schema_restore() {
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: cqlsh -u ${CASSANDRA_USER} -p '${CASSANDRA_PASSWORD}' ${cqlsh_ssl_opt} -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: cqlsh ${cqlsh_auth_opt} ${cqlsh_ssl_opt} -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
@@ -303,9 +314,9 @@ do_full_restore() {
     log_message "All data from backup chain extracted."
     
     log_message "4. Setting permissions..."
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_CACHES_DIR"
+    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_DATA_DIR"
+    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_COMMITLOG_DIR"
+    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_CACHES_DIR"
 
     log_message "5. Starting Cassandra service..."
     systemctl start cassandra
@@ -429,7 +440,28 @@ do_granular_restore() {
 
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
-            if sstableloader -u "$CASSANDRA_USER" -pw "$CASSANDRA_PASSWORD" -d "$LOADER_NODES" "$path_to_load"; then
+            
+            local cqlshrc_path="/root/.cassandra/cqlshrc"
+            local sstableloader_opts="--conf-path /etc/cassandra/conf -d ${LOADER_NODES}"
+
+            if [ -f "$cqlshrc_path" ]; then
+                log_message "Found cqlshrc file, parsing for credentials..."
+                local cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlshrc_path")
+                local cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlshrc_path")
+                if [ -n "$cqlsh_user" ] && [ -n "$cqlsh_pass" ]; then
+                    log_message "Using username '$cqlsh_user' from cqlshrc."
+                    sstableloader_opts+=" -u '${cqlsh_user}' -pw '${cqlsh_pass}'"
+                else
+                    log_message "WARNING: cqlshrc found but username/password not set in [authentication] section."
+                fi
+            else
+                log_message "WARNING: cqlshrc file not found. sstableloader may fail if authentication is required."
+            fi
+
+            log_message "Executing: sstableloader ${sstableloader_opts} \"${path_to_load}\""
+            
+            # We must use eval here to correctly handle the quotes around the username and password
+            if eval "sstableloader ${sstableloader_opts} \"${path_to_load}\""; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
                 log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
