@@ -73,6 +73,9 @@ cleanup_old_snapshots() {
       elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}
           snapshot_timestamp=$(date -d "$snapshot_date_str" +%s)
+      elif [[ "$tag" =~ ^backup_([0-9]{14}) ]]; then
+          local snapshot_date_str=${BASH_REMATCH[1]}
+          snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
       fi
       
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
@@ -155,39 +158,46 @@ if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
     CQLSH_SSL_OPT="--ssl"
 fi
 
-for ks in $(nodetool keyspaces); do
-    if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
-        continue
-    fi
-    log_message "Processing keyspace: $ks"
-    
-    # Find table directories. They have a UUID suffix.
-    find "$CASSANDRA_DATA_DIR/$ks" -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
-        table_name=$(basename "$table_dir" | cut -d'-' -f1)
-        snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
-        
-        # Check if snapshot dir exists and is not empty
-        if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
-            log_message "Backing up table: $ks.$table_name"
-            s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.enc"
-            
-            # Streaming pipeline: tar -> gzip -> openssl -> aws s3
-            tar -C "$snapshot_dir" -c . | \
-            gzip | \
-            openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
-            aws s3 cp - "$s3_path"
+# Make keyspace discovery more robust by filtering output and checking for command failure.
+KEYSPACES_LIST=$(nodetool keyspaces 2>/dev/null | grep -E '^[a-zA-Z][a-zA-Z0-9_]*$')
 
-            # Check the exit code of the aws cli command (the last in the pipe)
-            if [ ${PIPESTATUS[3]} -eq 0 ]; then
-                log_message "Successfully uploaded backup for $ks.$table_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
-            else
-                log_message "ERROR: Failed to upload backup for $ks.$table_name"
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-            fi
+if [ -z "$KEYSPACES_LIST" ]; then
+    log_message "WARNING: 'nodetool keyspaces' returned no valid keyspaces or the command failed. Skipping table data backup."
+else
+    for ks in $KEYSPACES_LIST; do
+        if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
+            continue
         fi
+        log_message "Processing keyspace: $ks"
+        
+        # Find table directories. They have a UUID suffix.
+        find "$CASSANDRA_DATA_DIR/$ks" -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
+            table_name=$(basename "$table_dir" | cut -d'-' -f1)
+            snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
+            
+            # Check if snapshot dir exists and is not empty
+            if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
+                log_message "Backing up table: $ks.$table_name"
+                s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.enc"
+                
+                # Streaming pipeline: tar -> gzip -> openssl -> aws s3
+                tar -C "$snapshot_dir" -c . | \
+                gzip | \
+                openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
+                aws s3 cp - "$s3_path"
+
+                # Check the exit code of the aws cli command (the last in the pipe)
+                if [ ${PIPESTATUS[3]} -eq 0 ]; then
+                    log_message "Successfully uploaded backup for $ks.$table_name"
+                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                else
+                    log_message "ERROR: Failed to upload backup for $ks.$table_name"
+                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                fi
+            fi
+        done
     done
-done
+fi
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
