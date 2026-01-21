@@ -13,7 +13,7 @@ log_message() {
 }
 
 # Check for required tools
-for tool in jq aws openssl; do
+for tool in jq aws openssl nodetool; do
     if ! command -v $tool &> /dev/null; then
         echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Required tool '$tool' is not installed or in PATH."
         exit 1
@@ -61,7 +61,7 @@ cleanup_old_snapshots() {
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     # Filter out headers and footers from nodetool output before processing
-    nodetool listsnapshots | grep -Ev '^(Snapshot Details:|Snapshot name|Total snapshots:|There are no snapshots)$' | while read -r snapshot_line; do
+    nodetool listsnapshots | grep -Ev '^(Snapshot Details:|Snapshot name:|Total snapshots:|There are no snapshots)$' | while read -r snapshot_line; do
       if [[ -z "$snapshot_line" ]]; then
           continue
       fi
@@ -72,7 +72,8 @@ cleanup_old_snapshots() {
 
       if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
           # Convert YYYY-MM-DD-HH-MM to a standard "YYYY-MM-DD HH:MM" format for `date` command
-          local parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
+          local parsable_date
+          parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
           snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
       elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}

@@ -13,7 +13,7 @@ log_message() {
 }
 
 # Check for required tools
-for tool in jq aws openssl; do
+for tool in jq aws openssl nodetool; do
     if ! command -v $tool &> /dev/null; then
         echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Required tool '$tool' is not installed or in PATH."
         exit 1
