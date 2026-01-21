@@ -13,7 +13,7 @@ log_message() {
 }
 
 # Check for required tools
-for tool in jq aws openssl nodetool; do
+for tool in jq aws openssl nodetool cqlsh; do
     if ! command -v $tool &> /dev/null; then
         echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Required tool '$tool' is not installed or in PATH."
         exit 1
@@ -181,21 +181,21 @@ if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
     CQLSH_SSL_OPT="--ssl"
 fi
 
-# Make keyspace discovery more robust by filtering output and checking for command failure.
-KEYSPACES_LIST=$(nodetool keyspaces 2>/dev/null | grep -E '^[a-zA-Z][a-zA-Z0-9_]*$')
+# Make keyspace discovery more robust by using cqlsh.
+KEYSPACES_LIST=$(cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE KEYSPACES;" 2>/dev/null)
 
 if [ -z "$KEYSPACES_LIST" ]; then
-    log_message "WARNING: 'nodetool keyspaces' returned no valid keyspaces or the command failed. Skipping table data backup."
+    log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
 else
-    # Use a while loop to read line by line to avoid word splitting issues from error messages
-    echo "$KEYSPACES_LIST" | while IFS= read -r ks; do
+    # Use a for loop to iterate over the space-separated list from cqlsh
+    for ks in $KEYSPACES_LIST; do
         if [[ $SYSTEM_KEYSPACES =~ $ks ]]; then
             continue
         fi
         log_message "Processing keyspace: $ks"
         
         # Find table directories. They have a UUID suffix.
-        find "$CASSANDRA_DATA_DIR/$ks" -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
+        find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
             table_name=$(basename "$table_dir" | cut -d'-' -f1)
             snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
             
