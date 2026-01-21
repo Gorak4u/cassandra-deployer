@@ -70,7 +70,9 @@ cleanup_old_snapshots() {
       local snapshot_timestamp=0
 
       if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
-          snapshot_timestamp=$(date -d "$(echo "$tag" | tr -d ' ')" +%s 2>/dev/null || echo 0)
+          # Convert YYYY-MM-DD-HH-MM to a standard "YYYY-MM-DD HH:MM" format for `date` command
+          local parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
+          snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
       elif [[ "$tag" =~ ^full_snapshot_([0-9]{8}) ]]; then
           local snapshot_date_str=${BASH_REMATCH[1]}
           snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
