@@ -440,8 +440,6 @@ do_granular_restore() {
     else # download_and_restore
         log_message "All data has been downloaded. Preparing to load into cluster..."
         
-        # The path to load depends on whether we downloaded a single table or a whole keyspace.
-        # sstableloader is smart enough to find the data if we give it the keyspace directory.
         local path_to_load="$base_output_dir/$KEYSPACE_NAME"
         
         if [ -n "$TABLE_NAME" ]; then
@@ -451,16 +449,20 @@ do_granular_restore() {
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
             
+            # Use an array to build the command safely, avoiding eval.
+            local loader_cmd=("sstableloader" "--conf-path" "/etc/cassandra/conf" "-d" "${LOADER_NODES}")
+            
             local cqlshrc_path="/root/.cassandra/cqlshrc"
-            local sstableloader_opts="--conf-path /etc/cassandra/conf -d ${LOADER_NODES}"
-
             if [ -f "$cqlshrc_path" ]; then
                 log_message "Found cqlshrc file, parsing for credentials..."
-                local cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlshrc_path")
-                local cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlshrc_path")
+                local cqlsh_user
+                cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlshrc_path")
+                local cqlsh_pass
+                cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlshrc_path")
+                
                 if [ -n "$cqlsh_user" ] && [ -n "$cqlsh_pass" ]; then
                     log_message "Using username '$cqlsh_user' from cqlshrc."
-                    sstableloader_opts+=" -u '${cqlsh_user}' -pw '${cqlsh_pass}'"
+                    loader_cmd+=("-u" "$cqlsh_user" "-pw" "$cqlsh_pass")
                 else
                     log_message "WARNING: cqlshrc found but username/password not set in [authentication] section."
                 fi
@@ -468,10 +470,11 @@ do_granular_restore() {
                 log_message "WARNING: cqlshrc file not found. sstableloader may fail if authentication is required."
             fi
 
-            log_message "Executing: sstableloader ${sstableloader_opts} \"${path_to_load}\""
+            loader_cmd+=("$path_to_load")
+
+            log_message "Executing: ${loader_cmd[*]}"
             
-            # We must use eval here to correctly handle the quotes around the username and password
-            if eval "sstableloader ${sstableloader_opts} \"${path_to_load}\""; then
+            if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
                 log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
