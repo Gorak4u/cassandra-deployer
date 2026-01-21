@@ -449,8 +449,12 @@ do_granular_restore() {
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
             
+            # Set the CASSANDRA_CONF environment variable as an alternative to --conf-path
+            export CASSANDRA_CONF="/etc/cassandra/conf"
+            log_message "Set CASSANDRA_CONF to $CASSANDRA_CONF"
+
             # Use an array to build the command safely, avoiding eval.
-            local loader_cmd=("sstableloader" "--conf-path" "/etc/cassandra/conf" "-d" "${LOADER_NODES}")
+            local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
             
             local cqlshrc_path="/root/.cassandra/cqlshrc"
             if [ -f "$cqlshrc_path" ]; then
@@ -522,5 +526,3 @@ case $MODE in
 esac
 
 exit 0
-
-    
