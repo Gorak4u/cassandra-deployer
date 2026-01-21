@@ -33,7 +33,8 @@ CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
-# upload_streaming is deprecated in this new model
+UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
+
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -178,6 +179,7 @@ cleanup_old_snapshots
 log_message "--- Starting Granular Cassandra Snapshot Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
 log_message "Backup Timestamp (Tag): $BACKUP_TAG"
+log_message "Streaming Mode: $UPLOAD_STREAMING"
 
 # 1. Create temporary directory for manifest
 mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory."; exit 1; }
@@ -227,35 +229,54 @@ else
                 log_message "Backing up table: $ks.$table_name"
                 s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.gz.enc"
                 
-                local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
-                local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
-
-                # Step 1: Archive and compress
-                if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
-                    log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
-                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                    continue
-                fi
-
-                # Step 2: Encrypt
-                if ! openssl enc -aes-256-cbc -salt -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                    log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
-                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                    rm -f "$local_tar_file"
-                    continue
-                fi
-                
-                # Step 3: Upload
-                if ! aws s3 cp "$local_enc_file" "$s3_path"; then
-                    log_message "ERROR: Failed to upload backup for $ks.$table_name"
-                    UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                if [ "$UPLOAD_STREAMING" = "true" ]; then
+                    # Streaming pipeline: tar -> gzip -> openssl -> aws s3
+                    tar -C "$snapshot_dir" -c . | \
+                    gzip | \
+                    openssl enc -aes-256-cbc -salt -pass "file:$TMP_KEY_FILE" | \
+                    aws s3 cp - "$s3_path"
+                    
+                    # Check all exit codes in the pipeline
+                    pipeline_status=("${PIPESTATUS[@]}")
+                    if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
+                        log_message "ERROR: Streaming backup failed for $ks.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                    else
+                        log_message "Successfully streamed backup for $ks.$table_name"
+                        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                    fi
                 else
-                    log_message "Successfully uploaded backup for $ks.$table_name"
-                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
-                fi
+                    # Non-streaming (safer) method using temporary files
+                    local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
+                    local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
 
-                # Step 4: Cleanup local temp files
-                rm -f "$local_tar_file" "$local_enc_file"
+                    # Step 1: Archive and compress
+                    if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
+                        log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
+                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                        continue
+                    fi
+
+                    # Step 2: Encrypt
+                    if ! openssl enc -aes-256-cbc -salt -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+                        log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
+                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                        rm -f "$local_tar_file"
+                        continue
+                    fi
+                    
+                    # Step 3: Upload
+                    if ! aws s3 cp "$local_enc_file" "$s3_path"; then
+                        log_message "ERROR: Failed to upload backup for $ks.$table_name"
+                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                    else
+                        log_message "Successfully uploaded backup for $ks.$table_name"
+                        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                    fi
+
+                    # Step 4: Cleanup local temp files
+                    rm -f "$local_tar_file" "$local_enc_file"
+                fi
             fi
         done
     done
