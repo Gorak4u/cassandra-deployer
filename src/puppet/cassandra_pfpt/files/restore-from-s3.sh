@@ -234,7 +234,7 @@ build_cqlsh_cmd() {
     if [ "$SSL_ENABLED" == "true" ]; then
         cmd_parts+=("--ssl")
     fi
-    cmd_parts+=("-u" "'$CASSANDRA_USER'" "-p" "'$CASSANDRA_PASSWORD'")
+    cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
     echo "${cmd_parts[*]}"
 }
 
@@ -295,9 +295,10 @@ do_full_restore() {
     rm -rf "$CASSANDRA_CACHES_DIR"
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
-
+    
+    log_message "2a. Verifying disk space after cleanup..."
     local post_cleanup_usage
-    post_cleanup_usage=$(df "$CASSANDRA_DATA_DIR" --output=pcent | tail -1 | tr -cd '[:digit:]')
+    post_cleanup_usage=$(/usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 99 | grep -o '[0-9]*%' | tr -d '%')
     local max_allowed_usage=10
 
     if [[ "$post_cleanup_usage" -gt "$max_allowed_usage" ]]; then
@@ -311,11 +312,16 @@ do_full_restore() {
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize for schema restore..."
-    local cqlsh_cmd
-    cqlsh_cmd=$(build_cqlsh_cmd)
+    # On a fresh start, we must use the default credentials to apply the schema
+    local initial_cqlsh_cmd_parts=("cqlsh" "-u" "cassandra" "-p" "cassandra")
+    if [ "$SSL_ENABLED" == "true" ]; then
+        initial_cqlsh_cmd_parts+=("--ssl")
+    fi
+    local initial_cqlsh_cmd="${initial_cqlsh_cmd_parts[*]}"
+
     local CASSANDRA_READY=false
     for i in {1..30}; do # Wait up to 5 minutes
-        if eval "$cqlsh_cmd -e 'select cluster_name from system.local;'" >/dev/null 2>&1; then
+        if eval "$initial_cqlsh_cmd -e 'select cluster_name from system.local;'" >/dev/null 2>&1; then
             CASSANDRA_READY=true
             break
         fi
@@ -337,7 +343,7 @@ do_full_restore() {
         exit 1
     fi
 
-    if ! eval "$cqlsh_cmd -f $schema_local_path"; then
+    if ! eval "$initial_cqlsh_cmd -f $schema_local_path"; then
         log_message "ERROR: Failed to apply schema from $schema_local_path. Aborting."
         rm -f "$schema_local_path"
         exit 1
