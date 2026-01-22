@@ -438,7 +438,7 @@ download_and_extract_table() {
         return 1
     fi
 
-    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+    if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
         log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
@@ -537,6 +537,47 @@ do_granular_restore() {
         
         local path_to_load="$base_output_dir"
         
+        # Handle UUID mismatch for single-table restores
+        if [ -n "$TABLE_NAME" ]; then
+            log_message "Handling potential table UUID mismatch for granular restore of $KEYSPACE_NAME.$TABLE_NAME..."
+
+            # Find the source directory path (with old UUID from backup)
+            local source_table_dir
+            source_table_dir=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
+
+            if [ -z "$source_table_dir" ]; then
+                log_message "WARNING: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Nothing to load."
+            else
+                log_message "Downloaded data found at: $source_table_dir"
+
+                # Find the destination directory path (with live UUID)
+                local live_table_dir
+                live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
+
+                if [ -z "$live_table_dir" ]; then
+                    log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$TABLE_NAME' in '$CASSANDRA_DATA_DIR'."
+                    log_message "The table must exist in the cluster before you can perform a granular restore."
+                    exit 1
+                else
+                    log_message "Live table directory found at: $live_table_dir"
+
+                    local live_table_dirname
+                    live_table_dirname=$(basename "$live_table_dir")
+                    
+                    local source_table_dirname
+                    source_table_dirname=$(basename "$source_table_dir")
+
+                    if [ "$source_table_dirname" != "$live_table_dirname" ]; then
+                        log_message "UUID mismatch detected. Renaming downloaded directory to match live table UUID."
+                        log_message "Renaming '$source_table_dir' to '$(dirname "$source_table_dir")/$live_table_dirname'"
+                        mv "$source_table_dir" "$(dirname "$source_table_dir")/$live_table_dirname"
+                    else
+                        log_message "UUIDs match. No rename necessary."
+                    fi
+                fi
+            fi
+        fi
+
         if [ -d "$path_to_load/$KEYSPACE_NAME" ]; then
             log_message "Loading data from path: $path_to_load"
             
@@ -545,7 +586,6 @@ do_granular_restore() {
 
             local loader_cmd=("sstableloader" "--debug" "--no-progress" "-d" "${LOADER_NODES}")
             
-            # Add username and password if they are valid and not the string "null"
             if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER")
             fi
@@ -565,7 +605,7 @@ do_granular_restore() {
             if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
-                log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
+                log_message "ERROR: sstableloader failed. The downloaded data is still available in $path_to_load for inspection."
                 exit 1
             fi
         else
