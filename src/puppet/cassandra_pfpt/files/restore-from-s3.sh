@@ -7,15 +7,35 @@ set -euo pipefail
 
 # --- Configuration & Input ---
 CONFIG_FILE="/etc/backup/config.json"
-HOSTNAME=$(hostname -s)
 # Define a default log file path in case config loading fails, ensuring early errors are logged.
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
+HOSTNAME=$(hostname -s)
 TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
 # --- Logging ---
 log_message() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$RESTORE_LOG_FILE"
 }
+
+# --- Pre-flight Checks ---
+# Run these checks as early as possible so any failure is logged.
+if [ "$(id -u)" -ne 0 ]; then
+    log_message "ERROR: This script must be run as root."
+    exit 1
+fi
+
+for tool in jq aws sstableloader openssl pgrep ps /usr/local/bin/disk-health-check.sh; do
+    if ! command -v $tool &>/dev/null; then
+        log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
+        exit 1
+    fi
+done
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    log_message "ERROR: Backup configuration file not found at $CONFIG_FILE"
+    exit 1
+fi
+
 
 # --- Usage ---
 usage() {
@@ -38,23 +58,6 @@ usage() {
     exit 1
 }
 
-# --- Pre-flight Checks ---
-if [ "$(id -u)" -ne 0 ]; then
-    log_message "ERROR: This script must be run as root."
-    exit 1
-fi
-
-for tool in jq aws sstableloader openssl pgrep ps; do
-    if ! command -v $tool &>/dev/null; then
-        log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
-        exit 1
-    fi
-done
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    log_message "ERROR: Backup configuration file not found at $CONFIG_FILE"
-    exit 1
-fi
 
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
@@ -267,6 +270,14 @@ do_full_restore() {
         log_message "Auto-approving destructive full restore via --yes flag."
     fi
 
+    log_message "0. Pre-flight disk space check..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 5 -c 1; then
+        log_message "ERROR: Initial disk health check failed. The data volume may be full or having issues. Aborting."
+        exit 1
+    fi
+    log_message "Initial disk health check passed."
+
+
     log_message "1. Stopping Cassandra service..."
     systemctl stop cassandra
 
@@ -275,6 +286,13 @@ do_full_restore() {
     rm -rf "$CASSANDRA_COMMITLOG_DIR"/*
     rm -rf "$CASSANDRA_CACHES_DIR"/*
     log_message "Old directories cleaned."
+
+    log_message "2a. Verifying disk space after cleanup..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 90; then
+        log_message "ERROR: Post-cleanup disk check failed. Expected disk to be mostly empty but it is not. Aborting."
+        exit 1
+    fi
+    log_message "Post-cleanup disk space is sufficient."
 
     log_message "3. Downloading and extracting data from backup chain..."
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
@@ -389,19 +407,29 @@ do_granular_restore() {
 
     local base_output_dir
     local temp_download_dir
+    local check_path
 
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         base_output_dir="$DOWNLOAD_ONLY_PATH"
         temp_download_dir="$DOWNLOAD_ONLY_PATH"
+        check_path="$DOWNLOAD_ONLY_PATH"
         log_message "Action: Download-Only. Data will be saved to $base_output_dir"
         mkdir -p "$base_output_dir"
     else # download_and_restore
         TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
         base_output_dir="$TEMP_RESTORE_DIR"
         temp_download_dir="$TEMP_RESTORE_DIR"
+        check_path="$RESTORE_BASE_PATH"
         log_message "Action: Download & Restore. Using temporary directory $base_output_dir"
         mkdir -p "$base_output_dir"
     fi
+    
+    log_message "Performing pre-flight disk space check on $check_path..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 20 -c 10; then
+        log_message "ERROR: Insufficient disk space on the target volume. Aborting granular restore."
+        exit 1
+    fi
+    log_message "Disk space is sufficient to begin."
 
     # Step 1: Download and extract all data from the entire chain.
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
