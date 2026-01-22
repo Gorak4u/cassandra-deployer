@@ -230,11 +230,14 @@ find_backup_chain() {
 
 # Function to build cqlsh command options based on config
 build_cqlsh_cmd() {
+    local user="$1"
+    local pass="$2"
     local cmd_parts=("cqlsh")
+
     if [ "$SSL_ENABLED" == "true" ]; then
         cmd_parts+=("--ssl")
     fi
-    cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
+    cmd_parts+=("-u" "$user" "-p" "$pass")
     echo "${cmd_parts[*]}"
 }
 
@@ -242,7 +245,7 @@ do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
     local cqlsh_cmd
-    cqlsh_cmd=$(build_cqlsh_cmd)
+    cqlsh_cmd=$(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD")
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
@@ -313,11 +316,8 @@ do_full_restore() {
     
     log_message "Waiting for Cassandra to initialize for schema restore..."
     # On a fresh start, we must use the default credentials to apply the schema
-    local initial_cqlsh_cmd_parts=("cqlsh" "-u" "cassandra" "-p" "cassandra")
-    if [ "$SSL_ENABLED" == "true" ]; then
-        initial_cqlsh_cmd_parts+=("--ssl")
-    fi
-    local initial_cqlsh_cmd="${initial_cqlsh_cmd_parts[*]}"
+    local initial_cqlsh_cmd
+    initial_cqlsh_cmd=$(build_cqlsh_cmd "cassandra" "cassandra")
 
     local CASSANDRA_READY=false
     for i in {1..30}; do # Wait up to 5 minutes
