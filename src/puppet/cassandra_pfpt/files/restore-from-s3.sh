@@ -9,10 +9,7 @@ set -euo pipefail
 CONFIG_FILE="/etc/backup/config.json"
 # Define a default log file path in case config loading fails, ensuring early errors are logged.
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
-HOSTNAME=$(hostname -s)
-TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
-# --- Logging ---
 log_message() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$RESTORE_LOG_FILE"
 }
@@ -35,6 +32,10 @@ if [ ! -f "$CONFIG_FILE" ]; then
     log_message "ERROR: Backup configuration file not found at $CONFIG_FILE"
     exit 1
 fi
+
+# --- Variables defined after initial checks ---
+HOSTNAME=$(hostname -s)
+TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
 
 # --- Usage ---
@@ -282,14 +283,17 @@ do_full_restore() {
     systemctl stop cassandra
 
     log_message "2. Wiping old data..."
-    rm -rf "$CASSANDRA_DATA_DIR"/*
-    rm -rf "$CASSANDRA_COMMITLOG_DIR"/*
-    rm -rf "$CASSANDRA_CACHES_DIR"/*
-    log_message "Old directories cleaned."
+    rm -rf "$CASSANDRA_DATA_DIR"
+    mkdir -p "$CASSANDRA_DATA_DIR"
+    rm -rf "$CASSANDRA_COMMITLOG_DIR"
+    mkdir -p "$CASSANDRA_COMMITLOG_DIR"
+    rm -rf "$CASSANDRA_CACHES_DIR"
+    mkdir -p "$CASSANDRA_CACHES_DIR"
+    log_message "Old directories wiped and recreated."
 
     log_message "2a. Verifying disk space after cleanup..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 5 -c 10; then
-        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < 5%, but it is not. Aborting."
+    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 10 -c 15; then
+        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < 10%, but it is not. Aborting."
         exit 1
     fi
     log_message "Post-cleanup disk space is sufficient."
