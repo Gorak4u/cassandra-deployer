@@ -1,6 +1,4 @@
-# @summary Profile for a complete Cassandra node.
-# This class acts as a wrapper around the `cassandra_pfpt` component module,
-# providing all its parameters via Hiera lookups.
+# A profile for deploying and configuring a Cassandra node.
 class profile_cassandra_pfpt {
   # Hiera Lookups for Cassandra Configuration
   # This section gathers all configuration from Hiera, providing sensible defaults.
@@ -13,7 +11,7 @@ class profile_cassandra_pfpt {
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
   $rack                             = lookup('profile_cassandra_pfpt::rack', { 'default_value' => 'rack1' })
-  $cassandra_password               = lookup('profile_cassandra_pfpt::cassandra_password', { 'default_value' => 'PP#C@ss@ndr@000' })
+  $cassandra_password               = lookup('profile_cassandra_pfpt::cassandra_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('PP#C@ss@ndr@000') })
   $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
   $gc_type                          = lookup('profile_cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
   $data_dir                         = lookup('profile_cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
@@ -28,16 +26,16 @@ class profile_cassandra_pfpt {
   $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
   $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/etc/pki/tls/certs' })
   $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
-  $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'default_value' => 'ChangeMe' })
+  $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('ChangeMe') })
   $truststore_path                  = lookup('profile_cassandra_pfpt::truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
-  $truststore_password              = lookup('profile_cassandra_pfpt::truststore_password', { 'default_value' => 'changeit' })
+  $truststore_password              = lookup('profile_cassandra_pfpt::truststore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('changeit') })
   $internode_encryption             = lookup('profile_cassandra_pfpt::internode_encryption', { 'default_value' => 'all' })
   $internode_require_client_auth    = lookup('profile_cassandra_pfpt::internode_require_client_auth', { 'default_value' => true })
   $client_optional                  = lookup('profile_cassandra_pfpt::client_optional', { 'default_value' => false })
   $client_require_client_auth       = lookup('profile_cassandra_pfpt::client_require_client_auth', { 'default_value' => false })
   $client_keystore_path             = lookup('profile_cassandra_pfpt::client_keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
   $client_truststore_path           = lookup('profile_cassandra_pfpt::client_truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
-  $client_truststore_password       = lookup('profile_cassandra_pfpt::client_truststore_password', { 'default_value' => 'changeit' })
+  $client_truststore_password       = lookup('profile_cassandra_pfpt::client_truststore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('changeit') })
   $tls_protocol                     = lookup('profile_cassandra_pfpt::tls_protocol', { 'default_value' => 'TLS' })
   $tls_algorithm                    = lookup('profile_cassandra_pfpt::tls_algorithm', { 'default_value' => 'SunX509' })
   $store_type                       = lookup('profile_cassandra_pfpt::store_type', { 'default_value' => 'JKS' })
