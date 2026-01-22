@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
@@ -542,13 +543,13 @@ do_granular_restore() {
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
+            local loader_cmd=("sstableloader" "--debug" "--no-progress" "-d" "${LOADER_NODES}")
             
             # Add username and password if they are valid and not the string "null"
-            if [ -n "$CASSANDRA_USER" ] && [ "$CASSANDRA_USER" != "null" ]; then
+            if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER")
             fi
-            if [ -n "$CASSANDRA_PASSWORD" ] && [ "$CASSANDRA_PASSWORD" != "null" ]; then
+            if [[ -n "$CASSANDRA_PASSWORD" && "$CASSANDRA_PASSWORD" != "null" ]]; then
                 loader_cmd+=("-pw" "$CASSANDRA_PASSWORD")
             fi
 
@@ -559,7 +560,7 @@ do_granular_restore() {
 
             loader_cmd+=("$path_to_load")
 
-            log_message "Executing: sstableloader -d ${LOADER_NODES} ..."
+            log_message "Executing: ${loader_cmd[*]}"
             
             if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
@@ -616,3 +617,5 @@ case $MODE in
 esac
 
 exit 0
+
+    
