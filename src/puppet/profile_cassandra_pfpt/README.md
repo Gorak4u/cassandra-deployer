@@ -25,8 +25,13 @@
     3.  [Restore Scenario 1: Granular Restore (Live Cluster)](#restore-scenario-1-granular-restore-live-cluster)
     4.  [Restore Scenario 2: Full Node Restore (Replacing a Single Failed Node)](#restore-scenario-2-full-node-restore-replacing-a-single-failed-node)
     5.  [Restore Scenario 3: Full Cluster Restore (Cold Start DR)](#restore-scenario-3-full-cluster-restore-cold-start-dr)
-8.  [Hiera Parameter Reference](#hiera-parameter-reference)
-9.  [Puppet Agent Management](#puppet-agent-management)
+    6.  [Restore Scenario 4: Recovering from Accidental Schema Changes](#restore-scenario-4-recovering-from-accidental-schema-changes)
+8.  [Production Readiness Guide](#production-readiness-guide)
+    1.  [Monitoring Backups and Alerting](#monitoring-backups-and-alerting)
+    2.  [Testing Your Disaster Recovery Plan (Fire Drills)](#testing-your-disaster-recovery-plan-fire-drills)
+    3.  [Important Security and Cost Considerations](#important-security-and-cost-considerations)
+9.  [Hiera Parameter Reference](#hiera-parameter-reference)
+10. [Puppet Agent Management](#puppet-agent-management)
 
 ---
 
@@ -432,6 +437,74 @@ Now, you will perform a full node restore on each new machine, one at a time.
     *   Wait for this node to report `UN` status before proceeding to the next one.
 
 3.  Repeat this process until all nodes in the new cluster have been restored and are online. Your cluster is now fully recovered.
+
+---
+
+### Restore Scenario 4: Recovering from Accidental Schema Changes
+
+> **Use Case:** An operator accidentally ran a destructive `ALTER TABLE` or `DROP TABLE` command, but the data on disk is still intact.
+
+The `schema.cql` file included in every full backup is your safety net.
+
+1.  **Identify the last known-good backup** before the schema change occurred.
+2.  **Download the schema file** from that backup set using the `--schema-only` mode:
+    ```bash
+    sudo /usr/local/bin/restore-from-s3.sh \
+      --date "2026-01-20-18-00" \
+      --source-host cassandra-node-01.example.com \
+      --schema-only
+    ```
+3.  This downloads the full schema to `/tmp/schema_restore.cql`.
+4.  **Do not apply the whole file.** Instead, open it in a text editor (`less /tmp/schema_restore.cql`).
+5.  Find the correct `CREATE TABLE` statement for the table that was altered or dropped.
+6.  Copy that single statement and execute it in `cqlsh` to restore the table's structure.
+
+---
+
+## Production Readiness Guide
+
+Having functional backups is the first step. Ensuring they are reliable and secure is the next.
+
+### Monitoring Backups and Alerting
+
+A backup that fails silently is not a backup. The automated backup and repair jobs run as `systemd` services. You must monitor their status.
+
+*   **Manual Checks:**
+    *   Check the status of timers: `systemctl list-timers 'cassandra-*'`
+    *   Check the result of the last run: `systemctl status cassandra-full-backup.service`
+    *   View detailed logs: `journalctl -u cassandra-full-backup.service`
+
+*   **Automated Alerting (Recommended):**
+    *   Integrate your monitoring system (e.g., Prometheus with `node_exporter`'s textfile collector, Datadog) to parse the output of `systemctl status` or the log files in `/var/log/cassandra/`.
+    *   **Create alerts that trigger if a backup service enters a `failed` state.**
+
+### Testing Your Disaster Recovery Plan (Fire Drills)
+
+The only way to trust your backups is to test them regularly.
+
+1.  **Schedule Quarterly Drills:** At least once per quarter, perform a full DR test.
+2.  **Provision an Isolated Environment:** Spin up a new, temporary VPC with a small, isolated Cassandra cluster (e.g., 3 nodes).
+3.  **Execute the DR Playbook:** Follow the "Full Cluster Restore (Cold Start DR)" scenario documented above to restore your production backup into this test environment.
+4.  **Validate Data:** Once restored, run queries to verify that the data is consistent and accessible.
+5.  **Document and Decommission:** Note any issues found during the drill and then tear down the test environment.
+
+### Important Security and Cost Considerations
+
+*   **Encryption Key Management:**
+    *   The `backup_encryption_key` is the most critical secret. It should be managed in Hiera-eyaml.
+    *   **Key Rotation:** To rotate the key, update the encrypted value in Hiera. Puppet will deploy the change. From that point on, **new backups** will use the new key.
+    *   **IMPORTANT:** You must securely store **all old keys** that were used for previous backups. If you need to restore from a backup made a month ago, you will need the key that was active at that time.
+
+*   **S3 Cost Management:**
+    *   S3 costs can grow significantly over time.
+    *   **Implement S3 Lifecycle Policies** on your backup bucket. A typical policy would be:
+        *   Transition backups older than 30 days to a cheaper storage class (e.g., S3 Infrequent Access).
+        *   Transition backups older than 90 days to archival storage (e.g., S3 Glacier Deep Archive).
+        *   Permanently delete backups older than your retention policy (e.g., 1 year).
+
+*   **Cross-Region Disaster Recovery:**
+    *   To protect against a full AWS region failure, enable **S3 Cross-Region Replication** on your backup bucket to automatically copy backups to a secondary DR region.
+    *   Be aware of the data transfer costs associated with both replication and a potential cross-region restore.
 
 ---
 
