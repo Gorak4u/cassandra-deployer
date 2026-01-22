@@ -241,31 +241,21 @@ find_backup_chain() {
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
-# Function to build cqlsh command options based on config
-build_cqlsh_cmd() {
-    local user="$1"
-    local pass="$2"
-    local cmd_parts=("cqlsh")
-
-    if [ "$SSL_ENABLED" == "true" ]; then
-        cmd_parts+=("--ssl")
-    fi
-    cmd_parts+=("-u" "$user" "-p" "$pass")
-    echo "${cmd_parts[*]}"
-}
-
 do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
-    local cqlsh_cmd_array
-    cqlsh_cmd_array=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
+    local cqlsh_cmd_parts=("cqlsh")
+    if [ "$SSL_ENABLED" == "true" ]; then
+        cqlsh_cmd_parts+=("--ssl")
+    fi
+    cqlsh_cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd_array[*]} -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd_parts[*]} -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
@@ -444,9 +434,13 @@ do_full_restore() {
     local CASSANDRA_FINAL_READY=false
     for i in {1..30}; do
         # Use cqlsh with proper credentials as the final check
-        local cqlsh_cmd_array
-        cqlsh_cmd_array=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
-        if "${cqlsh_cmd_array[@]}" -e "SELECT cluster_name from system.local;" > /dev/null 2>&1; then
+        local cqlsh_cmd_parts=("cqlsh")
+        if [ "$SSL_ENABLED" == "true" ]; then
+            cqlsh_cmd_parts+=("--ssl")
+        fi
+        cqlsh_cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
+
+        if "${cqlsh_cmd_parts[@]}" -e "SELECT cluster_name from system.local;" > /dev/null 2>&1; then
             CASSANDRA_FINAL_READY=true
             break
         fi
