@@ -1,4 +1,3 @@
-# @summary Main class for the cassandra_pfpt module.
 class cassandra_pfpt (
   String $cassandra_version,
   String $java_version,
@@ -186,7 +185,6 @@ class cassandra_pfpt (
   # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
-
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
   contain cassandra_pfpt::config
@@ -214,6 +212,7 @@ class cassandra_pfpt (
       password    => $cassandra_password,
       ssl_enabled => $ssl_enabled,
     }
+    Class['cassandra_pfpt::install'] -> Class['cassandra_pfpt::stress']
   }
 
   # Manage the puppet agent itself
