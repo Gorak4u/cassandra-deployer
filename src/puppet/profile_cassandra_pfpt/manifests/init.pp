@@ -20,6 +20,7 @@ class profile_cassandra_pfpt {
   $commitlog_dir                    = lookup('profile_cassandra_pfpt::commitlog_dir', { 'default_value' => '/var/lib/cassandra/commitlog' })
   $saved_caches_dir                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { 'default_value' => '/var/lib/cassandra/saved_caches' })
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
+  $config_dir_path                  = lookup('profile_cassandra_pfpt::config_dir_path', { 'default_value' => '/etc/cassandra/conf' })
   $disable_swap                     = lookup('profile_cassandra_pfpt::disable_swap', { 'default_value' => false })
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
   $listen_address                   = lookup('profile_cassandra_pfpt::listen_address', { 'default_value' => $facts['networking']['ip'] })
@@ -174,6 +175,7 @@ class profile_cassandra_pfpt {
     commitlog_dir                    => $commitlog_dir,
     saved_caches_dir                 => $saved_caches_dir,
     hints_directory                  => $hints_directory,
+    config_dir_path                  => $config_dir_path,
     max_heap_size                    => $max_heap_size,
     gc_type                          => $gc_type,
     extra_jvm_args_override          => $jvm_overrides_from_hiera,
