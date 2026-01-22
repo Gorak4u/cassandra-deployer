@@ -153,6 +153,25 @@ TABLES_BACKED_UP="[]"
 # Define system keyspaces to exclude, allowing system_auth to be backed up
 INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 
+# Create a mapping of clean table names to their UUID-based directory names
+SCHEMA_MAP_FILE="$BACKUP_TEMP_DIR/schema_mapping.json"
+SCHEMA_MAP="{}"
+find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups' | while read -r table_path; do
+    ks_name_map=$(basename "$(dirname "$table_path")")
+    table_dir_name_map=$(basename "$table_path")
+    table_name_map=$(echo "$table_dir_name_map" | rev | cut -d'-' -f2- | rev)
+    
+    is_system_ks_to_skip=true
+    for included_ks_map in $INCLUDED_SYSTEM_KEYSPACES; do
+        if [ "$ks_name_map" == "$included_ks_map" ]; then is_system_ks_to_skip=false; break; fi
+    done
+    if [[ "$ks_name_map" == system* || "$ks_name_map" == dse* || "$ks_name_map" == solr* ]] && [ "$is_system_ks_to_skip" = true ]; then continue; fi
+
+    SCHEMA_MAP=$(echo "$SCHEMA_MAP" | jq --arg key "${ks_name_map}.${table_name_map}" --arg val "$table_dir_name_map" '. + {($key): $val}')
+done
+echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
+log_message "Schema-to-directory mapping generated."
+
 # Use a robust find and while loop to handle any filenames
 find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
     relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
@@ -171,11 +190,12 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
     fi
     
     table_dir_name=$(echo "$relative_path" | cut -d'/' -f2)
+    table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
     
-    log_message "Processing incremental backup for: $ks_name.$table_dir_name"
+    log_message "Processing incremental backup for: $ks_name.$table_name"
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_dir_name/incremental.tar.gz.enc"
+        s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/incremental.tar.gz.enc"
         
         if [ "$UPLOAD_STREAMING" = "true" ]; then
             # Streaming pipeline
@@ -186,30 +206,30 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             
             pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
-                log_message "ERROR: Streaming backup failed for $ks_name.$table_dir_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                log_message "ERROR: Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
                 log_message "Local incremental files will not be deleted."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
             else
-                log_message "Successfully streamed incremental backup for $ks_name.$table_dir_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
-                log_message "Cleaning up local incremental files for $ks_name.$table_dir_name"
+                log_message "Successfully streamed incremental backup for $ks_name.$table_name"
+                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
+                log_message "Cleaning up local incremental files for $ks_name.$table_name"
                 rm -f "$backup_dir"/*
             fi
         else
             # Non-streaming (safer) method
-            local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_dir_name.tar.gz"
-            local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_dir_name.tar.gz.enc"
+            local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
+            local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
             # Step 1: Archive and compress
             if ! tar -C "$backup_dir" -czf "$local_tar_file" .; then
-                log_message "ERROR: Failed to archive incremental backup for $ks_name.$table_dir_name. Skipping."
+                log_message "ERROR: Failed to archive incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 continue
             fi
 
             # Step 2: Encrypt
             if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_dir_name. Skipping."
+                log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 rm -f "$local_tar_file"
                 continue
@@ -217,13 +237,13 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             
             # Step 3: Upload
             if aws s3 cp "$local_enc_file" "$s3_path"; then
-                log_message "Successfully uploaded incremental backup for $ks_name.$table_dir_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
+                log_message "Successfully uploaded incremental backup for $ks_name.$table_name"
+                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
                 
-                log_message "Cleaning up local incremental files for $ks_name.$table_dir_name"
+                log_message "Cleaning up local incremental files for $ks_name.$table_name"
                 rm -f "$backup_dir"/*
             else
-                log_message "ERROR: Failed to upload incremental backup for $ks_name.$table_dir_name. Local files will not be deleted."
+                log_message "ERROR: Failed to upload incremental backup for $ks_name.$table_name. Local files will not be deleted."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
             fi
 
@@ -231,9 +251,9 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             rm -f "$local_tar_file" "$local_enc_file"
         fi
     else
-        log_message "INFO: Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_dir_name."
+        log_message "INFO: Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_name."
         log_message "IMPORTANT: Local incremental files at '$backup_dir' are NOT deleted for non-S3 backends."
-        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
+        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
     fi
 done
 
@@ -288,6 +308,14 @@ else
             log_message "ERROR: Failed to upload manifest to S3. The backup is not properly indexed."
         else
             log_message "Manifest uploaded successfully."
+        fi
+
+        log_message "Uploading schema mapping file..."
+        SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
+        if ! aws s3 cp "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
+            log_message "ERROR: Failed to upload schema mapping file to S3."
+        else
+            log_message "Schema mapping file uploaded successfully."
         fi
     fi
 fi

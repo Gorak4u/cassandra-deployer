@@ -295,7 +295,7 @@ do_full_restore() {
     log_message "3. Creating temporary restore directory: $TEMP_RESTORE_DIR"
     mkdir -p "$TEMP_RESTORE_DIR"
 
-    # === PHASE 2: TOKEN RESTORATION & DATA DOWNLOAD (OFFLINE) ===
+    # === PHASE 2: CONFIGURATION & DATA DOWNLOAD (OFFLINE) ===
     log_message "--- PHASE 2: CONFIGURATION & DATA DOWNLOAD ---"
     
     log_message "4. Downloading manifest from base full backup to extract tokens..."
@@ -329,15 +329,38 @@ do_full_restore() {
     log_message "Successfully configured node with $token_count tokens."
 
     log_message "6. Downloading and extracting all data from backup chain..."
+    # Download the schema mapping first
+    local SCHEMA_MAP_JSON
+    SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    if [ -z "$SCHEMA_MAP_JSON" ]; then
+        log_message "ERROR: Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
+        exit 1
+    fi
+    log_message "Schema-to-directory mapping downloaded."
+
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
+        # List all S3 objects ending in .tar.gz.enc for the current backup timestamp
         aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
-            ks_and_table_path=$(dirname "$archive_key") 
-            table_dir=$(basename "$ks_and_table_path")
-            ks_dir=$(basename "$(dirname "$ks_and_table_path")")
             
-            # The output directory should mirror the cassandra data structure
-            output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_dir"
+            # Extract keyspace and table name from the clean S3 path
+            local s3_path_no_host
+            s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
+            local ks_dir
+            ks_dir=$(echo "$s3_path_no_host" | cut -d'/' -f1)
+            local table_name
+            table_name=$(echo "$s3_path_no_host" | cut -d'/' -f2)
+
+            # Look up the correct UUID-based directory name from the map
+            local table_uuid_dir
+            table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
+            if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
+                log_message "WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key"
+                continue
+            fi
+            
+            # The local output directory must use the UUID
+            local output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_uuid_dir"
             
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
         done
@@ -462,22 +485,44 @@ do_granular_restore() {
     fi
     log_message "Disk usage is sufficient to begin."
 
+    # Download the schema mapping first
+    local SCHEMA_MAP_JSON
+    SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    if [ -z "$SCHEMA_MAP_JSON" ]; then
+        log_message "ERROR: Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
+        exit 1
+    fi
+    log_message "Schema-to-directory mapping downloaded."
+
     # Step 1: Download and extract all data from the entire chain.
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
+        # Only list objects under the specified keyspace
         aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
+            # The archive_key is now relative to the bucket, e.g., source_host/backup_ts/ks/tbl/tbl.tar.gz.enc
+            
             # If a table name is specified, only process archives for that table.
-            # This is a simple string match on the path.
-            if [ -n "$TABLE_NAME" ] && [[ ! "$archive_key" =~ "/${TABLE_NAME}-" ]]; then
+            if [ -n "$TABLE_NAME" ] && [[ ! "$archive_key" =~ "/${TABLE_NAME}/" ]]; then
                 continue
             fi
             
-            ks_and_table_path=$(dirname "$archive_key")
-            table_dir=$(basename "$ks_and_table_path")
-            ks_dir=$(basename "$(dirname "$ks_and_table_path")")
+            local s3_path_no_host
+            s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
+            local ks_dir
+            ks_dir=$(echo "$s3_path_no_host" | cut -d'/' -f1)
+            local table_name
+            table_name=$(echo "$s3_path_no_host" | cut -d'/' -f2)
 
-            output_dir="$base_output_dir/$ks_dir/$table_dir"
+            # Look up the correct UUID-based directory name from the map
+            local table_uuid_dir
+            table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
+            if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
+                log_message "WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key"
+                continue
+            fi
+
+            local output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
             
             download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
         done
