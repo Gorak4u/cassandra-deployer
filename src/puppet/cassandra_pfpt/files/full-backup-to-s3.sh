@@ -39,7 +39,9 @@ LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
 UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
-
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -205,15 +207,17 @@ TABLES_BACKED_UP="[]"
 UPLOAD_ERRORS=0
 
 # Determine if SSL is needed for cqlsh
-CQLSH_CONFIG="/root/.cassandra/cqlshrc"
 CQLSH_SSL_OPT=""
-if [ -f "$CQLSH_CONFIG" ] && grep -q '\[ssl\]' "$CQLSH_CONFIG"; then
-    log_message "INFO: SSL section found in cqlshrc, using --ssl for cqlsh schema dump."
+if [ "$SSL_ENABLED" == "true" ]; then
+    log_message "INFO: SSL is enabled, using --ssl for cqlsh schema dump."
     CQLSH_SSL_OPT="--ssl"
 fi
 
+# Build cqlsh command with authentication
+CQLSH_COMMAND="cqlsh ${CQLSH_SSL_OPT} -u '${CASSANDRA_USER}' -p '${CASSANDRA_PASSWORD}'"
+
 # Make keyspace discovery more robust by using cqlsh.
-KEYSPACES_LIST=$(cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE KEYSPACES;" 2>/dev/null | xargs)
+KEYSPACES_LIST=$(eval "$CQLSH_COMMAND -e 'DESCRIBE KEYSPACES;'" 2>/dev/null | xargs)
 
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
@@ -233,55 +237,60 @@ else
             # Check if snapshot dir exists and is not empty
             if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
                 log_message "Backing up table: $ks.$table_name"
-                s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.gz.enc"
                 
-                if [ "$UPLOAD_STREAMING" = "true" ]; then
-                    # Streaming pipeline: tar -> gzip -> openssl -> aws s3
-                    tar -C "$snapshot_dir" -c . | \
-                    gzip | \
-                    openssl enc -aes-256-cbc -salt -pbkdf2 -pass "file:$TMP_KEY_FILE" | \
-                    aws s3 cp - "$s3_path"
-                    
-                    # Check all exit codes in the pipeline
-                    pipeline_status=("${PIPESTATUS[@]}")
-                    if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
-                        log_message "ERROR: Streaming backup failed for $ks.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
-                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                if [ "$BACKUP_BACKEND" == "s3" ]; then
+                    s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.gz.enc"
+                    if [ "$UPLOAD_STREAMING" = "true" ]; then
+                        # Streaming pipeline: tar -> gzip -> openssl -> aws s3
+                        tar -C "$snapshot_dir" -c . | \
+                        gzip | \
+                        openssl enc -aes-256-cbc -salt -pbkdf2 -pass "file:$TMP_KEY_FILE" | \
+                        aws s3 cp - "$s3_path"
+                        
+                        # Check all exit codes in the pipeline
+                        pipeline_status=("${PIPESTATUS[@]}")
+                        if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
+                            log_message "ERROR: Streaming backup failed for $ks.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                        else
+                            log_message "Successfully streamed backup for $ks.$table_name"
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                        fi
                     else
-                        log_message "Successfully streamed backup for $ks.$table_name"
-                        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                        # Non-streaming (safer) method using temporary files
+                        local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
+                        local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
+
+                        # Step 1: Archive and compress
+                        if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
+                            log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
+                            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                            continue
+                        fi
+
+                        # Step 2: Encrypt
+                        if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+                            log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
+                            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                            rm -f "$local_tar_file"
+                            continue
+                        fi
+                        
+                        # Step 3: Upload
+                        if ! aws s3 cp "$local_enc_file" "$s3_path"; then
+                            log_message "ERROR: Failed to upload backup for $ks.$table_name"
+                            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                        else
+                            log_message "Successfully uploaded backup for $ks.$table_name"
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                        fi
+
+                        # Step 4: Cleanup local temp files
+                        rm -f "$local_tar_file" "$local_enc_file"
                     fi
                 else
-                    # Non-streaming (safer) method using temporary files
-                    local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
-                    local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
-
-                    # Step 1: Archive and compress
-                    if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
-                        log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
-                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                        continue
-                    fi
-
-                    # Step 2: Encrypt
-                    if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                        log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
-                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                        rm -f "$local_tar_file"
-                        continue
-                    fi
-                    
-                    # Step 3: Upload
-                    if ! aws s3 cp "$local_enc_file" "$s3_path"; then
-                        log_message "ERROR: Failed to upload backup for $ks.$table_name"
-                        UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                    else
-                        log_message "Successfully uploaded backup for $ks.$table_name"
-                        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
-                    fi
-
-                    # Step 4: Cleanup local temp files
-                    rm -f "$local_tar_file" "$local_enc_file"
+                    log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks.$table_name."
+                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
                 fi
             fi
         done
@@ -340,7 +349,7 @@ log_message "Manifest created successfully."
 # 5. Archive the schema
 log_message "Backing up schema..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
-if timeout 30 cqlsh ${CQLSH_SSL_OPT} -e "DESCRIBE SCHEMA;" > "$SCHEMA_FILE"; then
+if eval "timeout 30 $CQLSH_COMMAND -e 'DESCRIBE SCHEMA;'" > "$SCHEMA_FILE"; then
   log_message "Schema backup created successfully."
 else
   log_message "WARNING: Failed to dump schema. Backup manifest will be uploaded without it."

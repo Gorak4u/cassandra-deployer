@@ -58,12 +58,15 @@ fi
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
+CASSANDRA_CONF_DIR=$(jq -r '.cassandra_conf_dir' "$CONFIG_FILE")
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
-CASSANDRA_USER_CONFIG=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-CASSANDRA_PASSWORD_CONFIG=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
+BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 
 
 # Derive restore paths from the main data directory parameter
@@ -224,22 +227,12 @@ find_backup_chain() {
 do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
-    local cqlsh_config="/root/.cassandra/cqlshrc"
     local cqlsh_ssl_opt=""
-    local cqlsh_auth_opt=""
-
-    if [ -f "$cqlsh_config" ]; then
-        if grep -q '\[ssl\]' "$cqlsh_config"; then
-            cqlsh_ssl_opt="--ssl"
-        fi
-        if grep -q '\[authentication\]' "$cqlsh_config"; then
-             local cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlsh_config")
-             local cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlsh_config")
-             if [ -n "$cqlsh_user" ] && [ -n "$cqlsh_pass" ]; then
-                cqlsh_auth_opt="-u '${cqlsh_user}' -p '${cqlsh_pass}'"
-             fi
-        fi
+    if [ "$SSL_ENABLED" == "true" ]; then
+        cqlsh_ssl_opt="--ssl"
     fi
+    
+    local cqlsh_auth_opt="-u '${CASSANDRA_USER}' -p '${CASSANDRA_PASSWORD}'"
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
@@ -324,9 +317,9 @@ do_full_restore() {
     log_message "All data from backup chain extracted."
     
     log_message "4. Setting permissions..."
-    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_DATA_DIR"
-    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_COMMITLOG_DIR"
-    chown -R "$CASSANDRA_USER_CONFIG:$CASSANDRA_USER_CONFIG" "$CASSANDRA_CACHES_DIR"
+    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
+    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
+    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_CACHES_DIR"
 
     log_message "5. Starting Cassandra service..."
     systemctl start cassandra
@@ -449,50 +442,24 @@ do_granular_restore() {
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
             
-            CASSANDRA_CONF_DIR=""
-            # Try to discover the config path from the running Cassandra process
-            CASSANDRA_PID=$(pgrep -f "org.apache.cassandra.service.CassandraDaemon")
-            if [ -n "$CASSANDRA_PID" ]; then
-                CONFIG_PATH=$(ps -p $CASSANDRA_PID -o command= | grep -o -- "-Dcassandra.config=[^ ]*" | cut -d= -f2)
-                if [ -n "$CONFIG_PATH" ]; then
-                    CASSANDRA_CONF_DIR=$(dirname "$CONFIG_PATH")
-                fi
-            fi
-
-            # If dynamic discovery fails, fall back to the default path with a warning
-            if [ -z "$CASSANDRA_CONF_DIR" ]; then
-                log_message "WARNING: Could not dynamically determine Cassandra config directory. Falling back to default '/etc/cassandra/conf'."
-                CASSANDRA_CONF_DIR="/etc/cassandra/conf"
-            fi
-
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
             
             local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
             
-            local cqlshrc_path="/root/.cassandra/cqlshrc"
-            if [ -f "$cqlshrc_path" ]; then
-                log_message "Found cqlshrc file, parsing for credentials..."
-                local cqlsh_user
-                cqlsh_user=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^username/ {print $2; f=0}' "$cqlshrc_path")
-                local cqlsh_pass
-                cqlsh_pass=$(awk -F' *= *' '/^\[authentication\]/ {f=1} f && /^password/ {print $2; f=0}' "$cqlshrc_path")
-                
-                if [ -n "$cqlsh_user" ] && [ -n "$cqlsh_pass" ]; then
-                    log_message "Using username '$cqlsh_user' from cqlshrc."
-                    loader_cmd+=("-u" "$cqlsh_user" "-pw" "$cqlsh_pass")
-                else
-                    log_message "WARNING: cqlshrc found but username/password not set in [authentication] section."
-                fi
-            else
-                log_message "WARNING: cqlshrc file not found. sstableloader may fail if authentication is required."
+            log_message "Using username '$CASSANDRA_USER' for sstableloader."
+            loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
+
+            if [ "$SSL_ENABLED" == "true" ]; then
+                log_message "SSL is enabled, providing SSL options to sstableloader."
+                loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
             loader_cmd+=("$path_to_load")
 
             log_message "Executing: ${loader_cmd[*]}"
             
-            if "${loader_cmd[@]}"; then
+            if eval "${loader_cmd[*]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
                 log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
@@ -507,6 +474,13 @@ do_granular_restore() {
 # --- Main Execution ---
 
 log_message "--- Starting Point-in-Time Restore Manager ---"
+
+if [ "$BACKUP_BACKEND" != "s3" ]; then
+    log_message "ERROR: This restore script only supports the 's3' backup backend."
+    log_message "The current backup_backend is configured as '$BACKUP_BACKEND'."
+    exit 1
+fi
+
 find_backup_chain
 
 log_message "Backup chain to be restored (chronological order):"
