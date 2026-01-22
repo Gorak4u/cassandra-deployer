@@ -363,8 +363,7 @@ do_full_restore() {
     log_message "Waiting for Cassandra to initialize and come online..."
     local CASSANDRA_READY=false
     for i in {1..60}; do # Wait up to 10 minutes
-        # Check if the process is running and if the node is in UN state
-        if pgrep -f "Dcassandra.logdir" > /dev/null && nodetool status 2>/dev/null | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
+        if nodetool status 2>/dev/null | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
             CASSANDRA_READY=true
             break
         fi
