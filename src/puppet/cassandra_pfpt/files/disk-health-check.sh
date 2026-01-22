@@ -36,12 +36,12 @@ EOF
 
 function warning() {
   local msg="$@"
-  printf "$BOLD$COL_YELLOW""WARNING: $msg""$RESET\n" >&2
+  printf "$BOLD$COL_YELLOW""WARNING: %s""$RESET\n" "$msg" >&2
 }
 
 function error() {
   local msg="$@"
-  printf "$BOLD$COL_RED""ERROR: $msg""$RESET\n" >&2
+  printf "$BOLD$COL_RED""ERROR: %s""$RESET\n" "$msg" >&2
 }
 
 function get_free_disk_space() {
