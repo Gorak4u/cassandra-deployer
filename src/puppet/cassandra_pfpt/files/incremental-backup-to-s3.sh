@@ -156,7 +156,7 @@ INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 # Create a mapping of clean table names to their UUID-based directory names
 SCHEMA_MAP_FILE="$BACKUP_TEMP_DIR/schema_mapping.json"
 SCHEMA_MAP="{}"
-find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups' | while read -r table_path; do
+while IFS= read -r table_path; do
     ks_name_map=$(basename "$(dirname "$table_path")")
     table_dir_name_map=$(basename "$table_path")
     table_name_map=$(echo "$table_dir_name_map" | rev | cut -d'-' -f2- | rev)
@@ -168,7 +168,8 @@ find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapsho
     if [[ "$ks_name_map" == system* || "$ks_name_map" == dse* || "$ks_name_map" == solr* ]] && [ "$is_system_ks_to_skip" = true ]; then continue; fi
 
     SCHEMA_MAP=$(echo "$SCHEMA_MAP" | jq --arg key "${ks_name_map}.${table_name_map}" --arg val "$table_dir_name_map" '. + {($key): $val}')
-done
+done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups')
+
 echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
 log_message "Schema-to-directory mapping generated."
 
@@ -212,6 +213,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             else
                 log_message "Successfully streamed incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
+                
                 log_message "Cleaning up local incremental files for $ks_name.$table_name"
                 rm -f "$backup_dir"/*
             fi

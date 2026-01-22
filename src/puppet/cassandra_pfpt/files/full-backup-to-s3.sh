@@ -217,7 +217,7 @@ INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 # Create a mapping of clean table names to their UUID-based directory names
 SCHEMA_MAP_FILE="$BACKUP_TEMP_DIR/schema_mapping.json"
 SCHEMA_MAP="{}"
-find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups' | while read -r table_path; do
+while IFS= read -r table_path; do
     ks_name_map=$(basename "$(dirname "$table_path")")
     table_dir_name_map=$(basename "$table_path")
     table_name_map=$(echo "$table_dir_name_map" | rev | cut -d'-' -f2- | rev)
@@ -229,9 +229,11 @@ find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapsho
     if [[ "$ks_name_map" == system* || "$ks_name_map" == dse* || "$ks_name_map" == solr* ]] && [ "$is_system_ks_to_skip" = true ]; then continue; fi
 
     SCHEMA_MAP=$(echo "$SCHEMA_MAP" | jq --arg key "${ks_name_map}.${table_name_map}" --arg val "$table_dir_name_map" '. + {($key): $val}')
-done
+done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups')
+
 echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
 log_message "Schema-to-directory mapping generated."
+
 
 # Use a more robust find command to discover all non-empty snapshot directories directly.
 # This avoids fragile parsing of `cqlsh` output.
@@ -258,7 +260,7 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
         continue
     fi
     
-    log_message "Backing up table: $ks_name.$table_name (from directory $table_dir_name)"
+    log_message "Backing up table: $ks_name.$table_name"
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/$table_name.tar.gz.enc"
