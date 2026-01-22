@@ -246,7 +246,7 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
             # Streaming pipeline: tar -> gzip -> openssl -> aws s3
             tar -C "$snapshot_dir" -c . | \
             gzip | \
-            openssl enc -aes-256-cbc -salt -pbkdf2 -pass "file:$TMP_KEY_FILE" | \
+            openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
             
             # Check all exit codes in the pipeline
@@ -271,7 +271,7 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
             fi
 
             # Step 2: Encrypt
-            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_message "ERROR: Failed to encrypt $ks_name/$table_dir_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 rm -f "$local_tar_file"
@@ -307,6 +307,11 @@ log_message "Creating backup manifest at $MANIFEST_FILE..."
 
 # Tolerate failures in nodetool for manifest generation
 CLUSTER_NAME=$(nodetool describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
+if [ "$CLUSTER_NAME" == "Unknown" ]; then
+    log_message "ERROR: Could not get cluster name from 'nodetool describecluster'. Cannot create a valid manifest."
+    exit 1
+fi
+
 
 if [ -n "$LISTEN_ADDRESS" ]; then
     NODE_IP="$LISTEN_ADDRESS"
@@ -380,3 +385,4 @@ else
 fi
 
 exit 0
+

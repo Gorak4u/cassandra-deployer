@@ -151,14 +151,22 @@ MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 UPLOAD_ERRORS=0
 TABLES_BACKED_UP="[]"
 # Define system keyspaces to exclude, allowing system_auth to be backed up
-SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 
 # Use a robust find and while loop to handle any filenames
 find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
     relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
     ks_name=$(echo "$relative_path" | cut -d'/' -f1)
 
-    if [[ " $SYSTEM_KEYSPACES " =~ " $ks_name " ]]; then
+    is_system_ks=false
+    for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
+        if [ "$ks_name" == "$included_ks" ]; then
+            is_system_ks=true
+            break
+        fi
+    done
+
+    if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then
         continue
     fi
     
@@ -173,7 +181,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             # Streaming pipeline
             tar -C "$backup_dir" -c . | \
             gzip | \
-            openssl enc -aes-256-cbc -salt -pbkdf2 -pass "file:$TMP_KEY_FILE" | \
+            openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
             
             pipeline_status=("${PIPESTATUS[@]}")
@@ -183,7 +191,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
             else
                 log_message "Successfully streamed incremental backup for $ks_name.$table_dir_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name.$table_dir_name\"]")
+                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
                 log_message "Cleaning up local incremental files for $ks_name.$table_dir_name"
                 rm -f "$backup_dir"/*
             fi
@@ -200,7 +208,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             fi
 
             # Step 2: Encrypt
-            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_dir_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 rm -f "$local_tar_file"
@@ -210,7 +218,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             # Step 3: Upload
             if aws s3 cp "$local_enc_file" "$s3_path"; then
                 log_message "Successfully uploaded incremental backup for $ks_name.$table_dir_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name.$table_dir_name\"]")
+                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
                 
                 log_message "Cleaning up local incremental files for $ks_name.$table_dir_name"
                 rm -f "$backup_dir"/*
@@ -225,7 +233,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
     else
         log_message "INFO: Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_dir_name."
         log_message "IMPORTANT: Local incremental files at '$backup_dir' are NOT deleted for non-S3 backends."
-        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name.$table_dir_name\"]")
+        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_dir_name\"]")
     fi
 done
 
