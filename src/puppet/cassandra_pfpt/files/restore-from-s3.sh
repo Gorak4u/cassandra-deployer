@@ -73,7 +73,7 @@ CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 
@@ -479,8 +479,6 @@ do_granular_restore() {
         mkdir -p "$base_output_dir"
     fi
     
-    local path_to_load="$base_output_dir"
-
     log_message "Performing pre-flight disk usage check on $check_path..."
     if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 80 -c 90; then
         log_message "ERROR: Insufficient disk space on the target volume. Aborting granular restore."
@@ -527,7 +525,9 @@ do_granular_restore() {
 
             local output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
             
-            download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
+            if ! download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"; then
+                log_message "ERROR: Failed to download/extract table data for ${ks_dir}.${table_name}. Restore cannot proceed reliably for this table."
+            fi
         done
     done
     
@@ -536,47 +536,50 @@ do_granular_restore() {
         log_message "--- Granular Restore (Download Only) Finished Successfully ---"
         log_message "All data has been downloaded and decrypted to: $base_output_dir"
     else # download_and_restore
-        log_message "All data has been downloaded. Preparing to load into cluster..."
-        
-        log_message "Handling potential table UUID mismatches and loading data per table..."
+        log_message "All data has been downloaded. Preparing to load into cluster by iterating through each downloaded table."
         
         # Check if any tables were actually downloaded before proceeding
         local downloaded_tables_exist
-        downloaded_tables_exist=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d -print -quit)
+        downloaded_tables_exist=$(find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -n 1)
         if [ -z "$downloaded_tables_exist" ]; then
             log_message "WARNING: No data was downloaded for the specified keyspace/table. Nothing to load."
             exit 0
         fi
 
-        # Use process substitution to avoid subshell issues with the while loop
-        while IFS= read -r source_table_dir; do
+        # Use process substitution to avoid subshell issues with the while loop.
+        # This loop now iterates over each downloaded table directory.
+        find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | while IFS= read -r source_table_dir; do
             local downloaded_table_name_with_uuid
             downloaded_table_name_with_uuid=$(basename "$source_table_dir")
             local downloaded_table_name
             downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | rev | cut -d'-' -f2- | rev)
 
-            # If a single table restore is requested, skip all other tables.
+            # If a single table restore is requested, skip all other tables in the loop.
             if [ -n "$TABLE_NAME" ] && [ "$downloaded_table_name" != "$TABLE_NAME" ]; then
                 continue
             fi
             
             log_message "Processing table for restore: $KEYSPACE_NAME.$downloaded_table_name"
 
+            # Find the directory of the live table on the running node to get its current UUID.
             local live_table_dir
-            live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$downloaded_table_name-*" -print -quit)
+            live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$downloaded_table_name-*" 2>/dev/null | head -n 1)
             
-            if [ -z "$live_table_dir" ]; then
-                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name' on this node. Skipping restore for this table. Ensure the schema is created."
+            if [ -z "$live_table_dir" ];
+            then
+                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name' on this node. Skipping restore for this table. Ensure the schema is created in the cluster."
                 continue
             fi
 
             local live_table_dirname
             live_table_dirname=$(basename "$live_table_dir")
+            
+            # This is the path where the renamed directory should be.
             local final_table_dir_path
             final_table_dir_path="$(dirname "$source_table_dir")/$live_table_dirname"
 
             if [ "$downloaded_table_name_with_uuid" != "$live_table_dirname" ]; then
-                log_message "UUID mismatch for '$downloaded_table_name'. Renaming downloaded directory."
+                log_message "UUID mismatch for '$downloaded_table_name'. Renaming downloaded directory to match live cluster."
                 log_message "From: $source_table_dir"
                 log_message "To:   $final_table_dir_path"
                 mv "$source_table_dir" "$final_table_dir_path"
@@ -590,31 +593,36 @@ do_granular_restore() {
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
+            # Build the sstableloader command for THIS table only.
             local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
-            if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" && -n "$CASSANDRA_PASSWORD" && "$CASSANDRA_PASSWORD" != "null" ]]; then
+            if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
             fi
             
             if [ "$SSL_ENABLED" == "true" ]; then
-                log_message "SSL is enabled, providing SSL options to sstableloader."
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            # The path for sstableloader is now the specific, renamed table directory
+            # The path for sstableloader is now the specific, renamed table directory.
             log_message "Pointing sstableloader to specific table directory: $final_table_dir_path"
             loader_cmd+=("$final_table_dir_path")
 
             log_message "The following command will be executed:"
-            echo "${loader_cmd[*]}" | tee -a "$RESTORE_LOG_FILE"
+            # Use printf for safer printing of command with spaces
+            printf '%q ' "${loader_cmd[@]}"
+            echo "" # Newline after command
             
             if ! "${loader_cmd[@]}"; then
-                log_message "ERROR: sstableloader failed for table $KEYSPACE_NAME.$downloaded_table_name. The downloaded data is still available in $path_to_load for inspection. Continuing to next table."
+                log_message "ERROR: sstableloader failed for table $KEYSPACE_NAME.$downloaded_table_name. The downloaded data is still available in $base_output_dir for inspection. Continuing to next table."
             else
                  log_message "Successfully loaded data for table $KEYSPACE_NAME.$downloaded_table_name."
+                 # Clean up the specific table directory after successful load to save space
+                 rm -rf "$final_table_dir_path"
+                 log_message "Cleaned up temporary data for $downloaded_table_name."
             fi
 
-        done < <(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d)
+        done
 
         log_message "--- Granular Restore (Download & Restore) Finished ---"
     fi
