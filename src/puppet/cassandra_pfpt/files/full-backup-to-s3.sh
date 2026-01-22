@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # Performs a full snapshot backup and uploads it to a simulated S3 bucket.
 
@@ -91,7 +92,7 @@ cleanup_old_snapshots() {
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     # Filter out headers and footers from nodetool output before processing
-    nodetool listsnapshots | grep -Ev '^(Snapshot Details:|Snapshot name:|Total snapshots:|There are no snapshots)$' | while read -r snapshot_line; do
+    nodetool listsnapshots | grep -Ev '^(Snapshot Details|Total snapshots|There are no snapshots|---)' | grep -v 'Keyspace name' | while IFS= read -r snapshot_line; do
       if [[ -z "$snapshot_line" ]]; then
           continue
       fi
@@ -218,7 +219,9 @@ fi
 CQLSH_COMMAND="cqlsh ${CQLSH_SSL_OPT} -u '${CASSANDRA_USER}' -p '${CASSANDRA_PASSWORD}'"
 
 # Make keyspace discovery more robust by using cqlsh.
-KEYSPACES_LIST=$(eval "$CQLSH_COMMAND -e 'DESCRIBE KEYSPACES;'" 2>/dev/null | xargs)
+# The || true prevents the script from exiting if cqlsh fails, allowing us to log a warning instead.
+KEYSPACES_LIST=$(eval "$CQLSH_COMMAND -e 'DESCRIBE KEYSPACES;'" 2>>"$LOG_FILE" || true)
+
 
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
@@ -234,7 +237,7 @@ else
         log_message "Processing keyspace: $ks"
         
         # Use a robust find and while loop to handle table directories
-        find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" -print0 | while IFS= read -r -d $'\0' table_dir; do
+        find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" -print0 2>/dev/null | while IFS= read -r -d $'\0' table_dir; do
             table_name=$(basename "$table_dir" | cut -d'-' -f1)
             snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
             
@@ -398,3 +401,5 @@ else
 fi
 
 exit 0
+
+    
