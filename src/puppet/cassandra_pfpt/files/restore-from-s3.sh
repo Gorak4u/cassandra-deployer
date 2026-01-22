@@ -438,7 +438,7 @@ download_and_extract_table() {
         return 1
     fi
 
-    if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
         log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
