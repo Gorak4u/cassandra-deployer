@@ -313,8 +313,13 @@ do_full_restore() {
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
     
+    log_message "3. Setting correct ownership for Cassandra directories..."
+    chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
+    chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
+    chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
+
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_staging_$$"
-    log_message "3. Creating temporary staging directory: $TEMP_RESTORE_DIR"
+    log_message "4. Creating temporary staging directory: $TEMP_RESTORE_DIR"
     mkdir -p "$TEMP_RESTORE_DIR"
 
     # === PHASE 2: DATA STAGING (OFFLINE) ===
@@ -323,7 +328,7 @@ do_full_restore() {
     # 2a. Download and Stage Schema
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     local staged_schema_path="$TEMP_RESTORE_DIR/schema.cql"
-    log_message "4. Downloading schema to staging area..."
+    log_message "5. Downloading schema to staging area..."
     if ! aws s3 cp "$schema_s3_path" "$staged_schema_path"; then
         log_message "ERROR: Failed to download schema.cql. Aborting."
         exit 1
@@ -331,7 +336,7 @@ do_full_restore() {
     log_message "Schema staged successfully."
 
     # 2b. Download and Stage Data
-    log_message "5. Downloading and extracting all data from backup chain to staging area..."
+    log_message "6. Downloading and extracting all data from backup chain to staging area..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
@@ -354,13 +359,13 @@ do_full_restore() {
     # === PHASE 3: LOADING AND FINALIZATION (ONLINE) ===
     log_message "--- PHASE 3: LOADING AND FINALIZATION ---"
 
-    log_message "6. Preparing Cassandra for schema replay..."
+    log_message "7. Preparing Cassandra for schema replay..."
     # Clean up any previous flags first
     sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     # Add the new flag
     echo "-Dcassandra.replay_schema_from_file=$staged_schema_path" >> "$JVM_OPTIONS_FILE"
 
-    log_message "7. Starting Cassandra service with schema replay..."
+    log_message "8. Starting Cassandra service with schema replay..."
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize and join the cluster..."
@@ -386,7 +391,7 @@ do_full_restore() {
     fi
     log_message "Cassandra is ready. Schema has been applied."
 
-    log_message "8. Loading data into cluster with sstableloader..."
+    log_message "9. Loading data into cluster with sstableloader..."
     
     export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
     log_message "Using Cassandra config directory: $CASSANDRA_CONF"
@@ -413,7 +418,7 @@ do_full_restore() {
     fi
 
     log_message "sstableloader completed successfully."
-    log_message "9. Restore complete. The staging directory $TEMP_RESTORE_DIR will now be removed."
+    log_message "10. Restore complete. The staging directory $TEMP_RESTORE_DIR will now be removed."
     # The trap will handle the final cleanup of the staging directory.
     
     log_message "--- Full Restore Process Finished Successfully ---"
@@ -622,3 +627,5 @@ case $MODE in
 esac
 
 exit 0
+
+    
