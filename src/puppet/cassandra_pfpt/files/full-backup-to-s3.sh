@@ -218,17 +218,14 @@ INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 # This avoids fragile parsing of `cqlsh` output.
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | while IFS= read -r -d $'\0' snapshot_dir; do
     # snapshot_dir is e.g., /var/lib/cassandra/data/my_keyspace/my_table-uuid/snapshots/backup_tag
-    local path_without_prefix
     path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
     # e.g., my_keyspace/my_table-uuid/snapshots/backup_tag
 
-    local ks_name
     ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
-    local table_dir_name
     table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
 
     # Filter out non-essential system keyspaces
-    local is_system_ks=false
+    is_system_ks=false
     for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
         if [ "$ks_name" == "$included_ks" ]; then
             is_system_ks=true
