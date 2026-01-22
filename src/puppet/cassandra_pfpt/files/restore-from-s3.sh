@@ -21,7 +21,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for tool in jq aws sstableloader openssl pgrep ps /usr/local/bin/disk-health-check.sh; do
+for tool in jq aws sstableloader openssl pgrep ps cqlsh /usr/local/bin/disk-health-check.sh; do
     if ! command -v $tool &>/dev/null; then
         log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
         exit 1
@@ -228,23 +228,28 @@ find_backup_chain() {
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
+# Function to build cqlsh command options based on config
+build_cqlsh_cmd() {
+    local cmd_parts=("cqlsh")
+    if [ "$SSL_ENABLED" == "true" ]; then
+        cmd_parts+=("--ssl")
+    fi
+    cmd_parts+=("-u" "'$CASSANDRA_USER'" "-p" "'$CASSANDRA_PASSWORD'")
+    echo "${cmd_parts[*]}"
+}
 
 do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
-    local cqlsh_ssl_opt=""
-    if [ "$SSL_ENABLED" == "true" ]; then
-        cqlsh_ssl_opt="--ssl"
-    fi
-    
-    local cqlsh_auth_opt="-u '${CASSANDRA_USER}' -p '${CASSANDRA_PASSWORD}'"
+    local cqlsh_cmd
+    cqlsh_cmd=$(build_cqlsh_cmd)
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: cqlsh ${cqlsh_auth_opt} ${cqlsh_ssl_opt} -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: $cqlsh_cmd -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
@@ -291,10 +296,9 @@ do_full_restore() {
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
 
-    log_message "2a. Verifying disk space after cleanup..."
     local post_cleanup_usage
     post_cleanup_usage=$(df "$CASSANDRA_DATA_DIR" --output=pcent | tail -1 | tr -cd '[:digit:]')
-    local max_allowed_usage=10 # Allow up to 10% usage for filesystem overhead
+    local max_allowed_usage=10
 
     if [[ "$post_cleanup_usage" -gt "$max_allowed_usage" ]]; then
         log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < ${max_allowed_usage}%, but it is ${post_cleanup_usage}%. Aborting."
@@ -302,7 +306,50 @@ do_full_restore() {
     fi
     log_message "Post-cleanup disk space is sufficient (usage is ${post_cleanup_usage}%)."
 
-    log_message "3. Downloading and extracting data from backup chain..."
+    # --- Phase 1: Schema Restore ---
+    log_message "3. Starting Cassandra to create schema..."
+    systemctl start cassandra
+    
+    log_message "Waiting for Cassandra to initialize for schema restore..."
+    local cqlsh_cmd
+    cqlsh_cmd=$(build_cqlsh_cmd)
+    local CASSANDRA_READY=false
+    for i in {1..30}; do # Wait up to 5 minutes
+        if eval "$cqlsh_cmd -e 'select cluster_name from system.local;'" >/dev/null 2>&1; then
+            CASSANDRA_READY=true
+            break
+        fi
+        log_message "Waiting for CQL port to be available... (attempt $i of 30)"
+        sleep 10
+    done
+
+    if [ "$CASSANDRA_READY" = false ]; then
+        log_message "ERROR: Cassandra did not become ready for schema restore. Check system logs."
+        exit 1
+    fi
+    log_message "Cassandra is ready. Applying schema..."
+
+    local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
+    local schema_local_path="/tmp/schema_restore_$$.cql"
+    
+    if ! aws s3 cp "$schema_s3_path" "$schema_local_path"; then
+        log_message "ERROR: Failed to download schema.cql. Aborting."
+        exit 1
+    fi
+
+    if ! eval "$cqlsh_cmd -f $schema_local_path"; then
+        log_message "ERROR: Failed to apply schema from $schema_local_path. Aborting."
+        rm -f "$schema_local_path"
+        exit 1
+    fi
+    rm -f "$schema_local_path"
+    log_message "Schema applied successfully."
+
+    # --- Phase 2: Data Restore ---
+    log_message "4. Stopping Cassandra to restore data files..."
+    systemctl stop cassandra
+
+    log_message "5. Downloading and extracting data into schema-generated directories..."
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
     mkdir -p "$TEMP_RESTORE_DIR"
     
@@ -312,7 +359,6 @@ do_full_restore() {
         table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            # Safety check inside the loop to monitor disk usage during restore
             log_message "Checking disk usage before downloading $archive_key..."
             if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 90 -c 95; then
                 log_message "ERROR: Disk usage is high. Aborting mid-restore to prevent filling the disk."
@@ -322,10 +368,23 @@ do_full_restore() {
             local s3_path="s3://$S3_BUCKET_NAME/$archive_key"
             local ks_table_part
             ks_table_part=$(dirname "$archive_key" | sed "s#^$HOSTNAME/$backup_ts/##")
-            local target_dir="$CASSANDRA_DATA_DIR/$ks_table_part"
+            local table_name
+            table_name=$(basename "$ks_table_part")
+            local ks_name
+            ks_name=$(dirname "$ks_table_part")
+
+            # Dynamically find the target directory with UUID
+            local target_dirs=($(find "$CASSANDRA_DATA_DIR/$ks_name" -maxdepth 1 -type d -name "${table_name}-*"))
+            if [ ${#target_dirs[@]} -ne 1 ]; then
+                log_message "ERROR: Found ${#target_dirs[@]} directories for table '$table_name' in keyspace '$ks_name'. Expected 1. Aborting."
+                if [ ${#target_dirs[@]} -gt 1 ]; then
+                    printf "  - %s\n" "${target_dirs[@]}"
+                fi
+                exit 1
+            fi
+            local target_dir="${target_dirs[0]}"
 
             log_message "Restoring to $target_dir from $s3_path"
-            mkdir -p "$target_dir"
             
             local temp_enc_file="$TEMP_RESTORE_DIR/data.tar.gz.enc"
             local temp_tar_file="$TEMP_RESTORE_DIR/data.tar.gz"
@@ -350,12 +409,12 @@ do_full_restore() {
     done
     log_message "All data from backup chain extracted."
     
-    log_message "4. Setting permissions..."
+    log_message "6. Setting permissions..."
     chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
     chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
     chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_CACHES_DIR"
 
-    log_message "5. Starting Cassandra service..."
+    log_message "7. Starting Cassandra service..."
     systemctl start cassandra
     log_message "Service started. It may take a while for the node to initialize and join the cluster."
     log_message "Monitor nodetool status and system logs."
