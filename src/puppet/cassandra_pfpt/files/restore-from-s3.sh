@@ -8,6 +8,7 @@ set -euo pipefail
 # --- Configuration & Input ---
 CONFIG_FILE="/etc/backup/config.json"
 HOSTNAME=$(hostname -s)
+# Define a default log file path in case config loading fails, ensuring early errors are logged.
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
 TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
@@ -58,7 +59,7 @@ fi
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
-CASSANDRA_CONF_DIR=$(jq -r '.cassandra_conf_dir' "$CONFIG_FILE")
+CASSANDRA_CONF_DIR=$(jq -r '.config_dir_path' "$CONFIG_FILE")
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")

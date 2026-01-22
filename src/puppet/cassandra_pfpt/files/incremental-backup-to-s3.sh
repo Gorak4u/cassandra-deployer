@@ -8,33 +8,35 @@ if [ -z "$BASH_VERSION" ]; then
     exec /bin/bash "$0" "$@"
 fi
 
-# --- Configuration from JSON file ---
+# --- Configuration & Logging Initialization ---
 CONFIG_FILE="/etc/backup/config.json"
+# Define a default log file path in case config loading fails, ensuring early errors are logged.
+LOG_FILE="/var/log/cassandra/incremental_backup.log"
 
-# --- Logging ---
-# This function will be defined after LOG_FILE is sourced from config
 log_message() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Check for required tools
+# --- Pre-flight Checks ---
+# Check for required tools first, so we can log errors if they are missing.
 for tool in jq aws openssl nodetool; do
     if ! command -v $tool &> /dev/null; then
-        echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Required tool '$tool' is not installed or in PATH."
+        log_message "ERROR: Required tool '$tool' is not installed or in PATH."
         exit 1
     fi
 done
 
 # Check for config file
 if [ ! -f "$CONFIG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: Backup configuration file not found at $CONFIG_FILE"
+  log_message "ERROR: Backup configuration file not found at $CONFIG_FILE"
   exit 1
 fi
 
-# Source configuration from JSON
+# --- Source All Configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
+# Overwrite the default LOG_FILE with the one from the config.
 LOG_FILE=$(jq -r '.incremental_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
@@ -42,7 +44,7 @@ UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: One or more required configuration values are missing from $CONFIG_FILE"
+  log_message "ERROR: One or more required configuration values are missing from $CONFIG_FILE"
   exit 1
 fi
 
