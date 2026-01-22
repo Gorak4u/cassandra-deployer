@@ -304,6 +304,13 @@ do_full_restore() {
         table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
+            # Safety check inside the loop to monitor disk space during restore
+            log_message "Checking disk space before downloading $archive_key..."
+            if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 10 -c 5; then
+                log_message "ERROR: Disk space is low. Aborting mid-restore to prevent filling the disk."
+                exit 1
+            fi
+
             local s3_path="s3://$S3_BUCKET_NAME/$archive_key"
             local ks_table_part
             ks_table_part=$(dirname "$archive_key" | sed "s#^$HOSTNAME/$backup_ts/##")
@@ -354,6 +361,14 @@ download_and_extract_table() {
     local tbl_name="$3"
     local output_base_dir="$4"
     local temp_download_dir="$5"
+    local check_path="$6"
+
+    # Safety check before downloading this table's data
+    log_message "Checking disk space on $check_path before downloading..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 10 -c 5; then
+        log_message "ERROR: Disk space is low. Aborting download for $ks_name.$tbl_name."
+        return 1
+    fi
 
     local archive_path_base="$HOSTNAME/$backup_ts/$ks_name/$tbl_name"
     # New file extension
@@ -437,7 +452,7 @@ do_granular_restore() {
         
         if [ -n "$TABLE_NAME" ]; then
             # If a specific table is requested, just download it.
-            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_download_dir"
+            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_download_dir" "$check_path"
         else
             # If a whole keyspace is requested, discover and download all tables.
             log_message "Discovering all tables in keyspace '$KEYSPACE_NAME' for backup '$backup_ts'..."
@@ -450,7 +465,7 @@ do_granular_restore() {
             fi
 
             for table_in_ks in $tables_in_backup; do
-                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_download_dir"
+                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_download_dir" "$check_path"
             done
         fi
     done
