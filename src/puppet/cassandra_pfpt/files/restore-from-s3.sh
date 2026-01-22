@@ -584,7 +584,7 @@ do_granular_restore() {
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            local loader_cmd=("sstableloader" "--debug" "--no-progress" "-d" "${LOADER_NODES}")
+            local loader_cmd=("sstableloader" "--no-progress" "-d" "${LOADER_NODES}")
             
             if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER")
@@ -657,5 +657,3 @@ case $MODE in
 esac
 
 exit 0
-
-    
