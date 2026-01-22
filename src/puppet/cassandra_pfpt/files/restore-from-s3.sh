@@ -49,6 +49,7 @@ usage() {
     log_message "Modes (choose one):"
     log_message "  --full-restore                       Performs a full, destructive restore of the entire node."
     log_message "  --keyspace <ks> [--table <table>]    Targets a specific keyspace or table for a granular restore (requires an action)."
+    log_message "  --schema-only                        Downloads only the schema definition (schema.cql) from the latest full backup."
     log_message ""
     log_message "Actions for Granular Restore (required if --keyspace is used):"
     log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
@@ -121,6 +122,7 @@ while [[ "$#" -gt 0 ]]; do
         --full-restore) MODE="full" ;;
         --download-only) RESTORE_ACTION="download_only" ;;
         --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
+        --schema-only) MODE="schema_only" ;;
         --yes) AUTO_APPROVE=true ;;
         *) log_message "Unknown parameter passed: $1"; usage ;;
     esac
@@ -147,6 +149,12 @@ if [ "$MODE" = "granular" ]; then
         usage
     fi
 fi
+
+if [ "$MODE" = "schema_only" ] && [ "$RESTORE_ACTION" != "" ]; then
+    log_message "ERROR: --schema-only cannot be combined with --download-only or --download-and-restore."
+    usage
+fi
+
 
 # --- Cleanup & Trap Logic ---
 TMP_KEY_FILE=$(mktemp)
@@ -545,36 +553,32 @@ do_granular_restore() {
             log_message "WARNING: No data was downloaded for the specified keyspace/table. Nothing to load."
             exit 0
         fi
-
-        # Use process substitution to avoid subshell issues with the while loop.
-        # This loop now iterates over each downloaded table directory.
+        
         find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | while IFS= read -r source_table_dir; do
             local downloaded_table_name_with_uuid
             downloaded_table_name_with_uuid=$(basename "$source_table_dir")
             local downloaded_table_name
             downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | rev | cut -d'-' -f2- | rev)
 
-            # If a single table restore is requested, skip all other tables in the loop.
             if [ -n "$TABLE_NAME" ] && [ "$downloaded_table_name" != "$TABLE_NAME" ]; then
                 continue
             fi
             
             log_message "Processing table for restore: $KEYSPACE_NAME.$downloaded_table_name"
 
-            # Find the directory of the live table on the running node to get its current UUID.
             local live_table_dir
             live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$downloaded_table_name-*" 2>/dev/null | head -n 1)
             
             if [ -z "$live_table_dir" ];
             then
-                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name' on this node. Skipping restore for this table. Ensure the schema is created in the cluster."
+                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name' on this node. Skipping restore for this table."
+                log_message "This usually means the schema has not been created in the cluster. Use the --schema-only mode first to get the schema file."
                 continue
             fi
 
             local live_table_dirname
             live_table_dirname=$(basename "$live_table_dir")
             
-            # This is the path where the renamed directory should be.
             local final_table_dir_path
             final_table_dir_path="$(dirname "$source_table_dir")/$live_table_dirname"
 
@@ -593,7 +597,6 @@ do_granular_restore() {
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            # Build the sstableloader command for THIS table only.
             local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
@@ -604,20 +607,17 @@ do_granular_restore() {
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            # The path for sstableloader is now the specific, renamed table directory.
             log_message "Pointing sstableloader to specific table directory: $final_table_dir_path"
             loader_cmd+=("$final_table_dir_path")
 
             log_message "The following command will be executed:"
-            # Use printf for safer printing of command with spaces
             printf '%q ' "${loader_cmd[@]}"
-            echo "" # Newline after command
+            echo ""
             
             if ! "${loader_cmd[@]}"; then
                 log_message "ERROR: sstableloader failed for table $KEYSPACE_NAME.$downloaded_table_name. The downloaded data is still available in $base_output_dir for inspection. Continuing to next table."
             else
                  log_message "Successfully loaded data for table $KEYSPACE_NAME.$downloaded_table_name."
-                 # Clean up the specific table directory after successful load to save space
                  rm -rf "$final_table_dir_path"
                  log_message "Cleaned up temporary data for $downloaded_table_name."
             fi
@@ -626,6 +626,46 @@ do_granular_restore() {
 
         log_message "--- Granular Restore (Download & Restore) Finished ---"
     fi
+}
+
+do_schema_only_restore() {
+    log_message "--- Starting Schema-Only Restore ---"
+
+    if [ -z "$BASE_FULL_BACKUP" ]; then
+        log_message "ERROR: Cannot proceed without a base full backup in the chain."
+        exit 1
+    fi
+
+    log_message "Base full backup selected for schema extraction: $BASE_FULL_BACKUP"
+
+    local schema_s3_path="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema.cql"
+    local local_schema_path="/tmp/schema_restore.cql"
+
+    log_message "Downloading schema from: $schema_s3_path"
+    if ! aws s3 cp "$schema_s3_path" "$local_schema_path"; then
+        log_message "ERROR: Failed to download schema.cql. The backup might be incomplete or from an older version of the backup script."
+        log_message "Please check the S3 path manually: $schema_s3_path"
+        exit 1
+    fi
+
+    log_message "--- Schema Restore Finished Successfully ---"
+    log_message "The schema has been downloaded to: $local_schema_path"
+    log_message ""
+    log_message "NEXT STEPS:"
+    log_message "1. Manually review the schema file: less $local_schema_path"
+    log_message "2. On ONE node in your new cluster, apply the schema using cqlsh:"
+    
+    local cqlsh_creds=""
+    if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
+        cqlsh_creds="-u $CASSANDRA_USER -p 'YourPassword'"
+    fi
+    local cqlsh_ssl=""
+    if [[ "$SSL_ENABLED" == "true" ]]; then
+        cqlsh_ssl="--ssl"
+    fi
+    log_message "   cqlsh $cqlsh_creds $cqlsh_ssl -f $local_schema_path"
+
+    log_message "3. Once the schema is applied cluster-wide, you can proceed with the data restore on each node."
 }
 
 # --- Main Execution ---
@@ -662,6 +702,9 @@ case $MODE in
         ;;
     "granular")
         do_granular_restore
+        ;;
+    "schema_only")
+        do_schema_only_restore
         ;;
     *)
         log_message "INTERNAL ERROR: Invalid mode detected or no mode specified."

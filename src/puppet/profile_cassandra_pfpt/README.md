@@ -282,10 +282,11 @@ The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to re
 *   **Usage:**
     ```bash
     # Restore a single table to its state at or before the target time
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --table users
+    # This will download the data and load it with sstableloader.
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --table users --download-and-restore
 
-    # Restore an entire keyspace
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app
+    # Or just download the data for manual inspection
+    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --download-only
     ```
 
 #### Mode 2: Full Node Restore (Destructive)
@@ -308,7 +309,7 @@ This saves the schema to `/tmp/schema_restore.cql`, which you can then apply to 
 
 ### Example: Full Cluster Restore (Cold Start)
 
-This procedure restores a full cluster from S3 backups onto brand-new machines.
+This procedure restores a full cluster from S3 backups onto brand-new machines where the schema does not exist.
 
 > #### Prerequisites
 > *   You have full and incremental backups for each node of the old cluster in S3.
@@ -321,7 +322,7 @@ This procedure restores a full cluster from S3 backups onto brand-new machines.
     ```bash
     sudo /usr/local/bin/restore-from-s3.sh --date "YYYY-MM-DD-HH-MM" --schema-only
     ```
-4.  Apply the schema to the new cluster:
+4.  The script will download `/tmp/schema_restore.cql`. Apply it to the new cluster:
     ```bash
     cqlsh -u cassandra -p 'YourPassword' --ssl -f /tmp/schema_restore.cql
     ```

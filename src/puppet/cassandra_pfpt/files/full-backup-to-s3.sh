@@ -43,7 +43,7 @@ LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
 UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 
 # Validate sourced config
@@ -323,7 +323,27 @@ if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
 fi
 
-# 4. Create Backup Manifest
+# 4. Dump cluster schema
+SCHEMA_DUMP_FILE="$BACKUP_TEMP_DIR/schema.cql"
+log_message "Dumping cluster schema to $SCHEMA_DUMP_FILE..."
+
+local cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
+if [[ "$SSL_ENABLED" == "true" ]]; then
+    cqlsh_command_parts+=("--ssl")
+fi
+if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
+    cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
+fi
+cqlsh_command_parts+=("-e" "DESCRIBE CLUSTER")
+
+if ! "${cqlsh_command_parts[@]}" > "$SCHEMA_DUMP_FILE"; then
+    log_message "WARNING: Failed to dump schema. The backup will be incomplete for schema-only restores."
+else
+    log_message "Schema dumped successfully."
+fi
+
+
+# 5. Create Backup Manifest
 MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 log_message "Creating backup manifest at $MANIFEST_FILE..."
 
@@ -379,7 +399,7 @@ jq -n \
 
 log_message "Manifest created successfully."
 
-# 5. Upload Manifest and Schema to S3
+# 6. Upload Manifest, Schema and Schema to S3
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
     log_message "Backup artifacts are available locally with tag: $BACKUP_TAG"
@@ -401,6 +421,17 @@ else
         else
             log_message "Schema mapping file uploaded successfully."
         fi
+
+        if [ -f "$SCHEMA_DUMP_FILE" ]; then
+            log_message "Uploading schema dump..."
+            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
+            if ! aws s3 cp "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH"; then
+                log_message "ERROR: Failed to upload schema.cql to S3."
+            else
+                log_message "Schema dump uploaded successfully."
+            fi
+        fi
+
     else
         log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping manifest and schema uploads."
         log_message "Local snapshot is available with tag: $BACKUP_TAG"
