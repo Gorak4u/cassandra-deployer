@@ -257,15 +257,15 @@ build_cqlsh_cmd() {
 do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
-    local cqlsh_cmd
-    cqlsh_cmd=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
+    local cqlsh_cmd_array
+    cqlsh_cmd_array=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd[*]} -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd_array[*]} -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
@@ -359,13 +359,18 @@ do_full_restore() {
     # === PHASE 3: LOADING AND FINALIZATION (ONLINE) ===
     log_message "--- PHASE 3: LOADING AND FINALIZATION ---"
 
-    log_message "7. Preparing Cassandra for schema replay..."
+    log_message "7. Temporarily disabling authentication for restore..."
+    local yaml_file="$CASSANDRA_CONF_DIR/cassandra.yaml"
+    sed -i 's/authenticator:.*/authenticator: AllowAllAuthenticator/' "$yaml_file"
+    sed -i 's/authorizer:.*/authorizer: AllowAllAuthorizer/' "$yaml_file"
+
+    log_message "8. Preparing Cassandra for schema replay..."
     # Clean up any previous flags first
     sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     # Add the new flag
     echo "-Dcassandra.replay_schema_from_file=$staged_schema_path" >> "$JVM_OPTIONS_FILE"
 
-    log_message "8. Starting Cassandra service with schema replay..."
+    log_message "9. Starting Cassandra service with schema replay..."
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize and join the cluster..."
@@ -386,20 +391,21 @@ do_full_restore() {
 
     if [ "$CASSANDRA_READY" = false ]; then
         log_message "ERROR: Cassandra did not become ready (UN status). Check system logs."
-        log_message "The downloaded data is available in $TEMP_RESTORE_DIR for manual loading if needed."
+        log_message "Restoring authentication settings in cassandra.yaml before exiting..."
+        sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
+        sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
         exit 1
     fi
     log_message "Cassandra is ready. Schema has been applied."
 
-    log_message "9. Loading data into cluster with sstableloader..."
+    log_message "10. Loading data into cluster with sstableloader..."
     
     export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
     log_message "Using Cassandra config directory: $CASSANDRA_CONF"
     
     local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
     
-    log_message "Using username '$CASSANDRA_USER' for sstableloader."
-    loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
+    log_message "Authentication is disabled, running sstableloader without credentials."
 
     if [ "$SSL_ENABLED" == "true" ]; then
         log_message "SSL is enabled, providing SSL options to sstableloader."
@@ -414,11 +420,47 @@ do_full_restore() {
     if ! eval "${loader_cmd[*]}"; then
         log_message "ERROR: sstableloader failed. The cluster may be partially restored."
         log_message "The staged data is still available in $TEMP_RESTORE_DIR for manual inspection and reloading."
+        # Still need to re-enable auth before exiting
+        systemctl stop cassandra
+        sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
+        sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
         exit 1
     fi
 
     log_message "sstableloader completed successfully."
-    log_message "10. Restore complete. The staging directory $TEMP_RESTORE_DIR will now be removed."
+    log_message "11. Restore complete. Finalizing authentication settings."
+    
+    log_message "Stopping Cassandra to re-enable authentication."
+    systemctl stop cassandra
+
+    log_message "Restoring original authentication settings..."
+    sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
+    sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
+
+    log_message "Starting Cassandra in normal mode..."
+    systemctl start cassandra
+    
+    log_message "Waiting for node to come back online with authentication enabled..."
+    local CASSANDRA_FINAL_READY=false
+    for i in {1..30}; do
+        # Use cqlsh with proper credentials as the final check
+        local cqlsh_cmd_array
+        cqlsh_cmd_array=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
+        if "${cqlsh_cmd_array[@]}" -e "SELECT cluster_name from system.local;" > /dev/null 2>&1; then
+            CASSANDRA_FINAL_READY=true
+            break
+        fi
+        log_message "Waiting for successful CQL connection... (attempt $i of 30)"
+        sleep 10
+    done
+
+    if [ "$CASSANDRA_FINAL_READY" = false ]; then
+        log_message "WARNING: Node did not respond to authenticated CQL query after restart. Please check logs manually."
+    else
+        log_message "Node is online and responding to authenticated queries."
+    fi
+
+    log_message "The staging directory $TEMP_RESTORE_DIR will now be removed."
     # The trap will handle the final cleanup of the staging directory.
     
     log_message "--- Full Restore Process Finished Successfully ---"
