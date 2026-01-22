@@ -91,14 +91,24 @@ cleanup_old_snapshots() {
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
-    # Filter out headers and footers from nodetool output before processing
-    nodetool listsnapshots | grep -Ev '^[[:space:]]*(Snapshot Details|Total snapshots:|There are no snapshots|---|$)' | grep -v 'Snapshot name' | grep -v 'Keyspace name' | while IFS= read -r snapshot_line; do
-      if [[ -z "$snapshot_line" ]]; then
-          continue
-      fi
+    # Get a unique, sorted list of snapshot tags. This is more robust than parsing line by line.
+    # The grep finds lines that start with a snapshot name, ignoring headers/footers.
+    local tags
+    if ! tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9]' | awk '{print $1}' | sort -u); then
+        log_message "WARNING: Failed to run or parse 'nodetool listsnapshots'. Skipping old snapshot cleanup."
+        log_message "--- Snapshot Cleanup Finished (skipped) ---"
+        return
+    fi
+    
+    if [ -z "$tags" ]; then
+        log_message "INFO: No snapshots found to evaluate for cleanup."
+        log_message "--- Snapshot Cleanup Finished ---"
+        return
+    fi
 
-      local tag
-      tag=$(echo "$snapshot_line" | awk '{print $1}')
+    log_message "Found snapshots to evaluate: $tags"
+
+    for tag in $tags; do
       local snapshot_timestamp=0
       
       # Try to parse YYYY-MM-DD-HH-MM format
@@ -124,7 +134,7 @@ cleanup_old_snapshots() {
           fi
         fi
       else
-        log_message "WARNING: Could not parse date from snapshot tag '$tag'. Skipping."
+        log_message "WARNING: Could not parse date from snapshot tag '$tag'. Skipping cleanup for this tag."
       fi
     done
     log_message "--- Snapshot Cleanup Finished ---"
@@ -399,5 +409,3 @@ else
 fi
 
 exit 0
-
-    
