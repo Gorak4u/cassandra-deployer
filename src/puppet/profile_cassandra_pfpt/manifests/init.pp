@@ -1,4 +1,7 @@
-# A profile for deploying and configuring a Cassandra node.
+# A profile for configuring Cassandra.
+#
+# @summary This profile class configures a complete Cassandra node by wrapping the `cassandra_pfpt` component module and providing all its data via Hiera lookups.
+#
 class profile_cassandra_pfpt {
   # Hiera Lookups for Cassandra Configuration
   # This section gathers all configuration from Hiera, providing sensible defaults.
@@ -11,7 +14,7 @@ class profile_cassandra_pfpt {
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })
   $rack                             = lookup('profile_cassandra_pfpt::rack', { 'default_value' => 'rack1' })
-  $cassandra_password               = lookup('profile_cassandra_pfpt::cassandra_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('PP#C@ss@ndr@000') })
+  $cassandra_password               = Sensitive(lookup('profile_cassandra_pfpt::cassandra_password', { 'default_value' => 'PP#C@ss@ndr@000' }))
   $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
   $gc_type                          = lookup('profile_cassandra_pfpt::gc_type', { 'default_value' => 'G1GC' })
   $data_dir                         = lookup('profile_cassandra_pfpt::data_dir', { 'default_value' => '/var/lib/cassandra/data' })
@@ -26,16 +29,16 @@ class profile_cassandra_pfpt {
   $https_domain                     = lookup('profile_cassandra_pfpt::https_domain', { 'default_value' => $facts['networking']['fqdn'] })
   $target_dir                       = lookup('profile_cassandra_pfpt::target_dir', { 'default_value' => '/etc/pki/tls/certs' })
   $keystore_path                    = lookup('profile_cassandra_pfpt::keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
-  $keystore_password                = lookup('profile_cassandra_pfpt::keystore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('ChangeMe') })
+  $keystore_password                = Sensitive(lookup('profile_cassandra_pfpt::keystore_password', { 'default_value' => 'ChangeMe' }))
   $truststore_path                  = lookup('profile_cassandra_pfpt::truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
-  $truststore_password              = lookup('profile_cassandra_pfpt::truststore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('changeit') })
+  $truststore_password              = Sensitive(lookup('profile_cassandra_pfpt::truststore_password', { 'default_value' => 'changeit' }))
   $internode_encryption             = lookup('profile_cassandra_pfpt::internode_encryption', { 'default_value' => 'all' })
   $internode_require_client_auth    = lookup('profile_cassandra_pfpt::internode_require_client_auth', { 'default_value' => true })
   $client_optional                  = lookup('profile_cassandra_pfpt::client_optional', { 'default_value' => false })
   $client_require_client_auth       = lookup('profile_cassandra_pfpt::client_require_client_auth', { 'default_value' => false })
   $client_keystore_path             = lookup('profile_cassandra_pfpt::client_keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
   $client_truststore_path           = lookup('profile_cassandra_pfpt::client_truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
-  $client_truststore_password       = lookup('profile_cassandra_pfpt::client_truststore_password', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('changeit') })
+  $client_truststore_password       = Sensitive(lookup('profile_cassandra_pfpt::client_truststore_password', { 'default_value' => 'changeit' }))
   $tls_protocol                     = lookup('profile_cassandra_pfpt::tls_protocol', { 'default_value' => 'TLS' })
   $tls_algorithm                    = lookup('profile_cassandra_pfpt::tls_algorithm', { 'default_value' => 'SunX509' })
   $store_type                       = lookup('profile_cassandra_pfpt::store_type', { 'default_value' => 'JKS' })
@@ -143,13 +146,14 @@ class profile_cassandra_pfpt {
   $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
   $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
-  $backup_encryption_key            = lookup('profile_cassandra_pfpt::backup_encryption_key', { 'value_type' => Sensitive[String], 'default_value' => Sensitive('MustBeChanged-ChangeMe-ChangeMe!!') })
+  $backup_encryption_key            = Sensitive(lookup('profile_cassandra_pfpt::backup_encryption_key', { 'default_value' => 'MustBeChanged-ChangeMe-ChangeMe!!' }))
   # Scheduled Repair Settings
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
   $repair_keyspace                  = lookup('profile_cassandra_pfpt::repair_keyspace', { 'default_value' => undef })
   # Stress Test Settings
   $manage_stress_test               = lookup('profile_cassandra_pfpt::manage_stress_test', { 'default_value' => false })
+
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
