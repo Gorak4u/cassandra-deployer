@@ -292,11 +292,15 @@ do_full_restore() {
     log_message "Old directories wiped and recreated."
 
     log_message "2a. Verifying disk space after cleanup..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 10 -c 15; then
-        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < 10%, but it is not. Aborting."
+    local post_cleanup_usage
+    post_cleanup_usage=$(df "$CASSANDRA_DATA_DIR" --output=pcent | tail -1 | tr -cd '[:digit:]')
+    local max_allowed_usage=10 # Allow up to 10% usage for filesystem overhead
+
+    if [[ "$post_cleanup_usage" -gt "$max_allowed_usage" ]]; then
+        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < ${max_allowed_usage}%, but it is ${post_cleanup_usage}%. Aborting."
         exit 1
     fi
-    log_message "Post-cleanup disk space is sufficient."
+    log_message "Post-cleanup disk space is sufficient (usage is ${post_cleanup_usage}%)."
 
     log_message "3. Downloading and extracting data from backup chain..."
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
