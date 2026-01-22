@@ -538,47 +538,40 @@ do_granular_restore() {
     else # download_and_restore
         log_message "All data has been downloaded. Preparing to load into cluster..."
         
-        # Handle UUID mismatch for single-table restores
-        if [ -n "$TABLE_NAME" ]; then
-            log_message "Handling potential table UUID mismatch for granular restore of $KEYSPACE_NAME.$TABLE_NAME..."
+        log_message "Handling potential table UUID mismatches..."
+        
+        # Use process substitution to avoid subshell issues with the while loop
+        while IFS= read -r source_table_dir; do
+            local downloaded_table_name_with_uuid=$(basename "$source_table_dir")
+            local downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | rev | cut -d'-' -f2- | rev)
 
-            # Find the source directory path (with old UUID from backup)
-            local source_table_dir
-            source_table_dir=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
-            
-            if [ -z "$source_table_dir" ]; then
-                log_message "ERROR: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Cannot proceed with restore."
-                exit 1
-            else
-                log_message "DEBUG: Found source (downloaded) table dir: '$source_table_dir'"
-                # Find the destination directory path (with live UUID)
-                local live_table_dir
-                live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
-                
-                if [ -z "$live_table_dir" ]; then
-                    log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$TABLE_NAME' in '$CASSANDRA_DATA_DIR'."
-                    log_message "The table must exist in the cluster before you can perform a granular restore."
-                    exit 1
-                else
-                    log_message "DEBUG: Found live table dir: '$live_table_dir'"
-                    local live_table_dirname
-                    live_table_dirname=$(basename "$live_table_dir")
-                    
-                    local source_table_dirname
-                    source_table_dirname=$(basename "$source_table_dir")
-
-                    if [ "$source_table_dirname" != "$live_table_dirname" ]; then
-                        log_message "UUID mismatch detected. Renaming downloaded directory to match live table UUID."
-                        log_message "Renaming '$source_table_dir' to '$(dirname "$source_table_dir")/$live_table_dirname'"
-                        mv "$source_table_dir" "$(dirname "$source_table_dir")/$live_table_dirname"
-                    else
-                        log_message "UUIDs match. No rename necessary."
-                    fi
-                fi
+            # If a single table restore is requested, skip all other tables.
+            if [ -n "$TABLE_NAME" ] && [ "$downloaded_table_name" != "$TABLE_NAME" ]; then
+                continue
             fi
-        fi
+            
+            log_message "Checking UUID for table: $KEYSPACE_NAME.$downloaded_table_name"
 
-        # The path_to_load is the directory containing the keyspace folders.
+            local live_table_dir
+            live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$downloaded_table_name-*" -print -quit)
+            
+            if [ -z "$live_table_dir" ]; then
+                log_message "WARNING: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name'. Skipping restore for this table."
+                continue
+            fi
+
+            local live_table_dirname=$(basename "$live_table_dir")
+
+            if [ "$downloaded_table_name_with_uuid" != "$live_table_dirname" ]; then
+                log_message "UUID mismatch for '$downloaded_table_name'. Renaming downloaded directory."
+                log_message "From: $source_table_dir"
+                log_message "To:   $(dirname "$source_table_dir")/$live_table_dirname"
+                mv "$source_table_dir" "$(dirname "$source_table_dir")/$live_table_dirname"
+            else
+                log_message "UUIDs match for '$downloaded_table_name'. No rename necessary."
+            fi
+        done < <(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d)
+
         if [ -d "$path_to_load" ] && [ -n "$(ls -A "$path_to_load")" ]; then
             log_message "Setting correct ownership on downloaded data..."
             chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$path_to_load"
@@ -600,28 +593,11 @@ do_granular_restore() {
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            local final_path_to_load
-            if [ -n "$TABLE_NAME" ]; then
-                # After UUID rename, find the final specific path to the table directory.
-                final_path_to_load=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
-                if [ -z "$final_path_to_load" ]; then
-                    log_message "ERROR: Could not find final table directory after potential rename. Aborting."
-                    exit 1
-                fi
-                log_message "Granular table restore: pointing sstableloader directly to: $final_path_to_load"
-            else
-                # For a keyspace restore, point to the keyspace directory inside the temp folder.
-                final_path_to_load="$path_to_load/$KEYSPACE_NAME"
-                if [ ! -d "$final_path_to_load" ]; then
-                    log_message "ERROR: Keyspace directory '$final_path_to_load' does not exist. Nothing to load."
-                    exit 1
-                fi
-                log_message "Granular keyspace restore: pointing sstableloader to: $final_path_to_load"
-            fi
-
-            # Pass the most specific path possible to the loader.
+            # The path for sstableloader should be the parent directory containing the keyspace folder(s).
+            local final_path_to_load="$path_to_load"
+            log_message "Pointing sstableloader to root of downloaded data: $final_path_to_load"
             loader_cmd+=("$final_path_to_load")
-            
+
             log_message "The following command will be executed:"
             echo "${loader_cmd[*]}" | tee -a "$RESTORE_LOG_FILE"
             
