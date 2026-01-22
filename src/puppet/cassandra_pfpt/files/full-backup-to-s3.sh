@@ -94,14 +94,10 @@ cleanup_old_snapshots() {
     # Get a unique, sorted list of snapshot tags. This is more robust than parsing line by line.
     # The grep finds lines that start with a snapshot name, ignoring headers/footers.
     local tags
-    if ! tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9]' | awk '{print $1}' | sort -u); then
-        log_message "WARNING: Failed to run or parse 'nodetool listsnapshots'. Skipping old snapshot cleanup."
-        log_message "--- Snapshot Cleanup Finished (skipped) ---"
-        return
-    fi
+    tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9]' | awk '{print $1}' | sort -u || true)
     
     if [ -z "$tags" ]; then
-        log_message "INFO: No snapshots found to evaluate for cleanup."
+        log_message "INFO: No snapshots found to evaluate for cleanup. This may be due to an error running listsnapshots or because there are none."
         log_message "--- Snapshot Cleanup Finished ---"
         return
     fi
@@ -234,12 +230,12 @@ KEYSPACES_LIST=$("${cqlsh_command_parts[@]}" -e 'DESCRIBE KEYSPACES;' 2>>"$LOG_F
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
 else
-    # Define system keyspaces to exclude, allowing system_auth to be backed up
-    SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+    # Define system keyspaces to EXCLUDE. We now back up most system tables.
+    EXCLUDED_SYSTEM_KEYSPACES="system system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
     
     # Use a for loop to iterate over the space-separated list from cqlsh
     for ks in $KEYSPACES_LIST; do
-        if [[ " $SYSTEM_KEYSPACES " =~ " $ks " ]]; then
+        if [[ " $EXCLUDED_SYSTEM_KEYSPACES " =~ " $ks " ]]; then
             continue
         fi
         log_message "Processing keyspace: $ks"
@@ -361,8 +357,8 @@ jq -n \
 
 log_message "Manifest created successfully."
 
-# 5. Archive the schema
-log_message "Backing up schema..."
+# 5. Archive the schema (for --schema-only restore mode and manual inspection)
+log_message "Backing up schema as a CQL file for convenience..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
 if "${cqlsh_command_parts[@]}" -e 'DESCRIBE SCHEMA;' > "$SCHEMA_FILE"; then
   log_message "Schema backup created successfully."

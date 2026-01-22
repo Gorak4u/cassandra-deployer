@@ -65,7 +65,7 @@ usage() {
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 CASSANDRA_CONF_DIR=$(jq -r '.config_dir_path' "$CONFIG_FILE")
-JVM_OPTIONS_FILE="$CASSANDRA_CONF_DIR/jvm-server.options"
+JVM_OPTIONS_FILE="$CASSANDRA_CONF_DIR/cassandra-env.sh" # Changed to a file that is sourced
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -153,10 +153,6 @@ cleanup() {
     if [[ -n "$TEMP_RESTORE_DIR" && -d "$TEMP_RESTORE_DIR" ]]; then
         log_message "Removing temporary restore directory: $TEMP_RESTORE_DIR"
         rm -rf "$TEMP_RESTORE_DIR"
-    fi
-    if [ -f "$JVM_OPTIONS_FILE" ]; then
-      log_message "Ensuring schema replay flag is removed from JVM options..."
-      sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     fi
 }
 trap cleanup EXIT
@@ -325,18 +321,8 @@ do_full_restore() {
     # === PHASE 2: DATA DOWNLOAD (OFFLINE) ===
     log_message "--- PHASE 2: DATA DOWNLOAD ---"
     
-    # Download Schema to staging area
-    local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
-    local staged_schema_path="$TEMP_RESTORE_DIR/schema.cql"
-    log_message "4. Downloading schema to staging area..."
-    if ! aws s3 cp "$schema_s3_path" "$staged_schema_path"; then
-        log_message "ERROR: Failed to download schema.cql. Aborting."
-        exit 1
-    fi
-    log_message "Schema staged successfully."
-
     # Download and Stage all data
-    log_message "5. Downloading and extracting all data from backup chain into staging directory..."
+    log_message "4. Downloading and extracting all data from backup chain into staging directory..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
@@ -362,34 +348,24 @@ do_full_restore() {
     # === PHASE 3: DATA PLACEMENT AND STARTUP ===
     log_message "--- PHASE 3: FINALIZATION ---"
 
-    log_message "6. Moving restored data from staging to final data directory..."
+    log_message "5. Moving restored data from staging to final data directory..."
     # Use rsync for efficiency and to handle large numbers of files better than mv
     rsync -a "$TEMP_RESTORE_DIR/" "$CASSANDRA_DATA_DIR/"
     log_message "Data moved successfully."
     
-    log_message "7. Setting correct ownership for all Cassandra directories..."
+    log_message "6. Setting correct ownership for all Cassandra directories..."
     chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
     chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
     chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
 
-    log_message "8. Preparing Cassandra for schema replay..."
-    # The schema file was moved along with all other data
-    local final_schema_path="$CASSANDRA_DATA_DIR/schema.cql"
-    # Clean up any previous flags first
-    sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
-    # Add the new flag
-    echo "-Dcassandra.replay_schema_from_file=$final_schema_path" >> "$JVM_OPTIONS_FILE"
-
-    log_message "9. Starting Cassandra service..."
+    log_message "7. Starting Cassandra service..."
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize and come online..."
     local CASSANDRA_READY=false
     for i in {1..60}; do # Wait up to 10 minutes
-        # Use a CQL query to verify readiness.
-        # This check is now performed with the final credentials since system_auth is restored.
+        # This check uses the final credentials, which should be restored now from system_auth.
         if cqlsh_wrapper "SELECT cluster_name FROM system.local;" > /dev/null 2>&1; then
-             # An extra check on nodetool status is good practice
             if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
                 CASSANDRA_READY=true
                 break
@@ -399,10 +375,6 @@ do_full_restore() {
         sleep 10
     done
 
-    # Cleanup the JVM flag regardless of whether the node came up, to prevent issues on next restart
-    log_message "Removing schema replay flag from JVM options..."
-    sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
-
     if [ "$CASSANDRA_READY" = false ]; then
         log_message "ERROR: Cassandra did not become ready. Check system logs."
         log_message "The restored data is in place, but the service failed to start correctly."
@@ -410,7 +382,7 @@ do_full_restore() {
     fi
     
     log_message "Cassandra is online and ready."
-    log_message "10. Restore complete."
+    log_message "8. Restore complete."
     log_message "The temporary staging directory $TEMP_RESTORE_DIR will now be removed."
     # The trap will handle the final cleanup of the staging directory.
     
@@ -616,5 +588,3 @@ case $MODE in
 esac
 
 exit 0
-
-    
