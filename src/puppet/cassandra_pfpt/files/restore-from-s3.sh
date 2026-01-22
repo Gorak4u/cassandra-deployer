@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
@@ -64,6 +65,7 @@ usage() {
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 CASSANDRA_CONF_DIR=$(jq -r '.config_dir_path' "$CONFIG_FILE")
+JVM_OPTIONS_FILE="$CASSANDRA_CONF_DIR/jvm-server.options"
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -144,6 +146,10 @@ cleanup() {
     if [[ -n "$TEMP_RESTORE_DIR" && -d "$TEMP_RESTORE_DIR" ]]; then
         log_message "Removing temporary restore directory: $TEMP_RESTORE_DIR"
         rm -rf "$TEMP_RESTORE_DIR"
+    fi
+    if [ -f "$JVM_OPTIONS_FILE" ]; then
+      log_message "Ensuring schema replay flag is removed from JVM options..."
+      sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     fi
 }
 trap cleanup EXIT
@@ -263,11 +269,13 @@ do_schema_restore() {
 
 do_full_restore() {
     log_message "--- Starting FULL DESTRUCTIVE Node Restore ---"
-    log_message "This will restore the node to the state at the end of the last backup in the chain."
+    log_message "This will restore the node using sstableloader for maximum reliability."
     log_message "WARNING: This is a DESTRUCTIVE operation. It will:"
     log_message "1. STOP the Cassandra service."
     log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
-    log_message "3. RESTORE data from the backup chain."
+    log_message "3. RESTORE data from the backup chain into a temporary staging area."
+    log_message "4. START Cassandra with the restored schema."
+    log_message "5. LOAD the staged data using sstableloader."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -279,18 +287,13 @@ do_full_restore() {
         log_message "Auto-approving destructive full restore via --yes flag."
     fi
 
-    log_message "0. Pre-flight disk usage check..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 99; then
-        log_message "ERROR: Initial disk health check failed. The data volume may be full or having issues. Aborting."
-        exit 1
-    fi
-    log_message "Initial disk health check passed."
-
+    # === PHASE 1: PREPARATION (OFFLINE) ===
+    log_message "--- PHASE 1: PREPARATION ---"
 
     log_message "1. Stopping Cassandra service..."
     systemctl stop cassandra
 
-    log_message "2. Wiping old data..."
+    log_message "2. Wiping old data directories..."
     rm -rf "$CASSANDRA_DATA_DIR"
     mkdir -p "$CASSANDRA_DATA_DIR"
     rm -rf "$CASSANDRA_COMMITLOG_DIR"
@@ -299,78 +302,31 @@ do_full_restore() {
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
     
-    log_message "2a. Verifying disk space after cleanup..."
-    local post_cleanup_usage
-    post_cleanup_usage=$(/usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 99 | grep -o '[0-9]*%' | tr -d '%')
-    local max_allowed_usage=10
+    TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_staging_$$"
+    log_message "3. Creating temporary staging directory: $TEMP_RESTORE_DIR"
+    mkdir -p "$TEMP_RESTORE_DIR"
 
-    if [[ "$post_cleanup_usage" -gt "$max_allowed_usage" ]]; then
-        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < ${max_allowed_usage}%, but it is ${post_cleanup_usage}%. Aborting."
-        exit 1
-    fi
-    log_message "Post-cleanup disk space is sufficient (usage is ${post_cleanup_usage}%)."
-
-    # --- Phase 1: Schema Restore ---
-    log_message "3. Starting Cassandra to create schema..."
-    systemctl start cassandra
+    # === PHASE 2: DATA STAGING (OFFLINE) ===
+    log_message "--- PHASE 2: DATA STAGING ---"
     
-    log_message "Waiting for Cassandra to initialize for schema restore..."
-    # On a fresh start, we must use the default credentials to apply the schema
-    local initial_cqlsh_cmd
-    initial_cqlsh_cmd=$(build_cqlsh_cmd "cassandra" "cassandra")
-
-    local CASSANDRA_READY=false
-    for i in {1..30}; do # Wait up to 5 minutes
-        if eval "$initial_cqlsh_cmd -e 'select cluster_name from system.local;'" >/dev/null 2>&1; then
-            CASSANDRA_READY=true
-            break
-        fi
-        log_message "Waiting for CQL port to be available... (attempt $i of 30)"
-        sleep 10
-    done
-
-    if [ "$CASSANDRA_READY" = false ]; then
-        log_message "ERROR: Cassandra did not become ready for schema restore. Check system logs."
-        exit 1
-    fi
-    log_message "Cassandra is ready. Applying schema..."
-
+    # 2a. Download and Stage Schema
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
-    local schema_local_path="/tmp/schema_restore_$$.cql"
-    
-    if ! aws s3 cp "$schema_s3_path" "$schema_local_path"; then
+    local staged_schema_path="$TEMP_RESTORE_DIR/schema.cql"
+    log_message "4. Downloading schema to staging area..."
+    if ! aws s3 cp "$schema_s3_path" "$staged_schema_path"; then
         log_message "ERROR: Failed to download schema.cql. Aborting."
         exit 1
     fi
+    log_message "Schema staged successfully."
 
-    if ! eval "$initial_cqlsh_cmd -f $schema_local_path"; then
-        log_message "ERROR: Failed to apply schema from $schema_local_path. Aborting."
-        rm -f "$schema_local_path"
-        exit 1
-    fi
-    rm -f "$schema_local_path"
-    log_message "Schema applied successfully."
-
-    # --- Phase 2: Data Restore ---
-    log_message "4. Stopping Cassandra to restore data files..."
-    systemctl stop cassandra
-
-    log_message "5. Downloading and extracting data into schema-generated directories..."
-    TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
-    mkdir -p "$TEMP_RESTORE_DIR"
-    
+    # 2b. Download and Stage Data
+    log_message "5. Downloading and extracting all data from backup chain to staging area..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
         table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            log_message "Checking disk usage before downloading $archive_key..."
-            if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 90 -c 95; then
-                log_message "ERROR: Disk usage is high. Aborting mid-restore to prevent filling the disk."
-                exit 1
-            fi
-
             local s3_path="s3://$S3_BUCKET_NAME/$archive_key"
             local ks_table_part
             ks_table_part=$(dirname "$archive_key" | sed "s#^$HOSTNAME/$backup_ts/##")
@@ -379,52 +335,77 @@ do_full_restore() {
             local ks_name
             ks_name=$(dirname "$ks_table_part")
 
-            # Dynamically find the target directory with UUID
-            local target_dirs=($(find "$CASSANDRA_DATA_DIR/$ks_name" -maxdepth 1 -type d -name "${table_name}-*"))
-            if [ ${#target_dirs[@]} -ne 1 ]; then
-                log_message "ERROR: Found ${#target_dirs[@]} directories for table '$table_name' in keyspace '$ks_name'. Expected 1. Aborting."
-                if [ ${#target_dirs[@]} -gt 1 ]; then
-                    printf "  - %s\n" "${target_dirs[@]}"
-                fi
-                exit 1
-            fi
-            local target_dir="${target_dirs[0]}"
-
-            log_message "Restoring to $target_dir from $s3_path"
-            
-            local temp_enc_file="$TEMP_RESTORE_DIR/data.tar.gz.enc"
-            local temp_tar_file="$TEMP_RESTORE_DIR/data.tar.gz"
-
-            if ! aws s3 cp "$s3_path" "$temp_enc_file"; then
-                 log_message "ERROR: Failed to download $archive_key. Aborting restore."
-                 exit 1
-            fi
-            
-            if ! openssl enc -d -aes-256-cbc -pbkdf2 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
-                log_message "ERROR: Failed to decrypt $archive_key. 'bad decrypt' error likely. Aborting."
-                exit 1
-            fi
-            
-            if ! tar -xzf "$temp_tar_file" -C "$target_dir"; then
-                log_message "ERROR: Failed to extract $archive_key. Archive may be corrupt. Aborting."
-                exit 1
-            fi
-            
-            rm -f "$temp_enc_file" "$temp_tar_file"
+            download_and_extract_table "$backup_ts" "$ks_name" "$table_name" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
         done
     done
-    log_message "All data from backup chain extracted."
-    
-    log_message "6. Setting permissions..."
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
-    chown -R "$CASSANDRA_USER:$CASSANDRA_USER" "$CASSANDRA_CACHES_DIR"
+    log_message "All data from backup chain extracted to staging area."
 
-    log_message "7. Starting Cassandra service..."
+    # === PHASE 3: LOADING AND FINALIZATION (ONLINE) ===
+    log_message "--- PHASE 3: LOADING AND FINALIZATION ---"
+
+    log_message "6. Preparing Cassandra for schema replay..."
+    # Clean up any previous flags first
+    sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
+    # Add the new flag
+    echo "-Dcassandra.replay_schema_from_file=$staged_schema_path" >> "$JVM_OPTIONS_FILE"
+
+    log_message "7. Starting Cassandra service with schema replay..."
     systemctl start cassandra
-    log_message "Service started. It may take a while for the node to initialize and join the cluster."
-    log_message "Monitor nodetool status and system logs."
-    log_message "--- Full Restore Process Finished ---"
+    
+    log_message "Waiting for Cassandra to initialize and join the cluster..."
+    local CASSANDRA_READY=false
+    for i in {1..60}; do # Wait up to 10 minutes
+        # Use nodetool as the source of truth. It will fail if the node is not up.
+        if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
+            CASSANDRA_READY=true
+            break
+        fi
+        log_message "Waiting for node to report UP/NORMAL... (attempt $i of 60)"
+        sleep 10
+    done
+
+    # Cleanup the JVM flag regardless of whether the node came up, to prevent issues on next restart
+    log_message "Removing schema replay flag from JVM options..."
+    sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
+
+    if [ "$CASSANDRA_READY" = false ]; then
+        log_message "ERROR: Cassandra did not become ready (UN status). Check system logs."
+        log_message "The downloaded data is available in $TEMP_RESTORE_DIR for manual loading if needed."
+        exit 1
+    fi
+    log_message "Cassandra is ready. Schema has been applied."
+
+    log_message "8. Loading data into cluster with sstableloader..."
+    
+    export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
+    log_message "Using Cassandra config directory: $CASSANDRA_CONF"
+    
+    local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
+    
+    log_message "Using username '$CASSANDRA_USER' for sstableloader."
+    loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
+
+    if [ "$SSL_ENABLED" == "true" ]; then
+        log_message "SSL is enabled, providing SSL options to sstableloader."
+        # Note: sstableloader uses the same ports as nodetool. 7001 is standard for SSL storage.
+        loader_cmd+=("--ssl-storage-port" "7001")
+    fi
+
+    # Add the staging directory as the source for the loader
+    loader_cmd+=("$TEMP_RESTORE_DIR")
+    
+    log_message "Executing: ${loader_cmd[*]}"
+    if ! eval "${loader_cmd[*]}"; then
+        log_message "ERROR: sstableloader failed. The cluster may be partially restored."
+        log_message "The staged data is still available in $TEMP_RESTORE_DIR for manual inspection and reloading."
+        exit 1
+    fi
+
+    log_message "sstableloader completed successfully."
+    log_message "9. Restore complete. The staging directory $TEMP_RESTORE_DIR will now be removed."
+    # The trap will handle the final cleanup of the staging directory.
+    
+    log_message "--- Full Restore Process Finished Successfully ---"
 }
 
 
@@ -464,8 +445,8 @@ download_and_extract_table() {
     
     log_message "Downloading data for $ks_name.$tbl_name from $archive_to_download"
     
-    local temp_enc_file="$temp_download_dir/$ks_name.$tbl_name.tar.gz.enc"
-    local temp_tar_file="$temp_download_dir/$ks_name.$tbl_name.tar.gz"
+    local temp_enc_file="$temp_download_dir/$ks_name.$tbl_name.$$.tar.gz.enc"
+    local temp_tar_file="$temp_download_dir/$ks_name.$tbl_name.$$.tar.gz"
 
     if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" "$temp_enc_file"; then
         log_message "ERROR: Failed to download $archive_to_download."
@@ -485,7 +466,6 @@ download_and_extract_table() {
     fi
     
     rm -f "$temp_enc_file" "$temp_tar_file"
-    echo "$table_output_dir"
     return 0
 }
 
