@@ -16,3 +16,11 @@ This module handles the core technical implementation for a Cassandra node. Its 
 ## Usage
 
 This class should **not be declared directly** in a node's classification. It is designed to be wrapped by a profile module (like `profile_cassandra_pfpt`) which provides its configuration data via Hiera. This separation of concerns ensures that the component module remains data-agnostic and reusable.
+
+For a complete guide on operations, automated maintenance, and disaster recovery, please see the documentation in the `profile_cassandra_pfpt` module's README.
+
+## Included Tooling
+
+### Cassandra Stress Schema
+
+This module includes a `stress-schema.yaml` file located in the `cql` directory of the parent project. This file is designed for use with the `cassandra-stress` command-line tool. It defines a sample table schema and data generation profile for creating large datasets, which is useful for performance testing, load testing, and validating your cluster's behavior under heavy load.

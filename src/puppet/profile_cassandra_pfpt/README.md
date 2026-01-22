@@ -19,10 +19,12 @@
 6.  [Automated Maintenance Guide](#automated-maintenance-guide)
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
-7.  [Disaster Recovery Guide: Point-in-Time Recovery](#disaster-recovery-guide-point-in-time-recovery)
-    1.  [Restore Modes](#restore-modes)
-    2.  [Example: Granular Table Restore](#example-granular-table-restore)
-    3.  [Example: Full Cluster Restore (Cold Start)](#example-full-cluster-restore-cold-start)
+7.  [Disaster Recovery Guide: A Deep Dive into Point-in-Time Recovery](#disaster-recovery-guide-a-deep-dive-into-point-in-time-recovery)
+    1.  [Understanding the Backup Strategy](#understanding-the-backup-strategy)
+    2.  [The Restore Process: Building the Chain](#the-restore-process-building-the-chain)
+    3.  [Restore Scenario 1: Granular Restore (Live Cluster)](#restore-scenario-1-granular-restore-live-cluster)
+    4.  [Restore Scenario 2: Full Node Restore (Replacing a Single Failed Node)](#restore-scenario-2-full-node-restore-replacing-a-single-failed-node)
+    5.  [Restore Scenario 3: Full Cluster Restore (Cold Start DR)](#restore-scenario-3-full-cluster-restore-cold-start-dr)
 8.  [Hiera Parameter Reference](#hiera-parameter-reference)
 9.  [Puppet Agent Management](#puppet-agent-management)
 
@@ -264,83 +266,172 @@ A safe, low-impact, automated repair process is critical for data consistency.
 
 ---
 
-## Disaster Recovery Guide: Point-in-Time Recovery
+## Disaster Recovery Guide: A Deep Dive into Point-in-Time Recovery
 
-The `/usr/local/bin/restore-from-s3.sh` script is a powerful tool designed to restore data to a specific point in time by intelligently combining full and incremental backups.
+This guide provides an in-depth, step-by-step walkthrough for recovering your Cassandra cluster from S3 backups using the powerful `/usr/local/bin/restore-from-s3.sh` script.
 
-### The Restore Process
+### Understanding the Backup Strategy
 
-1.  **Find the Backup Chain:** You provide a target timestamp. The script finds the most recent full backup *before* your target time, and all incremental backups between the full backup and your target.
-2.  **Confirm:** It presents this "restore chain" to you for confirmation before proceeding.
-3.  **Restore:** It restores the full backup, then applies each incremental backup in chronological order.
+Before restoring, it's critical to understand how backups are structured:
 
-### Restore Modes
+*   **Backup Sets:** Each backup run (full or incremental) creates a "backup set" in S3, identified by a timestamp tag (e.g., `2026-01-20-18-00`).
+*   **Granular Archives:** Inside a backup set, data for each table is stored in its own encrypted archive (`.tar.gz.enc`).
+*   **Manifest File:** Every backup set contains a `backup_manifest.json`. This file is the key to recovery, containing metadata about the backup type (full/incremental), the node's identity (IP, DC, rack, tokens), and which tables were included.
+*   **Schema Dump:** Full backups also include a `schema.cql` file, which is a complete snapshot of the database schema (`CREATE KEYSPACE`, `CREATE TABLE` statements). This is essential for full cluster recovery.
+*   **Schema-to-Directory Mapping:** A `schema_mapping.json` file is included to map human-readable table names to their internal UUID-based directory names, which is critical for handling schema changes over time.
 
-#### Mode 1: Granular Restore (Non-Destructive)
-> This is the most common use case. It streams data for a specific table or keyspace into a **live, running cluster** without downtime.
+### The Restore Process: Building the Chain
 
-*   **Usage:**
+The `restore-from-s3.sh` script performs Point-in-Time Recovery (PITR). When you provide a target timestamp with `--date`:
+
+1.  **Find the Base:** It searches S3 for the most recent **full** backup that occurred *at or before* your target time. This is the foundation of the restore.
+2.  **Find the Deltas:** It then finds all **incremental** backups that occurred *between* the full backup and your target time.
+3.  **Build the Chain:** It assembles this list of backups into a "restore chain" (full backup + subsequent incrementals).
+4.  **Confirm and Execute:** It presents this chain to you for confirmation before proceeding with the restore, ensuring you know exactly what will be applied.
+
+---
+
+### Restore Scenario 1: Granular Restore (Live Cluster)
+
+> **Use Case:** Restoring a specific table or keyspace that was accidentally dropped or corrupted, without taking the cluster offline.
+
+This is a non-destructive operation that streams data into a **live, running cluster**.
+
+#### Steps:
+
+1.  SSH into any Cassandra node in the cluster.
+2.  Choose the appropriate restore action:
+    *   `--download-and-restore`: The most common action. It downloads the data and immediately loads it using `sstableloader`.
+    *   `--download-only`: Downloads and decrypts the data to `/var/lib/cassandra/restore_download/` for manual inspection. The data is **not** loaded into the cluster.
+
+#### Example Commands:
+
+```bash
+# Example 1: Restore a single table ('users') to its state as of 6:00 PM on Jan 20, 2026.
+# The script will find the correct backup chain and load the data.
+sudo /usr/local/bin/restore-from-s3.sh \
+  --date "2026-01-20-18-00" \
+  --keyspace my_app \
+  --table users \
+  --download-and-restore
+
+# Example 2: Restore an entire keyspace ('auditing').
+sudo /usr/local/bin/restore-from-s3.sh \
+  --date "2026-01-20-18-00" \
+  --keyspace auditing \
+  --download-and-restore
+
+# Example 3: Download data for a table for inspection without loading it.
+sudo /usr/local/bin/restore-from-s3.sh \
+  --date "2026-01-20-18-00" \
+  --keyspace my_app \
+  --table users \
+  --download-only
+```
+> **Important:** The script intelligently handles table UUID mismatches. If the live table has a different UUID than the backed-up data, the script will automatically rename the downloaded directory to match the live one before loading.
+
+---
+
+### Restore Scenario 2: Full Node Restore (Replacing a Single Failed Node)
+
+> **Use Case:** A single node has failed permanently (e.g., hardware failure) and you need to replace it with a new machine, restoring its data and identity.
+
+This is a **destructive** operation performed on a **new, stopped node**.
+
+#### Prerequisites:
+
+*   You have provisioned a new machine.
+*   You have applied the Puppet profile to it.
+*   The `cassandra` service is **stopped** on this new node.
+
+#### Steps:
+
+1.  SSH into the **new, stopped** node.
+2.  Execute the restore script in `--full-restore` mode. Crucially, you must use `--source-host` to specify the hostname of the *original, dead node* you are replacing.
     ```bash
-    # Restore a single table to its state at or before the target time
-    # This will download the data and load it with sstableloader.
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --table users --download-and-restore
-
-    # Or just download the data for manual inspection
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --keyspace my_app --download-only
+    # Restore this new node using the backup data from 'cassandra-node-03.example.com'
+    # to the point in time of the latest available backup.
+    sudo /usr/local/bin/restore-from-s3.sh \
+      --date "2026-01-22-10-00" \
+      --source-host cassandra-node-03.example.com \
+      --full-restore \
+      --yes
     ```
+3.  The script will:
+    *   Wipe any existing Cassandra data directories.
+    *   Download the manifest from the dead node's backup to retrieve its unique ring tokens.
+    *   Configure `cassandra.yaml` with these tokens, ensuring the new node assumes the correct identity in the ring.
+    *   Download and extract the full data set from the specified backup chain.
+    *   Start the Cassandra service and verify it rejoins the cluster as `UN` (Up/Normal).
 
-#### Mode 2: Full Node Restore (Destructive)
-> **WARNING:** This mode is for recovering a completely failed node. It will **WIPE ALL CASSANDRA DATA** on the target node before restoring.
+---
 
-*   **Usage:**
+### Restore Scenario 3: Full Cluster Restore (Cold Start DR)
+
+> **Use Case:** A catastrophic failure has destroyed the entire cluster. You need to rebuild the entire cluster from scratch on new hardware using S3 backups.
+
+This is the most advanced scenario and involves a coordinated, two-phase process across all new nodes.
+
+#### Prerequisites:
+
+*   You have provisioned an entirely new set of machines for the cluster.
+*   Puppet has run on all new nodes, but the `cassandra` service is **stopped on all of them**.
+*   You know the hostnames of the *original* nodes that were backed up to S3.
+
+#### Phase 1: Restore the Schema (Run on ONE Node Only)
+
+The first step is to create the keyspaces and table structures in the new, empty cluster.
+
+1.  Choose **one node** in the new cluster to be the "schema master".
+2.  SSH into this node.
+3.  Start the Cassandra service on this node **only**: `sudo systemctl start cassandra`. Wait for it to come up.
+4.  Run the restore script in `--schema-only` mode. You need to specify the `--source-host` of one of your original backed-up nodes.
     ```bash
-    # Restore the entire node to the state at the target time
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --full-restore
+    # Download the schema from the latest full backup of an original node.
+    sudo /usr/local/bin/restore-from-s3.sh \
+      --date "2026-01-22-10-00" \
+      --source-host original-node-01.example.com \
+      --schema-only
     ```
-
-#### Mode 3: Schema-Only Restore
-> This extracts the `schema.cql` file from the relevant full backup, which is the first step for a full cluster disaster recovery.
-
-*   **Usage:**
+5.  The script will download `schema.cql` to `/tmp/schema_restore.cql`.
+6.  Apply this schema to the new cluster using `cqlsh`:
     ```bash
-    sudo /usr/local/bin/restore-from-s3.sh --date "2026-01-20-18-00" --schema-only
+    # Use the password you've configured in Hiera for the new cluster.
+    cqlsh -u cassandra -p 'YourNewClusterPassword' --ssl -f /tmp/schema_restore.cql
     ```
-This saves the schema to `/tmp/schema_restore.cql`, which you can then apply to your new cluster using `cqlsh`.
+7.  Verify the keyspaces and tables now exist: `cqlsh -e "DESCRIBE KEYSPACES;"`.
+8.  **Crucially, stop the Cassandra service** on this "schema master" node: `sudo systemctl stop cassandra`. The entire new cluster should now be offline again, but with the correct schema created.
 
-### Example: Full Cluster Restore (Cold Start)
+#### Phase 2: Restore Data (Rolling Restore, Node by Node)
 
-This procedure restores a full cluster from S3 backups onto brand-new machines where the schema does not exist.
+Now, you will perform a full node restore on each new machine, one at a time.
 
-> #### Prerequisites
-> *   You have full and incremental backups for each node of the old cluster in S3.
-> *   You have provisioned new machines, applied this Puppet profile, and the `cassandra` service is **stopped** on all of them.
-
-#### Step 1: Restore the Schema
-1.  Choose **one node** in the new cluster. Start the `cassandra` service on this node only.
-2.  SSH into that node.
-3.  Choose a target restore time and run the script in schema-only mode:
-    ```bash
-    sudo /usr/local/bin/restore-from-s3.sh --date "YYYY-MM-DD-HH-MM" --schema-only
-    ```
-4.  The script will download `/tmp/schema_restore.cql`. Apply it to the new cluster:
-    ```bash
-    cqlsh -u cassandra -p 'YourPassword' --ssl -f /tmp/schema_restore.cql
-    ```
-5.  Stop the `cassandra` service on this node. The entire new cluster should now be offline.
-
-#### Step 2: Perform a Rolling Restore of All Nodes
-The restore script handles the complexity of determining whether to start as a first seed or join an existing cluster.
-
-1.  **On each node (one at a time):**
-    *   SSH into the new node.
-    *   Run the restore script in full mode with the desired point-in-time timestamp.
+1.  **For the first node:**
+    *   SSH into the new node (e.g., `new-node-01`).
+    *   Run the full restore, pointing it to the backup of its corresponding original node.
         ```bash
-        sudo /usr/local/bin/restore-from-s3.sh --date "YYYY-MM-DD-HH-MM" --full-restore
+        sudo /usr/local/bin/restore-from-s3.sh \
+          --date "2026-01-22-10-00" \
+          --source-host original-node-01.example.com \
+          --full-restore \
+          --yes
         ```
-    *   The script will download and apply the full backup and all necessary incrementals. It will then start Cassandra.
-    *   Wait for the node to come online and report `UN` in `nodetool status` before moving to the next node.
+    *   The script will restore the data and start Cassandra. Wait for it to fully initialize and report `UN` in `nodetool status`. This node will become the first seed of the restored cluster.
 
-2.  Repeat for all remaining nodes until the entire new cluster is recovered.
+2.  **For all subsequent nodes (one by one):**
+    *   SSH into the next new node (e.g., `new-node-02`).
+    *   Run the same command, but change the `--source-host` to its corresponding original node.
+        ```bash
+        sudo /usr/local/bin/restore-from-s3.sh \
+          --date "2026-01-22-10-00" \
+          --source-host original-node-02.example.com \
+          --full-restore \
+          --yes
+        ```
+    *   The script will restore the data and start Cassandra. It will automatically detect the running seed node and join the cluster.
+    *   Wait for this node to report `UN` status before proceeding to the next one.
+
+3.  Repeat this process until all nodes in the new cluster have been restored and are online. Your cluster is now fully recovered.
 
 ---
 
