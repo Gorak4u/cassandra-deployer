@@ -22,7 +22,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for tool in jq aws sstableloader openssl pgrep ps cqlsh /usr/local/bin/disk-health-check.sh; do
+for tool in jq aws sstableloader openssl pgrep ps cqlsh rsync /usr/local/bin/disk-health-check.sh; do
     if ! command -v $tool &>/dev/null; then
         log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
         exit 1
@@ -76,7 +76,7 @@ SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 
 # Validate essential configuration
-if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_message "ERROR: 'config_dir_path' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ] || [ ! -d "$CASSANDRA_CONF_DIR" ]; then log_message "ERROR: 'config_dir_path' is not set or invalid in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_DATA_DIR" ] || [ "$CASSANDRA_DATA_DIR" == "null" ]; then log_message "ERROR: 'cassandra_data_dir' is not set in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_COMMITLOG_DIR" ] || [ "$CASSANDRA_COMMITLOG_DIR" == "null" ]; then log_message "ERROR: 'commitlog_dir' is not set in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_CACHES_DIR" ] || [ "$CASSANDRA_CACHES_DIR" == "null" ]; then log_message "ERROR: 'saved_caches_dir' is not set in $CONFIG_FILE."; exit 1; fi
@@ -172,6 +172,21 @@ echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 # --- Core Logic Functions ---
 
+# Helper function to run cqlsh with appropriate auth and SSL flags
+cqlsh_wrapper() {
+    local query_to_run="$1"
+    
+    local cqlsh_cmd_parts=("cqlsh" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD" "-e" "$query_to_run")
+    
+    if [ "$SSL_ENABLED" == "true" ]; then
+        cqlsh_cmd_parts+=("--ssl")
+    fi
+    
+    # Execute the command
+    "${cqlsh_cmd_parts[@]}"
+}
+
+
 find_backup_chain() {
     log_message "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
     
@@ -244,12 +259,11 @@ find_backup_chain() {
 do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
-    local cqlsh_cmd_parts=("cqlsh")
+    local cqlsh_cmd_parts=("cqlsh" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
     if [ "$SSL_ENABLED" == "true" ]; then
         cqlsh_cmd_parts+=("--ssl")
     fi
-    cqlsh_cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
-
+    
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
 
@@ -265,14 +279,14 @@ do_schema_restore() {
 
 
 do_full_restore() {
-    log_message "--- Starting FULL DESTRUCTIVE Node Restore ---"
-    log_message "This will restore the node by placing system tables and using sstableloader for application data."
+    log_message "--- Starting SIMPLIFIED FULL DESTRUCTIVE Node Restore ---"
+    log_message "This will restore the node by wiping all data and replacing it directly from the backup files."
     log_message "WARNING: This is a DESTRUCTIVE operation. It will:"
     log_message "1. STOP the Cassandra service."
     log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
-    log_message "3. RESTORE system tables directly and stage application data."
-    log_message "4. START Cassandra with the restored schema and system data."
-    log_message "5. LOAD the staged application data using sstableloader."
+    log_message "3. DOWNLOAD all backup data to a temporary location."
+    log_message "4. MOVE the restored data into the final Cassandra data directory."
+    log_message "5. START Cassandra with the restored data."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -303,33 +317,26 @@ do_full_restore() {
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
     
-    log_message "3. Setting correct ownership for Cassandra directories..."
-    chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
-    chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
-    chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
-
-    # Application data will be staged here. System data goes directly to final destination.
+    # Create the single temporary directory for the entire restore
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_staging_$$"
-    log_message "4. Creating temporary staging directory for application data: $TEMP_RESTORE_DIR"
+    log_message "3. Creating temporary restore directory: $TEMP_RESTORE_DIR"
     mkdir -p "$TEMP_RESTORE_DIR"
 
-    # === PHASE 2: DATA STAGING (OFFLINE) ===
-    log_message "--- PHASE 2: DATA STAGING ---"
+    # === PHASE 2: DATA DOWNLOAD (OFFLINE) ===
+    log_message "--- PHASE 2: DATA DOWNLOAD ---"
     
-    # 2a. Download Schema to staging area (will be used for replay)
+    # Download Schema to staging area
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     local staged_schema_path="$TEMP_RESTORE_DIR/schema.cql"
-    log_message "5. Downloading schema to staging area..."
+    log_message "4. Downloading schema to staging area..."
     if ! aws s3 cp "$schema_s3_path" "$staged_schema_path"; then
         log_message "ERROR: Failed to download schema.cql. Aborting."
         exit 1
     fi
     log_message "Schema staged successfully."
 
-    # 2b. Download and Stage Data
-    log_message "6. Downloading and extracting all data from backup chain..."
-    local system_keyspaces_to_restore="system_auth system_distributed"
-
+    # Download and Stage all data
+    log_message "5. Downloading and extracting all data from backup chain into staging directory..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
@@ -344,50 +351,51 @@ do_full_restore() {
             local ks_name
             ks_name=$(basename "$(dirname "$full_path_part")")
             
-            local output_dir
-            local check_path
-            local is_system_keyspace=false
-
-            if [[ " $system_keyspaces_to_restore " =~ " $ks_name " ]]; then
-                is_system_keyspace=true
-            fi
-
-            if [ "$is_system_keyspace" = true ]; then
-                # System tables are restored directly to the final data directory
-                output_dir="$CASSANDRA_DATA_DIR/$ks_name/$table_dir_name"
-                check_path="$CASSANDRA_DATA_DIR"
-            else
-                # Application tables are restored to the temporary staging directory
-                output_dir="$TEMP_RESTORE_DIR/$ks_name/$table_dir_name"
-                check_path="$TEMP_RESTORE_DIR"
-            fi
+            # All data goes into the temporary restore directory
+            local output_dir="$TEMP_RESTORE_DIR/$ks_name/$table_dir_name"
             
-            download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$check_path"
+            download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
         done
     done
     log_message "All data from backup chain downloaded and extracted."
 
-    # === PHASE 3: LOADING AND FINALIZATION (ONLINE) ===
-    log_message "--- PHASE 3: LOADING AND FINALIZATION ---"
+    # === PHASE 3: DATA PLACEMENT AND STARTUP ===
+    log_message "--- PHASE 3: FINALIZATION ---"
 
-    log_message "7. Preparing Cassandra for schema replay..."
+    log_message "6. Moving restored data from staging to final data directory..."
+    # Use rsync for efficiency and to handle large numbers of files better than mv
+    rsync -a "$TEMP_RESTORE_DIR/" "$CASSANDRA_DATA_DIR/"
+    log_message "Data moved successfully."
+    
+    log_message "7. Setting correct ownership for all Cassandra directories..."
+    chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
+    chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
+    chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
+
+    log_message "8. Preparing Cassandra for schema replay..."
+    # The schema file was moved along with all other data
+    local final_schema_path="$CASSANDRA_DATA_DIR/schema.cql"
     # Clean up any previous flags first
     sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     # Add the new flag
-    echo "-Dcassandra.replay_schema_from_file=$staged_schema_path" >> "$JVM_OPTIONS_FILE"
+    echo "-Dcassandra.replay_schema_from_file=$final_schema_path" >> "$JVM_OPTIONS_FILE"
 
-    log_message "8. Starting Cassandra service with restored system tables and schema replay..."
+    log_message "9. Starting Cassandra service..."
     systemctl start cassandra
     
-    log_message "Waiting for Cassandra to initialize and join the cluster..."
+    log_message "Waiting for Cassandra to initialize and come online..."
     local CASSANDRA_READY=false
     for i in {1..60}; do # Wait up to 10 minutes
-        # Use nodetool as the source of truth. It will fail if the node is not up.
-        if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
-            CASSANDRA_READY=true
-            break
+        # Use a CQL query to verify readiness.
+        # This check is now performed with the final credentials since system_auth is restored.
+        if cqlsh_wrapper "SELECT cluster_name FROM system.local;" > /dev/null 2>&1; then
+             # An extra check on nodetool status is good practice
+            if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
+                CASSANDRA_READY=true
+                break
+            fi
         fi
-        log_message "Waiting for node to report UP/NORMAL... (attempt $i of 60)"
+        log_message "Waiting for node to become fully ready... (attempt $i of 60)"
         sleep 10
     done
 
@@ -396,41 +404,14 @@ do_full_restore() {
     sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
 
     if [ "$CASSANDRA_READY" = false ]; then
-        log_message "ERROR: Cassandra did not become ready (UN status). Check system logs."
+        log_message "ERROR: Cassandra did not become ready. Check system logs."
+        log_message "The restored data is in place, but the service failed to start correctly."
         exit 1
     fi
-    log_message "Cassandra is ready. Schema and system tables have been applied."
-
-    log_message "9. Loading application data into cluster with sstableloader..."
     
-    export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
-    log_message "Using Cassandra config directory: $CASSANDRA_CONF"
-    
-    local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
-    
-    log_message "Authenticating sstableloader with configured credentials..."
-    loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
-
-    if [ "$SSL_ENABLED" == "true" ]; then
-        log_message "SSL is enabled, providing SSL options to sstableloader."
-        # Note: sstableloader uses the same ports as nodetool. 7001 is standard for SSL storage.
-        loader_cmd+=("--ssl-storage-port" "7001")
-    fi
-
-    # Add the staging directory as the source for the loader
-    loader_cmd+=("$TEMP_RESTORE_DIR")
-    
-    log_message "Executing: ${loader_cmd[*]}"
-    if ! eval "${loader_cmd[*]}"; then
-        log_message "ERROR: sstableloader failed. The cluster may be partially restored."
-        log_message "The staged application data is still available in $TEMP_RESTORE_DIR for manual inspection and reloading."
-        exit 1
-    fi
-
-    log_message "sstableloader completed successfully."
+    log_message "Cassandra is online and ready."
     log_message "10. Restore complete."
-    
-    log_message "The staging directory $TEMP_RESTORE_DIR will now be removed."
+    log_message "The temporary staging directory $TEMP_RESTORE_DIR will now be removed."
     # The trap will handle the final cleanup of the staging directory.
     
     log_message "--- Full Restore Process Finished Successfully ---"
@@ -514,7 +495,18 @@ do_granular_restore() {
         
         local path_to_search="s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/"
         if [ -n "$TABLE_NAME" ]; then
-            path_to_search+="$TABLE_NAME/"
+            # Find the actual table directory name with UUID from the manifest
+            local manifest
+            manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
+            local full_table_name
+            full_table_name=$(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" --arg tbl "$TABLE_NAME" '.tables_backed_up[] | select(startswith($ks + "." + $tbl + "-"))' | head -n 1 | cut -d'.' -f2)
+
+            if [ -n "$full_table_name" ]; then
+                path_to_search+="$full_table_name/"
+            else
+                log_message "WARNING: Could not find table '$TABLE_NAME' in manifest for backup '$backup_ts'. It may not have been backed up. Skipping."
+                continue
+            fi
         fi
 
         log_message "Discovering all archives in path: $path_to_search"
@@ -561,6 +553,7 @@ do_granular_restore() {
 
             if [ "$SSL_ENABLED" == "true" ]; then
                 log_message "SSL is enabled, providing SSL options to sstableloader."
+                # Note: sstableloader uses the same ports as nodetool. 7001 is standard for SSL storage.
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
