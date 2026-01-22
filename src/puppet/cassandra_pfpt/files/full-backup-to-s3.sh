@@ -92,7 +92,7 @@ cleanup_old_snapshots() {
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     # Filter out headers and footers from nodetool output before processing
-    nodetool listsnapshots | grep -Ev '^(Snapshot Details|Total snapshots|There are no snapshots|---)' | grep -v 'Keyspace name' | while IFS= read -r snapshot_line; do
+    nodetool listsnapshots | grep -Ev '^[[:space:]]*(Snapshot Details|Total snapshots:|There are no snapshots|---|$)' | grep -v 'Snapshot name' | grep -v 'Keyspace name' | while IFS= read -r snapshot_line; do
       if [[ -z "$snapshot_line" ]]; then
           continue
       fi
@@ -208,19 +208,17 @@ log_message "Discovering keyspaces and tables to back up..."
 TABLES_BACKED_UP="[]"
 UPLOAD_ERRORS=0
 
-# Determine if SSL is needed for cqlsh
-CQLSH_SSL_OPT=""
+# Build cqlsh command with authentication in a robust bash array
+cqlsh_command_parts=("cqlsh")
 if [ "$SSL_ENABLED" == "true" ]; then
     log_message "INFO: SSL is enabled, using --ssl for cqlsh schema dump."
-    CQLSH_SSL_OPT="--ssl"
+    cqlsh_command_parts+=("--ssl")
 fi
-
-# Build cqlsh command with authentication
-CQLSH_COMMAND="cqlsh ${CQLSH_SSL_OPT} -u '${CASSANDRA_USER}' -p '${CASSANDRA_PASSWORD}'"
+cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
 
 # Make keyspace discovery more robust by using cqlsh.
 # The || true prevents the script from exiting if cqlsh fails, allowing us to log a warning instead.
-KEYSPACES_LIST=$(eval "$CQLSH_COMMAND -e 'DESCRIBE KEYSPACES;'" 2>>"$LOG_FILE" || true)
+KEYSPACES_LIST=$("${cqlsh_command_parts[@]}" -e 'DESCRIBE KEYSPACES;' 2>>"$LOG_FILE" || true)
 
 
 if [ -z "$KEYSPACES_LIST" ]; then
@@ -356,7 +354,7 @@ log_message "Manifest created successfully."
 # 5. Archive the schema
 log_message "Backing up schema..."
 SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
-if eval "timeout 30 $CQLSH_COMMAND -e 'DESCRIBE SCHEMA;'" > "$SCHEMA_FILE"; then
+if "${cqlsh_command_parts[@]}" -e 'DESCRIBE SCHEMA;' > "$SCHEMA_FILE"; then
   log_message "Schema backup created successfully."
 else
   log_message "WARNING: Failed to dump schema. Backup manifest will be uploaded without it."
