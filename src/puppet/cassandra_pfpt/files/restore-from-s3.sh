@@ -36,7 +36,6 @@ fi
 # --- Variables defined after initial checks ---
 HOSTNAME=$(hostname -s)
 TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
-SSTABLELOADER_CRED_FILE="" # Global var for credentials file
 
 # --- Usage ---
 usage() {
@@ -154,10 +153,6 @@ chmod 600 "$TMP_KEY_FILE"
 cleanup() {
     log_message "Running cleanup..."
     rm -f "$TMP_KEY_FILE"
-    if [[ -n "$SSTABLELOADER_CRED_FILE" && -f "$SSTABLELOADER_CRED_FILE" ]]; then
-        log_message "Removing temporary credentials file."
-        rm -f "$SSTABLELOADER_CRED_FILE"
-    fi
     if [[ -n "$TEMP_RESTORE_DIR" && -d "$TEMP_RESTORE_DIR" ]]; then
         log_message "Removing temporary restore directory: $TEMP_RESTORE_DIR"
         rm -rf "$TEMP_RESTORE_DIR"
@@ -547,17 +542,15 @@ do_granular_restore() {
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            # Create and populate the credentials file for sstableloader
-            SSTABLELOADER_CRED_FILE=$(mktemp)
-            chmod 600 "$SSTABLELOADER_CRED_FILE"
-            echo "$CASSANDRA_USER" > "$SSTABLELOADER_CRED_FILE"
-            echo "$CASSANDRA_PASSWORD" >> "$SSTABLELOADER_CRED_FILE"
-            log_message "Using temporary credentials file for sstableloader."
-            
             local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
             
-            # Use the -f flag to pass credentials securely from the file
-            loader_cmd+=("-f" "$SSTABLELOADER_CRED_FILE")
+            # Add username and password if they are valid and not the string "null"
+            if [ -n "$CASSANDRA_USER" ] && [ "$CASSANDRA_USER" != "null" ]; then
+                loader_cmd+=("-u" "$CASSANDRA_USER")
+            fi
+            if [ -n "$CASSANDRA_PASSWORD" ] && [ "$CASSANDRA_PASSWORD" != "null" ]; then
+                loader_cmd+=("-pw" "$CASSANDRA_PASSWORD")
+            fi
 
             if [ "$SSL_ENABLED" == "true" ]; then
                 log_message "SSL is enabled, providing SSL options to sstableloader."
@@ -566,7 +559,7 @@ do_granular_restore() {
 
             loader_cmd+=("$path_to_load")
 
-            log_message "Executing: sstableloader -d ${LOADER_NODES} -f <credentials_file> ..."
+            log_message "Executing: sstableloader -d ${LOADER_NODES} -u ${CASSANDRA_USER} -pw <password> ..."
             
             if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
