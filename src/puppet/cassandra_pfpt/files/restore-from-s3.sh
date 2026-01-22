@@ -534,9 +534,9 @@ do_granular_restore() {
     else # download_and_restore
         log_message "All data has been downloaded. Preparing to load into cluster..."
         
-        local path_to_load="$base_output_dir/$KEYSPACE_NAME"
+        local path_to_load="$base_output_dir"
         
-        if [ -d "$path_to_load" ]; then
+        if [ -d "$path_to_load/$KEYSPACE_NAME" ]; then
             log_message "Loading data from path: $path_to_load"
             
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
@@ -559,7 +559,7 @@ do_granular_restore() {
 
             loader_cmd+=("$path_to_load")
 
-            log_message "Executing: sstableloader -d ${LOADER_NODES} -u ${CASSANDRA_USER} -pw <password> ..."
+            log_message "Executing: sstableloader -d ${LOADER_NODES} ..."
             
             if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
