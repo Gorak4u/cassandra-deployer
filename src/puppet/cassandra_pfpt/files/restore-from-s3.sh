@@ -376,9 +376,9 @@ do_full_restore() {
     log_message "Data moved successfully."
     
     log_message "8. Setting correct ownership for all Cassandra directories..."
-    chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
-    chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
-    chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
+    chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$CASSANDRA_DATA_DIR"
+    chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$CASSANDRA_COMMITLOG_DIR"
+    chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$CASSANDRA_CACHES_DIR"
 
     log_message "9. Starting Cassandra service..."
     systemctl start cassandra
@@ -544,23 +544,23 @@ do_granular_restore() {
             # Find the source directory path (with old UUID from backup)
             local source_table_dir
             source_table_dir=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
+            log_message "DEBUG: Found source (downloaded) table dir: '$source_table_dir'"
+
 
             if [ -z "$source_table_dir" ]; then
                 log_message "WARNING: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Nothing to load."
             else
-                log_message "Downloaded data found at: $source_table_dir"
-
                 # Find the destination directory path (with live UUID)
                 local live_table_dir
                 live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
+                log_message "DEBUG: Found live table dir: '$live_table_dir'"
+
 
                 if [ -z "$live_table_dir" ]; then
                     log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$TABLE_NAME' in '$CASSANDRA_DATA_DIR'."
                     log_message "The table must exist in the cluster before you can perform a granular restore."
                     exit 1
                 else
-                    log_message "Live table directory found at: $live_table_dir"
-
                     local live_table_dirname
                     live_table_dirname=$(basename "$live_table_dir")
                     
@@ -578,13 +578,17 @@ do_granular_restore() {
             fi
         fi
 
-        if [ -d "$path_to_load/$KEYSPACE_NAME" ]; then
-            log_message "Loading data from path: $path_to_load"
+        local keyspace_path_to_load="$path_to_load/$KEYSPACE_NAME"
+        if [ -d "$keyspace_path_to_load" ]; then
+            log_message "Setting correct ownership on downloaded data..."
+            chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$keyspace_path_to_load"
+
+            log_message "Loading data from path: $keyspace_path_to_load"
             
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            local loader_cmd=("sstableloader" "--no-progress" "-d" "${LOADER_NODES}")
+            local loader_cmd=("sstableloader" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER")
@@ -598,7 +602,7 @@ do_granular_restore() {
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            loader_cmd+=("$path_to_load")
+            loader_cmd+=("$keyspace_path_to_load")
 
             log_message "Executing: ${loader_cmd[*]}"
             
