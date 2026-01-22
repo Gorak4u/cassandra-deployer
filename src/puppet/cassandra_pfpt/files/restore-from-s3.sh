@@ -270,8 +270,8 @@ do_full_restore() {
         log_message "Auto-approving destructive full restore via --yes flag."
     fi
 
-    log_message "0. Pre-flight disk space check..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 5 -c 1; then
+    log_message "0. Pre-flight disk usage check..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 99; then
         log_message "ERROR: Initial disk health check failed. The data volume may be full or having issues. Aborting."
         exit 1
     fi
@@ -288,8 +288,8 @@ do_full_restore() {
     log_message "Old directories cleaned."
 
     log_message "2a. Verifying disk space after cleanup..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 95 -c 90; then
-        log_message "ERROR: Post-cleanup disk check failed. Expected disk to be mostly empty but it is not. Aborting."
+    if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 5 -c 10; then
+        log_message "ERROR: Post-cleanup disk check failed. Expected disk usage to be < 5%, but it is not. Aborting."
         exit 1
     fi
     log_message "Post-cleanup disk space is sufficient."
@@ -304,10 +304,10 @@ do_full_restore() {
         table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            # Safety check inside the loop to monitor disk space during restore
-            log_message "Checking disk space before downloading $archive_key..."
-            if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 10 -c 5; then
-                log_message "ERROR: Disk space is low. Aborting mid-restore to prevent filling the disk."
+            # Safety check inside the loop to monitor disk usage during restore
+            log_message "Checking disk usage before downloading $archive_key..."
+            if ! /usr/local/bin/disk-health-check.sh -p "$CASSANDRA_DATA_DIR" -w 90 -c 95; then
+                log_message "ERROR: Disk usage is high. Aborting mid-restore to prevent filling the disk."
                 exit 1
             fi
 
@@ -364,9 +364,9 @@ download_and_extract_table() {
     local check_path="$6"
 
     # Safety check before downloading this table's data
-    log_message "Checking disk space on $check_path before downloading..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 10 -c 5; then
-        log_message "ERROR: Disk space is low. Aborting download for $ks_name.$tbl_name."
+    log_message "Checking disk usage on $check_path before downloading..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 90 -c 95; then
+        log_message "ERROR: Disk usage is high. Aborting download for $ks_name.$tbl_name."
         return 1
     fi
 
@@ -439,12 +439,12 @@ do_granular_restore() {
         mkdir -p "$base_output_dir"
     fi
     
-    log_message "Performing pre-flight disk space check on $check_path..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 20 -c 10; then
+    log_message "Performing pre-flight disk usage check on $check_path..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 80 -c 90; then
         log_message "ERROR: Insufficient disk space on the target volume. Aborting granular restore."
         exit 1
     fi
-    log_message "Disk space is sufficient to begin."
+    log_message "Disk usage is sufficient to begin."
 
     # Step 1: Download and extract all data from the entire chain.
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do

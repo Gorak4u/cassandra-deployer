@@ -2,8 +2,8 @@
 set -euo pipefail
 
 DISK_CHECK_PATH="/var/lib/cassandra/data"
-WARNING_THRESHOLD=25
-CRITICAL_THRESHOLD=15
+WARNING_THRESHOLD=75
+CRITICAL_THRESHOLD=85
 LOG_FILE="/var/log/cassandra/repair.log"
 KEYSPACE="${1:-}" # Optional: specify a keyspace
 
@@ -26,12 +26,12 @@ else
 fi
 
 # Pre-flight disk space check
-log_message "Performing pre-flight disk space check..."
+log_message "Performing pre-flight disk usage check..."
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
-    log_message "ERROR: Pre-flight disk space check failed. Aborting repair to prevent disk space issues."
+    log_message "ERROR: Pre-flight disk usage check failed. Aborting repair to prevent disk space issues."
     exit 1
 fi
-log_message "Disk space OK. Proceeding with repair."
+log_message "Disk usage OK. Proceeding with repair."
 
 # Execute repair via python script
 log_message "Executing command: $PYTHON_CMD"

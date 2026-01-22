@@ -5,7 +5,7 @@ set -euo pipefail
 KEYSPACE=""
 TABLE=""
 DISK_CHECK_PATH="/var/lib/cassandra/data"
-CRITICAL_THRESHOLD=15 # Abort if free space drops below 15%
+CRITICAL_THRESHOLD=85 # Abort if disk usage rises above 85%
 CHECK_INTERVAL=30     # Check disk space every 30 seconds
 LOG_FILE="/var/log/cassandra/compaction_manager.log"
 
@@ -21,7 +21,7 @@ usage() {
     log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Required for -t)"
     log_message "  -t, --table <name>       Specify the table to compact."
     log_message "  -d, --disk-path <path>   Path to monitor for disk space. Default: $DISK_CHECK_PATH"
-    log_message "  -c, --critical <%>       Critical free space threshold (%). Aborts if below. Default: $CRITICAL_THRESHOLD"
+    log_message "  -c, --critical <%>       Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
     log_message "  -i, --interval <sec>     Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
     log_message "  -h, --help               Show this help message."
     log_message ""
@@ -68,16 +68,16 @@ fi
 
 log_message "Target: $TARGET_DESC"
 log_message "Disk path to monitor: $DISK_CHECK_PATH"
-log_message "Critical free space threshold: $CRITICAL_THRESHOLD%"
+log_message "Critical disk usage threshold: $CRITICAL_THRESHOLD%"
 log_message "Disk check interval: $CHECK_INTERVALs"
 
 # Pre-flight disk space check
-log_message "Performing pre-flight disk space check..."
+log_message "Performing pre-flight disk usage check..."
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -c "$CRITICAL_THRESHOLD"; then
-    log_message "ERROR: Pre-flight disk space check failed. Aborting compaction to prevent disk space issues."
+    log_message "ERROR: Pre-flight disk usage check failed. Aborting compaction to prevent disk space issues."
     exit 1
 fi
-log_message "Disk space OK."
+log_message "Disk usage OK."
 
 # Pre-flight node state check
 log_message "Performing pre-flight node state check..."
@@ -98,11 +98,11 @@ log_message "Compaction started with PID: $COMPACTION_PID"
 
 # Monitor the process
 while ps -p $COMPACTION_PID > /dev/null; do
-    log_message "Compaction running (PID: $COMPACTION_PID). Checking disk space..."
+    log_message "Compaction running (PID: $COMPACTION_PID). Checking disk usage..."
     
     # Use the existing health check script
     if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -c "$CRITICAL_THRESHOLD"; then
-        log_message "CRITICAL: Disk space threshold reached. Stopping compaction."
+        log_message "CRITICAL: Disk usage threshold reached. Stopping compaction."
         nodetool stop COMPACTION
         # Wait a moment for the stop command to be processed
         sleep 10
@@ -111,11 +111,11 @@ while ps -p $COMPACTION_PID > /dev/null; do
              log_message "Nodetool stop did not terminate process. Sending KILL signal to PID $COMPACTION_PID."
              kill -9 $COMPACTION_PID
         fi
-        log_message "ERROR: Compaction aborted due to low disk space."
+        log_message "ERROR: Compaction aborted due to low disk usage."
         exit 2
     fi
 
-    log_message "Disk space OK. Sleeping for $CHECK_INTERVAL seconds."
+    log_message "Disk usage OK. Sleeping for $CHECK_INTERVAL seconds."
     sleep $CHECK_INTERVAL
 done
 

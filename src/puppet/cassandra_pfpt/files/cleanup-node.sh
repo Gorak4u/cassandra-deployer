@@ -6,8 +6,8 @@ KEYSPACE=""
 TABLE_LIST=""
 JOBS=0 # 0 means let Cassandra decide
 DISK_CHECK_PATH="/var/lib/cassandra/data"
-WARNING_THRESHOLD=20
-CRITICAL_THRESHOLD=10
+WARNING_THRESHOLD=80
+CRITICAL_THRESHOLD=90
 LOG_FILE="/var/log/cassandra/cleanup.log"
 
 # --- Logging ---
@@ -23,8 +23,8 @@ usage() {
     log_message "  -t, --table <name>          Specify a table to clean up. Can be used multiple times."
     log_message "  -j, --jobs <num>            Number of concurrent sstable cleanup jobs. Default: 0 (auto)"
     log_message "  -d, --disk-path <path>      Path to monitor for disk space. Default: $DISK_CHECK_PATH"
-    log_message "  -w, --warning <%>           Warning free space threshold (%). Aborts if below. Default: $WARNING_THRESHOLD"
-    log_message "  -c, --critical <%>          Critical free space threshold (%). Aborts if below. Default: $CRITICAL_THRESHOLD"
+    log_message "  -w, --warning <%>           Warning disk usage threshold (%). Aborts if above. Default: $WARNING_THRESHOLD"
+    log_message "  -c, --critical <%>          Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
     log_message "  -h, --help                  Show this help message."
     exit 1
 }
@@ -74,17 +74,17 @@ fi
 
 log_message "Target: $TARGET_DESC"
 log_message "Disk path to check: $DISK_CHECK_PATH"
-log_message "Warning free space threshold: $WARNING_THRESHOLD%"
-log_message "Critical free space threshold: $CRITICAL_THRESHOLD%"
+log_message "Warning usage threshold: $WARNING_THRESHOLD%"
+log_message "Critical usage threshold: $CRITICAL_THRESHOLD%"
 log_message "Command to be executed: $CMD"
 
 # Pre-flight disk space check
 log_message "Performing pre-flight disk space check..."
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
-    log_message "ERROR: Pre-flight disk space check failed. Aborting cleanup to prevent disk space issues."
+    log_message "ERROR: Pre-flight disk usage check failed. Aborting cleanup to prevent disk space issues."
     exit 1
 fi
-log_message "Disk space OK. Proceeding with cleanup."
+log_message "Disk usage OK. Proceeding with cleanup."
 
 # Execute the command
 if $CMD; then
