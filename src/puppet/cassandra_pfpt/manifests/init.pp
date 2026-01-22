@@ -1,5 +1,3 @@
-# @summary Main component class for managing Cassandra.
-# This class is fully parameterized and should receive its data from a profile.
 class cassandra_pfpt (
   String $cassandra_version,
   String $java_version,
@@ -183,36 +181,6 @@ class cassandra_pfpt (
     {}
   }
 
-  # Merge the default arguments with any overrides from Hiera. Hiera wins.
-  $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
-  $extra_jvm_args = $merged_jvm_args_hash.values
-  contain cassandra_pfpt::java
-  contain cassandra_pfpt::install
-  contain cassandra_pfpt::config
-  contain cassandra_pfpt::service
-  contain cassandra_pfpt::firewall
-  contain cassandra_pfpt::system_keyspaces
-  contain cassandra_pfpt::roles
-
-  if $manage_jmx_exporter {
-    contain cassandra_pfpt::jmx_exporter
-  }
-  if $manage_coralogix_agent {
-    contain cassandra_pfpt::coralogix
-    Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
-  }
-  if $manage_full_backups or $manage_incremental_backups {
-    contain cassandra_pfpt::backup
-  }
-  if $manage_scheduled_repair {
-    contain cassandra_pfpt::repair
-  }
-
-  # Manage the puppet agent itself
-  contain cassandra_pfpt::puppet
-
-  Class['cassandra_pfpt::java']
-  -> Class['cassandra_pfpt::install']
-  -> Class['cassandra_pfpt::config']
-  ~> Class['cassandra_pfpt::service']
+  # Install stress testing tools
+  include cassandra_pfpt::stress
 }

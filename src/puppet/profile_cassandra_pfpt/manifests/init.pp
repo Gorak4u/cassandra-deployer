@@ -1,6 +1,3 @@
-# @summary Profile for configuring a Cassandra node.
-# This class wraps the cassandra_pfpt component module and provides
-# configuration data via Hiera.
 class profile_cassandra_pfpt {
   # Hiera Lookups for Cassandra Configuration
   # This section gathers all configuration from Hiera, providing sensible defaults.
