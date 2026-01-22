@@ -266,13 +266,13 @@ do_schema_restore() {
 
 do_full_restore() {
     log_message "--- Starting FULL DESTRUCTIVE Node Restore ---"
-    log_message "This will restore the node using sstableloader for maximum reliability."
+    log_message "This will restore the node by placing system tables and using sstableloader for application data."
     log_message "WARNING: This is a DESTRUCTIVE operation. It will:"
     log_message "1. STOP the Cassandra service."
     log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
-    log_message "3. RESTORE data from the backup chain into a temporary staging area."
-    log_message "4. START Cassandra with the restored schema."
-    log_message "5. LOAD the staged data using sstableloader."
+    log_message "3. RESTORE system tables directly and stage application data."
+    log_message "4. START Cassandra with the restored schema and system data."
+    log_message "5. LOAD the staged application data using sstableloader."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -308,14 +308,15 @@ do_full_restore() {
     chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
     chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
 
+    # Application data will be staged here. System data goes directly to final destination.
     TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_staging_$$"
-    log_message "4. Creating temporary staging directory: $TEMP_RESTORE_DIR"
+    log_message "4. Creating temporary staging directory for application data: $TEMP_RESTORE_DIR"
     mkdir -p "$TEMP_RESTORE_DIR"
 
     # === PHASE 2: DATA STAGING (OFFLINE) ===
     log_message "--- PHASE 2: DATA STAGING ---"
     
-    # 2a. Download and Stage Schema
+    # 2a. Download Schema to staging area (will be used for replay)
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     local staged_schema_path="$TEMP_RESTORE_DIR/schema.cql"
     log_message "5. Downloading schema to staging area..."
@@ -326,41 +327,56 @@ do_full_restore() {
     log_message "Schema staged successfully."
 
     # 2b. Download and Stage Data
-    log_message "6. Downloading and extracting all data from backup chain to staging area..."
+    log_message "6. Downloading and extracting all data from backup chain..."
+    local system_keyspaces_to_restore="system_auth system_distributed"
+
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
-        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc)$' | awk '{print $4}')
+        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc|incremental\.tar\.gz\.enc)$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            local s3_path="s3://$S3_BUCKET_NAME/$archive_key"
-            local ks_table_part
-            ks_table_part=$(dirname "$archive_key" | sed "s#^$HOSTNAME/$backup_ts/##")
-            local table_name
-            table_name=$(basename "$ks_table_part")
+            # Parse keyspace and table directory name from the S3 key
+            local full_path_part
+            full_path_part=$(dirname "$archive_key")
+            local table_dir_name
+            table_dir_name=$(basename "$full_path_part")
             local ks_name
-            ks_name=$(dirname "$ks_table_part")
+            ks_name=$(basename "$(dirname "$full_path_part")")
+            
+            local output_dir
+            local check_path
+            local is_system_keyspace=false
 
-            download_and_extract_table "$backup_ts" "$ks_name" "$table_name" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
+            if [[ " $system_keyspaces_to_restore " =~ " $ks_name " ]]; then
+                is_system_keyspace=true
+            fi
+
+            if [ "$is_system_keyspace" = true ]; then
+                # System tables are restored directly to the final data directory
+                output_dir="$CASSANDRA_DATA_DIR/$ks_name/$table_dir_name"
+                check_path="$CASSANDRA_DATA_DIR"
+            else
+                # Application tables are restored to the temporary staging directory
+                output_dir="$TEMP_RESTORE_DIR/$ks_name/$table_dir_name"
+                check_path="$TEMP_RESTORE_DIR"
+            fi
+            
+            download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$check_path"
         done
     done
-    log_message "All data from backup chain extracted to staging area."
+    log_message "All data from backup chain downloaded and extracted."
 
     # === PHASE 3: LOADING AND FINALIZATION (ONLINE) ===
     log_message "--- PHASE 3: LOADING AND FINALIZATION ---"
 
-    log_message "7. Temporarily disabling authentication for restore..."
-    local yaml_file="$CASSANDRA_CONF_DIR/cassandra.yaml"
-    sed -i 's/authenticator:.*/authenticator: AllowAllAuthenticator/' "$yaml_file"
-    sed -i 's/authorizer:.*/authorizer: AllowAllAuthorizer/' "$yaml_file"
-
-    log_message "8. Preparing Cassandra for schema replay..."
+    log_message "7. Preparing Cassandra for schema replay..."
     # Clean up any previous flags first
     sed -i '/-Dcassandra.replay_schema_from_file/d' "$JVM_OPTIONS_FILE"
     # Add the new flag
     echo "-Dcassandra.replay_schema_from_file=$staged_schema_path" >> "$JVM_OPTIONS_FILE"
 
-    log_message "9. Starting Cassandra service with schema replay..."
+    log_message "8. Starting Cassandra service with restored system tables and schema replay..."
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize and join the cluster..."
@@ -381,21 +397,19 @@ do_full_restore() {
 
     if [ "$CASSANDRA_READY" = false ]; then
         log_message "ERROR: Cassandra did not become ready (UN status). Check system logs."
-        log_message "Restoring authentication settings in cassandra.yaml before exiting..."
-        sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
-        sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
         exit 1
     fi
-    log_message "Cassandra is ready. Schema has been applied."
+    log_message "Cassandra is ready. Schema and system tables have been applied."
 
-    log_message "10. Loading data into cluster with sstableloader..."
+    log_message "9. Loading application data into cluster with sstableloader..."
     
     export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
     log_message "Using Cassandra config directory: $CASSANDRA_CONF"
     
     local loader_cmd=("sstableloader" "-d" "${LOADER_NODES}")
     
-    log_message "Authentication is disabled, running sstableloader without credentials."
+    log_message "Authenticating sstableloader with configured credentials..."
+    loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
 
     if [ "$SSL_ENABLED" == "true" ]; then
         log_message "SSL is enabled, providing SSL options to sstableloader."
@@ -409,51 +423,13 @@ do_full_restore() {
     log_message "Executing: ${loader_cmd[*]}"
     if ! eval "${loader_cmd[*]}"; then
         log_message "ERROR: sstableloader failed. The cluster may be partially restored."
-        log_message "The staged data is still available in $TEMP_RESTORE_DIR for manual inspection and reloading."
-        # Still need to re-enable auth before exiting
-        systemctl stop cassandra
-        sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
-        sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
+        log_message "The staged application data is still available in $TEMP_RESTORE_DIR for manual inspection and reloading."
         exit 1
     fi
 
     log_message "sstableloader completed successfully."
-    log_message "11. Restore complete. Finalizing authentication settings."
+    log_message "10. Restore complete."
     
-    log_message "Stopping Cassandra to re-enable authentication."
-    systemctl stop cassandra
-
-    log_message "Restoring original authentication settings..."
-    sed -i 's/authenticator:.*/authenticator: PasswordAuthenticator/' "$yaml_file"
-    sed -i 's/authorizer:.*/authorizer: CassandraAuthorizer/' "$yaml_file"
-
-    log_message "Starting Cassandra in normal mode..."
-    systemctl start cassandra
-    
-    log_message "Waiting for node to come back online with authentication enabled..."
-    local CASSANDRA_FINAL_READY=false
-    for i in {1..30}; do
-        # Use cqlsh with proper credentials as the final check
-        local cqlsh_cmd_parts=("cqlsh")
-        if [ "$SSL_ENABLED" == "true" ]; then
-            cqlsh_cmd_parts+=("--ssl")
-        fi
-        cqlsh_cmd_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
-
-        if "${cqlsh_cmd_parts[@]}" -e "SELECT cluster_name from system.local;" > /dev/null 2>&1; then
-            CASSANDRA_FINAL_READY=true
-            break
-        fi
-        log_message "Waiting for successful CQL connection... (attempt $i of 30)"
-        sleep 10
-    done
-
-    if [ "$CASSANDRA_FINAL_READY" = false ]; then
-        log_message "WARNING: Node did not respond to authenticated CQL query after restart. Please check logs manually."
-    else
-        log_message "Node is online and responding to authenticated queries."
-    fi
-
     log_message "The staging directory $TEMP_RESTORE_DIR will now be removed."
     # The trap will handle the final cleanup of the staging directory.
     
@@ -462,57 +438,38 @@ do_full_restore() {
 
 
 download_and_extract_table() {
-    local backup_ts="$1"
-    local ks_name="$2"
-    local tbl_name="$3"
-    local output_base_dir="$4"
-    local temp_download_dir="$5"
-    local check_path="$6"
+    local archive_key="$1"
+    local output_dir="$2"
+    local temp_download_dir="$3"
+    local check_path="$4"
 
     # Safety check before downloading this table's data
     log_message "Checking disk usage on $check_path before downloading..."
     if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 90 -c 95; then
-        log_message "ERROR: Disk usage is high. Aborting download for $ks_name.$tbl_name."
+        log_message "ERROR: Disk usage is high. Aborting download for archive $archive_key."
         return 1
     fi
 
-    local archive_path_base="$HOSTNAME/$backup_ts/$ks_name/$tbl_name"
-    # New file extension
-    local archive_path_full="$archive_path_base/$tbl_name.tar.gz.enc"
-    local archive_path_incr="$archive_path_base/incremental.tar.gz.enc"
-    local archive_to_download=""
-
-    if aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_full" >/dev/null 2>&1; then
-        archive_to_download="$archive_path_full"
-    elif aws s3api head-object --bucket "$S3_BUCKET_NAME" --key "$archive_path_incr" >/dev/null 2>&1; then
-        archive_to_download="$archive_path_incr"
-    else
-        log_message "INFO: No data for $ks_name.$tbl_name found in backup $backup_ts. Skipping."
-        return 1
-    fi
-
-    # The actual output dir for this specific table's data
-    local table_output_dir="$output_base_dir/$ks_name/$tbl_name"
-    mkdir -p "$table_output_dir"
+    mkdir -p "$output_dir"
     
-    log_message "Downloading data for $ks_name.$tbl_name from $archive_to_download"
+    log_message "Downloading data for $archive_key to $output_dir"
     
-    local temp_enc_file="$temp_download_dir/$ks_name.$tbl_name.$$.tar.gz.enc"
-    local temp_tar_file="$temp_download_dir/$ks_name.$tbl_name.$$.tar.gz"
+    local temp_enc_file="$temp_download_dir/$(basename "$archive_key").$$"
+    local temp_tar_file="${temp_enc_file%.enc}"
 
-    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_to_download" "$temp_enc_file"; then
-        log_message "ERROR: Failed to download $archive_to_download."
+    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_key" "$temp_enc_file"; then
+        log_message "ERROR: Failed to download $archive_key."
         return 1
     fi
 
     if ! openssl enc -d -aes-256-cbc -pbkdf2 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
-        log_message "ERROR: Failed to decrypt $archive_to_download. Check encryption key and file integrity."
+        log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
         rm -f "$temp_enc_file"
         return 1
     fi
 
-    if ! tar -xzf "$temp_tar_file" -C "$table_output_dir"; then
-        log_message "ERROR: Failed to extract $archive_to_download. Archive is likely corrupt."
+    if ! tar -xzf "$temp_tar_file" -C "$output_dir"; then
+        log_message "ERROR: Failed to extract $archive_key. Archive is likely corrupt."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
     fi
@@ -555,24 +512,31 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
+        local path_to_search="s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/"
         if [ -n "$TABLE_NAME" ]; then
-            # If a specific table is requested, just download it.
-            download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$TABLE_NAME" "$base_output_dir" "$temp_download_dir" "$check_path"
-        else
-            # If a whole keyspace is requested, discover and download all tables.
-            log_message "Discovering all tables in keyspace '$KEYSPACE_NAME' for backup '$backup_ts'..."
-            local tables_in_backup
-            tables_in_backup=$(aws s3 ls "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/" | awk '{print $2}' | sed 's/\///')
-            
-            if [ -z "$tables_in_backup" ]; then
-                log_message "No tables found for keyspace '$KEYSPACE_NAME' in backup '$backup_ts'. Skipping."
-                continue
-            fi
-
-            for table_in_ks in $tables_in_backup; do
-                download_and_extract_table "$backup_ts" "$KEYSPACE_NAME" "$table_in_ks" "$base_output_dir" "$temp_download_dir" "$check_path"
-            done
+            path_to_search+="$TABLE_NAME/"
         fi
+
+        log_message "Discovering all archives in path: $path_to_search"
+        local table_archives
+        table_archives=$(aws s3 ls --recursive "$path_to_search" | grep -E '(\.tar\.gz\.enc|incremental\.tar\.gz\.enc)$' | awk '{print $4}' || true)
+        
+        if [ -z "$table_archives" ]; then
+            log_message "No archives found for the specified path in backup '$backup_ts'. Skipping."
+            continue
+        fi
+
+        for archive_key in $table_archives; do
+             local full_path_part
+            full_path_part=$(dirname "$archive_key")
+            local table_dir_name
+            table_dir_name=$(basename "$full_path_part")
+            local ks_name
+            ks_name=$(basename "$(dirname "$full_path_part")")
+
+            local output_dir="$base_output_dir/$ks_name/$table_dir_name"
+            download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
+        done
     done
     
     # Step 2: Decide on the final action.
@@ -584,10 +548,6 @@ do_granular_restore() {
         
         local path_to_load="$base_output_dir/$KEYSPACE_NAME"
         
-        if [ -n "$TABLE_NAME" ]; then
-            path_to_load="$path_to_load/$TABLE_NAME"
-        fi
-
         if [ -d "$path_to_load" ]; then
             log_message "Loading data from path: $path_to_load"
             

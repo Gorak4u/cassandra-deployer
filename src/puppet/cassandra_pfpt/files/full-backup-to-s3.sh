@@ -236,15 +236,15 @@ else
         
         # Use a robust find and while loop to handle table directories
         find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" -print0 2>/dev/null | while IFS= read -r -d $'\0' table_dir; do
-            table_name=$(basename "$table_dir" | cut -d'-' -f1)
+            table_dir_name=$(basename "$table_dir")
             snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
             
             # Check if snapshot dir exists and is not empty
             if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
-                log_message "Backing up table: $ks.$table_name"
+                log_message "Backing up table: $ks.$table_dir_name"
                 
                 if [ "$BACKUP_BACKEND" == "s3" ]; then
-                    s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_name/$table_name.tar.gz.enc"
+                    s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_dir_name/$table_dir_name.tar.gz.enc"
                     if [ "$UPLOAD_STREAMING" = "true" ]; then
                         # Streaming pipeline: tar -> gzip -> openssl -> aws s3
                         tar -C "$snapshot_dir" -c . | \
@@ -255,27 +255,27 @@ else
                         # Check all exit codes in the pipeline
                         pipeline_status=("${PIPESTATUS[@]}")
                         if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
-                            log_message "ERROR: Streaming backup failed for $ks.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                            log_message "ERROR: Streaming backup failed for $ks.$table_dir_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
-                            log_message "Successfully streamed backup for $ks.$table_name"
-                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                            log_message "Successfully streamed backup for $ks.$table_dir_name"
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
                         fi
                     else
                         # Non-streaming (safer) method using temporary files
-                        local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz"
-                        local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_name.tar.gz.enc"
+                        local_tar_file="$BACKUP_TEMP_DIR/$ks.$table_dir_name.tar.gz"
+                        local_enc_file="$BACKUP_TEMP_DIR/$ks.$table_dir_name.tar.gz.enc"
 
                         # Step 1: Archive and compress
                         if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
-                            log_message "ERROR: Failed to archive $ks.$table_name. Skipping."
+                            log_message "ERROR: Failed to archive $ks.$table_dir_name. Skipping."
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                             continue
                         fi
 
                         # Step 2: Encrypt
                         if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                            log_message "ERROR: Failed to encrypt $ks.$table_name. Skipping."
+                            log_message "ERROR: Failed to encrypt $ks.$table_dir_name. Skipping."
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                             rm -f "$local_tar_file"
                             continue
@@ -283,19 +283,19 @@ else
                         
                         # Step 3: Upload
                         if ! aws s3 cp "$local_enc_file" "$s3_path"; then
-                            log_message "ERROR: Failed to upload backup for $ks.$table_name"
+                            log_message "ERROR: Failed to upload backup for $ks.$table_dir_name"
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
-                            log_message "Successfully uploaded backup for $ks.$table_name"
-                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                            log_message "Successfully uploaded backup for $ks.$table_dir_name"
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
                         fi
 
                         # Step 4: Cleanup local temp files
                         rm -f "$local_tar_file" "$local_enc_file"
                     fi
                 else
-                    log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks.$table_name."
-                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_name\"]")
+                    log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks.$table_dir_name."
+                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
                 fi
             fi
         done
