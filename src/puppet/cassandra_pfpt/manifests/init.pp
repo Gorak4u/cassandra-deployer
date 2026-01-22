@@ -1,3 +1,11 @@
+# @summary This is the primary class for the cassandra_pfpt module. It manages the installation, configuration, and service of Apache Cassandra.
+#
+# @param cassandra_version The version of Cassandra to install.
+# @param java_version The major version of Java required.
+# @param cluster_name The name of the Cassandra cluster.
+# @param seeds_list An array of seed node IP addresses.
+# @param listen_address The IP address for Cassandra to listen on.
+#
 class cassandra_pfpt (
   String $cassandra_version,
   String $java_version,
@@ -177,15 +185,19 @@ class cassandra_pfpt (
       'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
       'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
     }
+  } else {
+    {}
   }
 
   # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
+
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
   contain cassandra_pfpt::config
   contain cassandra_pfpt::service
+  contain cassandra_pfpt::firewall
   contain cassandra_pfpt::system_keyspaces
   contain cassandra_pfpt::roles
   contain cassandra_pfpt::stress
@@ -203,6 +215,9 @@ class cassandra_pfpt (
   if $manage_scheduled_repair {
     contain cassandra_pfpt::repair
   }
+
+  # Manage the puppet agent itself
+  contain cassandra_pfpt::puppet
 
   Class['cassandra_pfpt::java']
   -> Class['cassandra_pfpt::install']
