@@ -577,10 +577,10 @@ do_granular_restore() {
             fi
         fi
 
-        local keyspace_path_to_load="$path_to_load/$KEYSPACE_NAME"
-        if [ -d "$keyspace_path_to_load" ]; then
+        # The path_to_load is the directory containing the keyspace folders.
+        if [ -d "$path_to_load" ] && [ -n "$(ls -A "$path_to_load")" ]; then
             log_message "Setting correct ownership on downloaded data..."
-            chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$keyspace_path_to_load"
+            chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$path_to_load"
 
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
@@ -599,7 +599,8 @@ do_granular_restore() {
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            loader_cmd+=("$keyspace_path_to_load")
+            # Pass the parent directory containing the keyspace folder(s)
+            loader_cmd+=("$path_to_load")
 
             log_message "The following command will be executed:"
             echo "${loader_cmd[*]}" | tee -a "$RESTORE_LOG_FILE"
