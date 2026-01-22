@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
@@ -332,19 +331,13 @@ do_full_restore() {
     log_message "6. Downloading and extracting all data from backup chain..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
-        local table_archives
-        table_archives=$(aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}')
-
-        for archive_key in $table_archives; do
-            local ks_and_table_path
+        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
             ks_and_table_path=$(dirname "$archive_key") 
-            local table_dir
             table_dir=$(basename "$ks_and_table_path")
-            local ks_dir
             ks_dir=$(basename "$(dirname "$ks_and_table_path")")
             
             # The output directory should mirror the cassandra data structure
-            local output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_dir"
+            output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_dir"
             
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
         done
@@ -468,48 +461,19 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
-        # Discover table directories to restore, respecting the --table flag if provided.
-        local s3_search_prefix="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
-        local manifest_key="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json"
-        
-        local manifest
-        manifest=$(aws s3 cp "$manifest_key" - 2>/dev/null || echo "{}")
-        
-        local tables_in_manifest
-        tables_in_manifest=($(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" '.tables_backed_up[] | select(startswith($ks + "/"))'))
-        
-        if [ ${#tables_in_manifest[@]} -eq 0 ]; then
-            log_message "No tables found for keyspace '$KEYSPACE_NAME' in manifest for backup '$backup_ts'. Skipping."
-            continue
-        fi
-
-        for table_path in "${tables_in_manifest[@]}"; do
-            local current_table_name
-            current_table_name=$(echo "$table_path" | cut -d'/' -f2 | cut -d'-' -f1)
-            
-            # If --table is specified, skip if it doesn't match
-            if [ -n "$TABLE_NAME" ] && [ "$current_table_name" != "$TABLE_NAME" ]; then
+        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
+            # If a table name is specified, only process archives for that table.
+            # This is a simple string match on the path.
+            if [ -n "$TABLE_NAME" ] && [[ ! "$archive_key" =~ "/${TABLE_NAME}-" ]]; then
                 continue
             fi
-
-            local ks_name
-            ks_name=$(echo "$table_path" | cut -d'/' -f1)
-            local table_dir_name
-            table_dir_name=$(echo "$table_path" | cut -d'/' -f2)
-
-            local output_dir="$base_output_dir/$ks_name/$table_dir_name"
             
-            # Construct archive key based on backup type from manifest
-            local backup_type
-            backup_type=$(echo "$manifest" | jq -r '.backup_type')
-            
-            local archive_name="incremental.tar.gz.enc"
-            if [ "$backup_type" == "full" ]; then
-                archive_name="$table_dir_name.tar.gz.enc"
-            fi
-            
-            local archive_key="$EFFECTIVE_SOURCE_HOST/$backup_ts/$ks_name/$table_dir_name/$archive_name"
+            ks_and_table_path=$(dirname "$archive_key")
+            table_dir=$(basename "$ks_and_table_path")
+            ks_dir=$(basename "$(dirname "$ks_and_table_path")")
 
+            output_dir="$base_output_dir/$ks_dir/$table_dir"
+            
             download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
         done
     done
