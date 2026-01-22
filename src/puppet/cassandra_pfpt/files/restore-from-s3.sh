@@ -75,6 +75,13 @@ CASSANDRA_PASSWORD=$(jq -r '.cassandra_password' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 
+# Validate essential configuration
+if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_message "ERROR: 'config_dir_path' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_DATA_DIR" ] || [ "$CASSANDRA_DATA_DIR" == "null" ]; then log_message "ERROR: 'cassandra_data_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_COMMITLOG_DIR" ] || [ "$CASSANDRA_COMMITLOG_DIR" == "null" ]; then log_message "ERROR: 'commitlog_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_CACHES_DIR" ] || [ "$CASSANDRA_CACHES_DIR" == "null" ]; then log_message "ERROR: 'saved_caches_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$LISTEN_ADDRESS" ] || [ "$LISTEN_ADDRESS" == "null" ]; then log_message "ERROR: 'listen_address' is not set in $CONFIG_FILE."; exit 1; fi
+
 
 # Derive restore paths from the main data directory parameter
 RESTORE_BASE_PATH="${CASSANDRA_DATA_DIR%/*}" # e.g., /var/lib/cassandra
@@ -251,14 +258,14 @@ do_schema_restore() {
     log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
     
     local cqlsh_cmd
-    cqlsh_cmd=$(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD")
+    cqlsh_cmd=($(build_cqlsh_cmd "$CASSANDRA_USER" "$CASSANDRA_PASSWORD"))
 
     local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
     log_message "Downloading schema from $schema_s3_path"
 
     if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
         log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: $cqlsh_cmd -f /tmp/schema_restore.cql"
+        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd[*]} -f /tmp/schema_restore.cql"
     else
         log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
         exit 1
