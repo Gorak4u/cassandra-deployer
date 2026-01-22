@@ -402,7 +402,7 @@ download_and_extract_table() {
     
     log_message "Downloading data for $archive_key to $output_dir"
     
-    local temp_enc_file="$temp_download_dir/$(basename "$archive_key").$$"
+    local temp_enc_file="$temp_download_dir/$(basename "$archive_key")"
     local temp_tar_file="${temp_enc_file%.enc}"
 
     if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
