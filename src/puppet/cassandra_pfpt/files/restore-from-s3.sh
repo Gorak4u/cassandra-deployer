@@ -402,17 +402,22 @@ download_and_extract_table() {
     
     log_message "Downloading data for $archive_key to $output_dir"
     
-    local temp_enc_file="$temp_download_dir/$(basename "$archive_key")"
-    local temp_tar_file="${temp_enc_file%.enc}"
+    # Use clean, static temporary filenames within this function's scope.
+    local temp_enc_file="$temp_download_dir/temp.tar.gz.enc"
+    local temp_tar_file="$temp_download_dir/temp.tar.gz"
+
+    # Ensure no old temp files exist from a failed previous run.
+    rm -f "$temp_enc_file" "$temp_tar_file"
 
     if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_message "ERROR: Failed to download $archive_key."
+        rm -f "$temp_enc_file" # Clean up partial download
         return 1
     fi
 
     if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
         log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
-        rm -f "$temp_enc_file"
+        rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
     fi
 
@@ -422,6 +427,7 @@ download_and_extract_table() {
         return 1
     fi
     
+    # Final cleanup of temp files for this run.
     rm -f "$temp_enc_file" "$temp_tar_file"
     return 0
 }
