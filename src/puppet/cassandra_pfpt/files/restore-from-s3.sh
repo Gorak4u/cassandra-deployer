@@ -1,4 +1,5 @@
 
+
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
@@ -593,15 +594,34 @@ do_granular_restore() {
             if [[ -n "$CASSANDRA_PASSWORD" && "$CASSANDRA_PASSWORD" != "null" ]]; then
                 loader_cmd+=("-pw" "$CASSANDRA_PASSWORD")
             fi
-
+            
             if [ "$SSL_ENABLED" == "true" ]; then
                 log_message "SSL is enabled, providing SSL options to sstableloader."
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 
-            # Pass the parent directory containing the keyspace folder(s)
-            loader_cmd+=("$path_to_load")
+            local final_path_to_load
+            if [ -n "$TABLE_NAME" ]; then
+                # After UUID rename, find the final specific path to the table directory.
+                final_path_to_load=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
+                if [ -z "$final_path_to_load" ]; then
+                    log_message "ERROR: Could not find final table directory after potential rename. Aborting."
+                    exit 1
+                fi
+                log_message "Granular table restore: pointing sstableloader directly to: $final_path_to_load"
+            else
+                # For a keyspace restore, point to the keyspace directory inside the temp folder.
+                final_path_to_load="$path_to_load/$KEYSPACE_NAME"
+                if [ ! -d "$final_path_to_load" ]; then
+                    log_message "ERROR: Keyspace directory '$final_path_to_load' does not exist. Nothing to load."
+                    exit 1
+                fi
+                log_message "Granular keyspace restore: pointing sstableloader to: $final_path_to_load"
+            fi
 
+            # Pass the most specific path possible to the loader.
+            loader_cmd+=("$final_path_to_load")
+            
             log_message "The following command will be executed:"
             echo "${loader_cmd[*]}" | tee -a "$RESTORE_LOG_FILE"
             
