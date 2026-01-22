@@ -144,6 +144,7 @@ This profile installs a suite of robust management scripts in `/usr/local/bin` o
 | `restore-from-s3.sh`           | **(Primary Restore Tool)** A powerful script to restore data to a point in time from S3 backups.              |
 | `full-backup-to-s3.sh`         | (Automated) Script executed by `systemd` to perform scheduled full backups.                                 |
 | `incremental-backup-to-s3.sh`  | (Automated) Script executed by `systemd` to perform scheduled incremental backups.                          |
+| `stress-test.sh`               | A robust wrapper for running `cassandra-stress` performance tests.                                          |
 | `cassandra-upgrade-precheck.sh`| A detailed, non-invasive script to validate readiness for a major version upgrade (e.g., 3.11 to 4.0).         |
 | `robust_backup.sh`             | Deprecated. Use `full-backup-to-s3.sh` with `backup_backend: 'local'`.                                     |
 
@@ -570,6 +571,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
+*   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/bin/stress-test.sh` wrapper script. Default: `false`.
 
 ---
 

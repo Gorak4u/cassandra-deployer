@@ -1,4 +1,5 @@
-# @summary This profile class configures a complete Cassandra node by wrapping the `cassandra_pfpt` component module and feeding it data from Hiera.
+# @summary Profile for a complete Cassandra node.
+# @api private
 class profile_cassandra_pfpt {
   # Hiera Lookups for Cassandra Configuration
   # This section gathers all configuration from Hiera, providing sensible defaults.
@@ -148,6 +149,8 @@ class profile_cassandra_pfpt {
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
   $repair_keyspace                  = lookup('profile_cassandra_pfpt::repair_keyspace', { 'default_value' => undef })
+  # Stress Test Settings
+  $manage_stress_test               = lookup('profile_cassandra_pfpt::manage_stress_test', { 'default_value' => false })
 
   # Include the component class, passing all data from Hiera.
   class { 'cassandra_pfpt':
@@ -293,5 +296,6 @@ class profile_cassandra_pfpt {
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
     repair_keyspace                  => $repair_keyspace,
+    manage_stress_tools              => $manage_stress_test,
   }
 }

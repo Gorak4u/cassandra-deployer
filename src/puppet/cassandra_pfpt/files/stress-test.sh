@@ -4,13 +4,19 @@ set -euo pipefail
 # --- Defaults & Configuration ---
 KEYSPACE="my_app"
 TABLE="users_large"
-PROFILE_PATH="/etc/cassandra/stress-schema.yaml"
+PROFILE_PATH="/etc/cassandra/conf/stress-schema.yaml"
+CONFIG_PATH="/etc/cassandra/conf/stress.conf"
 NODES=""
 WRITE_COUNT=""
 READ_COUNT=""
 DELETE_COUNT=""
 LOG_FILE="/var/log/cassandra/stress-test.log"
 NO_WARMUP=false
+
+# Source credentials and SSL settings from config file if it exists
+if [ -f "$CONFIG_PATH" ]; then
+    source "$CONFIG_PATH"
+fi
 
 # --- Logging ---
 log_message() {
@@ -21,6 +27,7 @@ log_message() {
 usage() {
     log_message "Usage: $0 [OPTIONS]"
     log_message "A robust wrapper for cassandra-stress."
+    log_message "Credentials and SSL settings are automatically configured via $CONFIG_PATH."
     log_message ""
     log_message "Operations (at least one is required):"
     log_message "  -w, --write <count>     Number of rows to write (e.g., 10M for 10 million)."
@@ -86,6 +93,20 @@ else
 fi
 
 CMD_ARGS+=("-node" "$NODES")
+
+# Add authentication arguments if provided in config
+if [ -n "${CASSANDRA_USER:-}" ]; then
+    CMD_ARGS+=("-user" "$CASSANDRA_USER")
+fi
+if [ -n "${CASSANDRA_PASS:-}" ]; then
+    CMD_ARGS+=("-password" "$CASSANDRA_PASS")
+fi
+
+# Add SSL mode if requested in config
+if [ "${USE_SSL:-false}" = true ]; then
+    CMD_ARGS+=("-mode" "ssl" "encryption=true")
+fi
+
 
 # Function to run a stress operation
 run_stress() {

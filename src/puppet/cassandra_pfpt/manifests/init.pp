@@ -1,11 +1,6 @@
-# @summary This is the primary class for the cassandra_pfpt module. It manages the installation, configuration, and service of Apache Cassandra.
-#
+# @summary Manages the complete installation and configuration of Cassandra.
 # @param cassandra_version The version of Cassandra to install.
-# @param java_version The major version of Java required.
-# @param cluster_name The name of the Cassandra cluster.
-# @param seeds_list An array of seed node IP addresses.
-# @param listen_address The IP address for Cassandra to listen on.
-#
+# @param java_version The major version of Java to install.
 class cassandra_pfpt (
   String $cassandra_version,
   String $java_version,
@@ -149,6 +144,7 @@ class cassandra_pfpt (
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
   Sensitive[String] $backup_encryption_key,
+  Boolean $manage_stress_tools = false,
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -192,7 +188,6 @@ class cassandra_pfpt (
   # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
-
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
   contain cassandra_pfpt::config
@@ -200,7 +195,16 @@ class cassandra_pfpt (
   contain cassandra_pfpt::firewall
   contain cassandra_pfpt::system_keyspaces
   contain cassandra_pfpt::roles
-  contain cassandra_pfpt::stress
+
+  if $manage_stress_tools {
+    class { 'cassandra_pfpt::stress':
+      user            => $user,
+      config_dir_path => $config_dir_path,
+      cassandra_user  => 'cassandra',
+      cassandra_pass  => $cassandra_password,
+      ssl_enabled     => $ssl_enabled,
+    }
+  }
 
   if $manage_jmx_exporter {
     contain cassandra_pfpt::jmx_exporter
