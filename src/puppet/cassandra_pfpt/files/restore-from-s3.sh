@@ -48,12 +48,15 @@ usage() {
     log_message ""
     log_message "Modes (choose one):"
     log_message "  --full-restore                       Performs a full, destructive restore of the entire node."
-    log_message "  --schema-only                        DEPRECATED: Schema is now restored with system keyspaces."
     log_message "  --keyspace <ks> [--table <table>]    Targets a specific keyspace or table for a granular restore (requires an action)."
     log_message ""
     log_message "Actions for Granular Restore (required if --keyspace is used):"
     log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
     log_message "  --download-and-restore             Download data and load it into the cluster via sstableloader."
+    log_message ""
+    log_message "Restore Source Options (optional):"
+    log_message "  --s3-bucket <name>                   Override the S3 bucket from config.json."
+    log_message "  --source-host <hostname>             Restore from a backup of a different host. Defaults to the current hostname."
     log_message ""
     log_message "Automation:"
     log_message "  --yes                                Skips all interactive confirmation prompts. Use with caution."
@@ -101,6 +104,8 @@ TABLE_NAME=""
 MODE="" # Will be set to 'granular', 'full', or 'schema'
 RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
 AUTO_APPROVE=false
+S3_BUCKET_OVERRIDE=""
+SOURCE_HOST_OVERRIDE=""
 
 if [ "$#" -eq 0 ]; then
     usage
@@ -111,8 +116,9 @@ while [[ "$#" -gt 0 ]]; do
         --date) TARGET_DATE="$2"; shift ;;
         --keyspace) KEYSPACE_NAME="$2"; shift ;;
         --table) TABLE_NAME="$2"; shift ;;
+        --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
+        --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
         --full-restore) MODE="full" ;;
-        --schema-only) MODE="schema" ;;
         --download-only) RESTORE_ACTION="download_only" ;;
         --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
         --yes) AUTO_APPROVE=true ;;
@@ -164,6 +170,10 @@ if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
 fi
 echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
+# --- Define Effective Variables ---
+EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+
 
 # --- Core Logic Functions ---
 
@@ -177,9 +187,9 @@ cqlsh_wrapper() {
         cqlsh_cmd_parts+=("--ssl")
     fi
     
-    # Execute the command
+    # Execute the command, ensuring special characters in password are handled
     if ! "${cqlsh_cmd_parts[@]}"; then
-        log_message "ERROR: cqlsh command failed. Using password from config.json."
+        log_message "ERROR: cqlsh command failed."
         return 1
     fi
 }
@@ -198,10 +208,10 @@ find_backup_chain() {
 
     log_message "Listing available backups from S3..."
     local all_backups
-    all_backups=$(aws s3 ls "s3://$S3_BUCKET_NAME/$HOSTNAME/" | awk '{print $2}' | sed 's/\///' || true)
+    all_backups=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | awk '{print $2}' | sed 's/\///' || true)
 
     if [ -z "$all_backups" ]; then
-        log_message "ERROR: No backups found for host '$HOSTNAME' in bucket '$S3_BUCKET_NAME'."
+        log_message "ERROR: No backups found for host '$EFFECTIVE_SOURCE_HOST' in bucket '$EFFECTIVE_S3_BUCKET'."
         exit 1
     fi
 
@@ -229,7 +239,7 @@ find_backup_chain() {
     log_message "Analyzing backup manifests to build restore chain..."
     for backup_ts in "${sorted_backups[@]}"; do
         local manifest
-        manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/backup_manifest.json" - 2>/dev/null || continue)
+        manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || continue)
         
         if [ -z "$manifest" ]; then
             log_message "WARNING: Skipping backup '$backup_ts' as it has no manifest."
@@ -254,12 +264,6 @@ find_backup_chain() {
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
-do_schema_restore() {
-    log_message "--- Schema-Only Restore is DEPRECATED ---"
-    log_message "Schema, roles, and passwords are now restored as part of a full restore by backing up system keyspaces."
-    log_message "Please use --full-restore on a stopped node to recover the schema and data together."
-}
-
 
 do_full_restore() {
     log_message "--- Starting SIMPLIFIED FULL DESTRUCTIVE Node Restore ---"
@@ -270,7 +274,7 @@ do_full_restore() {
     log_message "3. DOWNLOAD all backup data to a temporary location."
     log_message "4. CONFIGURE cassandra.yaml with the node's original tokens."
     log_message "5. MOVE the restored data into the final Cassandra data directory."
-    log_message "6. START Cassandra with the restored data and tokens."
+    log_message "6. START Cassandra."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -310,7 +314,7 @@ do_full_restore() {
     
     log_message "4. Downloading manifest from base full backup to extract tokens..."
     local base_manifest
-    base_manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
+    base_manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
     if [ -z "$base_manifest" ]; then
         log_message "ERROR: Cannot download manifest for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -342,20 +346,17 @@ do_full_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
-        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}')
+        table_archives=$(aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            local archive_basename
-            archive_basename=$(basename "$archive_key" .tar.gz.enc)
-            
-            # The path format is now <keyspace>/<table-name-uuid>/<file>
             local ks_and_table_path
-            ks_and_table_path=$(dirname "$archive_key") # e.g. host/timestamp/keyspace/table-uuid
+            ks_and_table_path=$(dirname "$archive_key") 
             local table_dir
             table_dir=$(basename "$ks_and_table_path")
             local ks_dir
             ks_dir=$(basename "$(dirname "$ks_and_table_path")")
             
+            # The output directory should mirror the cassandra data structure
             local output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_dir"
             
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
@@ -367,6 +368,7 @@ do_full_restore() {
     log_message "--- PHASE 3: FINALIZATION ---"
 
     log_message "7. Moving restored data from temporary dir to final data directory..."
+    # rsync is safer than mv as it can be resumed.
     rsync -a "$TEMP_RESTORE_DIR/" "$CASSANDRA_DATA_DIR/"
     log_message "Data moved successfully."
     
@@ -425,7 +427,7 @@ download_and_extract_table() {
     local temp_enc_file="$temp_download_dir/$(basename "$archive_key").$$"
     local temp_tar_file="${temp_enc_file%.enc}"
 
-    if ! aws s3 cp "s3://$S3_BUCKET_NAME/$archive_key" "$temp_enc_file"; then
+    if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_message "ERROR: Failed to download $archive_key."
         return 1
     fi
@@ -480,11 +482,11 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
-        local path_to_search="s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/$KEYSPACE_NAME/"
+        local path_to_search="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
         if [ -n "$TABLE_NAME" ]; then
             # Find the actual table directory name with UUID from the manifest
             local manifest
-            manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
+            manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
             local table_dir
             table_dir=$(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" --arg tbl "$TABLE_NAME" '.tables_backed_up[] | select(startswith($ks + "/" + $tbl + "-"))' | head -n 1 | cut -d'/' -f2)
 
@@ -563,6 +565,8 @@ do_granular_restore() {
 # --- Main Execution ---
 
 log_message "--- Starting Point-in-Time Restore Manager ---"
+log_message "Target S3 Bucket: $EFFECTIVE_S3_BUCKET"
+log_message "Source Hostname for Restore: $EFFECTIVE_SOURCE_HOST"
 
 if [ "$BACKUP_BACKEND" != "s3" ]; then
     log_message "ERROR: This restore script only supports the 's3' backup backend."
@@ -587,9 +591,6 @@ else
 fi
 
 case $MODE in
-    "schema")
-        do_schema_restore
-        ;;
     "full")
         do_full_restore
         ;;
@@ -597,7 +598,8 @@ case $MODE in
         do_granular_restore
         ;;
     *)
-        log_message "INTERNAL ERROR: Invalid mode detected."
+        log_message "INTERNAL ERROR: Invalid mode detected or no mode specified."
+        usage
         exit 1
         ;;
 esac
