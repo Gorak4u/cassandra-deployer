@@ -478,6 +478,8 @@ do_granular_restore() {
         mkdir -p "$base_output_dir"
     fi
     
+    local path_to_load="$base_output_dir"
+
     log_message "Performing pre-flight disk usage check on $check_path..."
     if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 80 -c 90; then
         log_message "ERROR: Insufficient disk space on the target volume. Aborting granular restore."
@@ -535,8 +537,6 @@ do_granular_restore() {
     else # download_and_restore
         log_message "All data has been downloaded. Preparing to load into cluster..."
         
-        local path_to_load="$base_output_dir"
-        
         # Handle UUID mismatch for single-table restores
         if [ -n "$TABLE_NAME" ]; then
             log_message "Handling potential table UUID mismatch for granular restore of $KEYSPACE_NAME.$TABLE_NAME..."
@@ -544,23 +544,21 @@ do_granular_restore() {
             # Find the source directory path (with old UUID from backup)
             local source_table_dir
             source_table_dir=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
-            log_message "DEBUG: Found source (downloaded) table dir: '$source_table_dir'"
-
-
+            
             if [ -z "$source_table_dir" ]; then
                 log_message "WARNING: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Nothing to load."
             else
+                log_message "DEBUG: Found source (downloaded) table dir: '$source_table_dir'"
                 # Find the destination directory path (with live UUID)
                 local live_table_dir
                 live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
-                log_message "DEBUG: Found live table dir: '$live_table_dir'"
-
-
+                
                 if [ -z "$live_table_dir" ]; then
                     log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$TABLE_NAME' in '$CASSANDRA_DATA_DIR'."
                     log_message "The table must exist in the cluster before you can perform a granular restore."
                     exit 1
                 else
+                    log_message "DEBUG: Found live table dir: '$live_table_dir'"
                     local live_table_dirname
                     live_table_dirname=$(basename "$live_table_dir")
                     
@@ -583,12 +581,10 @@ do_granular_restore() {
             log_message "Setting correct ownership on downloaded data..."
             chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$keyspace_path_to_load"
 
-            log_message "Loading data from path: $keyspace_path_to_load"
-            
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
             log_message "Using Cassandra config directory: $CASSANDRA_CONF"
 
-            local loader_cmd=("sstableloader" "--no-progress" "-d" "$LOADER_NODES")
+            local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ -n "$CASSANDRA_USER" && "$CASSANDRA_USER" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER")
@@ -604,6 +600,7 @@ do_granular_restore() {
 
             loader_cmd+=("$keyspace_path_to_load")
 
+            log_message "Loading data from path: $keyspace_path_to_load"
             log_message "Executing: ${loader_cmd[*]}"
             
             if "${loader_cmd[@]}"; then
