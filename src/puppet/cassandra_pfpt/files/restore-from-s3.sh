@@ -546,7 +546,8 @@ do_granular_restore() {
             source_table_dir=$(find "$path_to_load/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$TABLE_NAME-*" -print -quit)
             
             if [ -z "$source_table_dir" ]; then
-                log_message "WARNING: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Nothing to load."
+                log_message "ERROR: No downloaded data found for table '$TABLE_NAME' in '$path_to_load/$KEYSPACE_NAME'. Cannot proceed with restore."
+                exit 1
             else
                 log_message "DEBUG: Found source (downloaded) table dir: '$source_table_dir'"
                 # Find the destination directory path (with live UUID)
@@ -600,8 +601,8 @@ do_granular_restore() {
 
             loader_cmd+=("$keyspace_path_to_load")
 
-            log_message "Loading data from path: $keyspace_path_to_load"
-            log_message "Executing: ${loader_cmd[*]}"
+            log_message "The following command will be executed:"
+            echo "${loader_cmd[*]}" | tee -a "$RESTORE_LOG_FILE"
             
             if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
@@ -658,3 +659,5 @@ case $MODE in
 esac
 
 exit 0
+
+    
