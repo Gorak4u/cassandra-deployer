@@ -1,5 +1,4 @@
 
-
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
@@ -714,5 +713,3 @@ case $MODE in
 esac
 
 exit 0
-
-    
