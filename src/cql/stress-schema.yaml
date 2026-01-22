@@ -1,0 +1,36 @@
+# This profile is for use with the `cassandra-stress` tool to generate a large dataset.
+# It defines a new table `users_large` within the `my_app` keyspace.
+
+keyspace: my_app
+
+# The table schema, including a large 'data' blob to increase row size.
+table: users_large
+table_definition: |
+  CREATE TABLE my_app.users_large (
+    user_id uuid PRIMARY KEY,
+    first_name text,
+    last_name text,
+    email text,
+    created_at timestamp,
+    data blob
+  );
+
+# Specifies how to generate data for each column.
+columnspec:
+  - name: user_id
+    dist: uniform(1..10000000)
+  - name: first_name
+    size: uniform(5..15)
+  - name: last_name
+    size: uniform(5..20)
+  - name: email
+    size: uniform(15..30)
+  - name: created_at
+    dist: uniform(1..10000000)
+  - name: data
+    size: uniform(800..900) # This blob generates the bulk of the data size.
+
+# Defines the query to run.
+insert:
+  partitions: fixed(1)
+  batchtype: UNLOGGED
