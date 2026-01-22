@@ -204,7 +204,6 @@ log_message "Full snapshot taken successfully."
 
 # 3. Archive and Upload, per-table
 log_message "Discovering keyspaces and tables to back up..."
-SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
 TABLES_BACKED_UP="[]"
 UPLOAD_ERRORS=0
 
@@ -224,6 +223,9 @@ KEYSPACES_LIST=$(eval "$CQLSH_COMMAND -e 'DESCRIBE KEYSPACES;'" 2>/dev/null | xa
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
 else
+    # Define system keyspaces to exclude, allowing system_auth to be backed up
+    SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+    
     # Use a for loop to iterate over the space-separated list from cqlsh
     for ks in $KEYSPACES_LIST; do
         if [[ " $SYSTEM_KEYSPACES " =~ " $ks " ]]; then
@@ -231,8 +233,8 @@ else
         fi
         log_message "Processing keyspace: $ks"
         
-        # Find table directories. They have a UUID suffix.
-        find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" | while read -r table_dir; do
+        # Use a robust find and while loop to handle table directories
+        find "$CASSANDRA_DATA_DIR/$ks" -mindepth 1 -maxdepth 1 -type d -name "*-*" -print0 | while IFS= read -r -d $'\0' table_dir; do
             table_name=$(basename "$table_dir" | cut -d'-' -f1)
             snapshot_dir="$table_dir/snapshots/$BACKUP_TAG"
             

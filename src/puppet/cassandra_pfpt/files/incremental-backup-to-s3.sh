@@ -137,9 +137,9 @@ log_message "Streaming Mode: $UPLOAD_STREAMING"
 
 
 # Find all incremental backup directories that are not empty
-INCREMENTAL_DIRS=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print)
+INCREMENTAL_DIRS_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print | wc -l)
 
-if [ -z "$INCREMENTAL_DIRS" ]; then
+if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
     log_message "No new incremental backup files found. Nothing to do."
     exit 0
 fi
@@ -150,10 +150,11 @@ MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 
 UPLOAD_ERRORS=0
 TABLES_BACKED_UP="[]"
+# Define system keyspaces to exclude, allowing system_auth to be backed up
 SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
 
-# Loop through each directory containing incremental backups
-echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
+# Use a robust find and while loop to handle any filenames
+find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
     relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
     ks_name=$(echo "$relative_path" | cut -d'/' -f1)
 
