@@ -2,7 +2,7 @@
 #!/bin/bash
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
-# Supports full node restore, granular keyspace/table restore, and schema-only extraction.
+# Supports full node restore, granular keyspace/table restore.
 
 set -euo pipefail
 
@@ -101,7 +101,7 @@ fi
 TARGET_DATE=""
 KEYSPACE_NAME=""
 TABLE_NAME=""
-MODE="" # Will be set to 'granular', 'full', or 'schema'
+MODE="" # Will be set to 'granular' or 'full'
 RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
 AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
@@ -177,24 +177,6 @@ EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
 
 # --- Core Logic Functions ---
 
-# Helper function to run cqlsh with appropriate auth and SSL flags
-cqlsh_wrapper() {
-    local query_to_run="$1"
-    
-    local cqlsh_cmd_parts=("cqlsh" "$LISTEN_ADDRESS" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD" "-e" "$query_to_run")
-    
-    if [ "$SSL_ENABLED" == "true" ]; then
-        cqlsh_cmd_parts+=("--ssl")
-    fi
-    
-    # Execute the command, ensuring special characters in password are handled
-    if ! "${cqlsh_cmd_parts[@]}"; then
-        log_message "ERROR: cqlsh command failed."
-        return 1
-    fi
-}
-
-
 find_backup_chain() {
     log_message "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
     
@@ -206,17 +188,22 @@ find_backup_chain() {
         exit 1
     fi
 
-    log_message "Listing available backups from S3..."
+    log_message "Listing available backups from s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/..."
     local all_backups
-    all_backups=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | awk '{print $2}' | sed 's/\///' || true)
+    all_backups=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | awk '{print $2}' | sed 's/\///' || echo "")
 
     if [ -z "$all_backups" ]; then
         log_message "ERROR: No backups found for host '$EFFECTIVE_SOURCE_HOST' in bucket '$EFFECTIVE_S3_BUCKET'."
+        log_message "Please check the bucket name and source host."
         exit 1
     fi
 
     local eligible_backups=()
     for backup_ts in $all_backups; do
+        # Ensure backup_ts is in the correct format before parsing
+        if [[ ! "$backup_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
+            continue
+        fi
         local parsable_backup_ts="${backup_ts:0:10} ${backup_ts:11:2}:${backup_ts:14:2}"
         local backup_date_seconds
         backup_date_seconds=$(date -d "$parsable_backup_ts" +%s 2>/dev/null || continue)
@@ -383,13 +370,12 @@ do_full_restore() {
     log_message "Waiting for Cassandra to initialize and come online..."
     local CASSANDRA_READY=false
     for i in {1..60}; do # Wait up to 10 minutes
-        if cqlsh_wrapper "SELECT cluster_name FROM system.local;" > /dev/null 2>&1; then
-            if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
-                CASSANDRA_READY=true
-                break
-            fi
+        # Check if the process is running and if the node is in UN state
+        if pgrep -f "Dcassandra.logdir" > /dev/null && nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
+            CASSANDRA_READY=true
+            break
         fi
-        log_message "Waiting for node to become fully ready... (attempt $i of 60)"
+        log_message "Waiting for node to report UP/NORMAL... (attempt $i of 60)"
         sleep 10
     done
 
@@ -482,40 +468,48 @@ do_granular_restore() {
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         
-        local path_to_search="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
-        if [ -n "$TABLE_NAME" ]; then
-            # Find the actual table directory name with UUID from the manifest
-            local manifest
-            manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
-            local table_dir
-            table_dir=$(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" --arg tbl "$TABLE_NAME" '.tables_backed_up[] | select(startswith($ks + "/" + $tbl + "-"))' | head -n 1 | cut -d'/' -f2)
-
-            if [ -n "$table_dir" ]; then
-                path_to_search+="$table_dir/"
-            else
-                log_message "WARNING: Could not find table '$TABLE_NAME' in manifest for backup '$backup_ts'. It may not have been backed up. Skipping."
-                continue
-            fi
-        fi
-
-        log_message "Discovering all archives in path: $path_to_search"
-        local table_archives
-        table_archives=$(aws s3 ls --recursive "$path_to_search" | grep -E '(\.tar\.gz\.enc|incremental\.tar\.gz\.enc)$' | awk '{print $4}' || true)
+        # Discover table directories to restore, respecting the --table flag if provided.
+        local s3_search_prefix="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
+        local manifest_key="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json"
         
-        if [ -z "$table_archives" ]; then
-            log_message "No archives found for the specified path in backup '$backup_ts'. Skipping."
+        local manifest
+        manifest=$(aws s3 cp "$manifest_key" - 2>/dev/null || echo "{}")
+        
+        local tables_in_manifest
+        tables_in_manifest=($(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" '.tables_backed_up[] | select(startswith($ks + "/"))'))
+        
+        if [ ${#tables_in_manifest[@]} -eq 0 ]; then
+            log_message "No tables found for keyspace '$KEYSPACE_NAME' in manifest for backup '$backup_ts'. Skipping."
             continue
         fi
 
-        for archive_key in $table_archives; do
-             local full_path_part
-            full_path_part=$(dirname "$archive_key")
-            local table_dir_name
-            table_dir_name=$(basename "$full_path_part")
+        for table_path in "${tables_in_manifest[@]}"; do
+            local current_table_name
+            current_table_name=$(echo "$table_path" | cut -d'/' -f2 | cut -d'-' -f1)
+            
+            # If --table is specified, skip if it doesn't match
+            if [ -n "$TABLE_NAME" ] && [ "$current_table_name" != "$TABLE_NAME" ]; then
+                continue
+            fi
+
             local ks_name
-            ks_name=$(basename "$(dirname "$full_path_part")")
+            ks_name=$(echo "$table_path" | cut -d'/' -f1)
+            local table_dir_name
+            table_dir_name=$(echo "$table_path" | cut -d'/' -f2)
 
             local output_dir="$base_output_dir/$ks_name/$table_dir_name"
+            
+            # Construct archive key based on backup type from manifest
+            local backup_type
+            backup_type=$(echo "$manifest" | jq -r '.backup_type')
+            
+            local archive_name="incremental.tar.gz.enc"
+            if [ "$backup_type" == "full" ]; then
+                archive_name="$table_dir_name.tar.gz.enc"
+            fi
+            
+            local archive_key="$EFFECTIVE_SOURCE_HOST/$backup_ts/$ks_name/$table_dir_name/$archive_name"
+
             download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
         done
     done
@@ -542,7 +536,6 @@ do_granular_restore() {
 
             if [ "$SSL_ENABLED" == "true" ]; then
                 log_message "SSL is enabled, providing SSL options to sstableloader."
-                # Note: sstableloader uses the same ports as nodetool. 7001 is standard for SSL storage.
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
 

@@ -92,17 +92,16 @@ cleanup_old_snapshots() {
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     # Get a unique, sorted list of snapshot tags. This is more robust than parsing line by line.
-    # The grep finds lines that start with a snapshot name, ignoring headers/footers.
     local tags
-    tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9_.-]+$' | awk '{print $1}' | sort -u || true)
+    tags=$(nodetool listsnapshots 2>&1 | awk '/^Snapshot name:/{print $3}' | sort -u || true)
     
     if [ -z "$tags" ]; then
-        log_message "INFO: No snapshots found to evaluate for cleanup. This may be due to an error running listsnapshots or because there are none."
+        log_message "INFO: No snapshots found to evaluate for cleanup. This could be due to a nodetool error or because there are none."
         log_message "--- Snapshot Cleanup Finished ---"
         return
     fi
 
-    log_message "Found snapshots to evaluate: $tags"
+    log_message "Found snapshots to evaluate for cleanup."
 
     for tag in $tags; do
       local snapshot_timestamp=0
@@ -112,9 +111,9 @@ cleanup_old_snapshots() {
           local parsable_date
           parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
           snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
-      # Try to parse legacy formats
-      elif [[ "$tag" =~ ^(full_snapshot_|backup_|adhoc_snapshot_)([0-9]{8}|[0-9]{14}) ]]; then
-          local snapshot_date_str=${BASH_REMATCH[2]}
+      # Try to parse legacy formats like adhoc_snapshot_YYYYMMDDHHMMSS
+      elif [[ "$tag" =~ _([0-9]{8,14})$ ]]; then
+          local snapshot_date_str=${BASH_REMATCH[1]}
           if [ ${#snapshot_date_str} -eq 8 ]; then # YYYYMMDD
               snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
           elif [ ${#snapshot_date_str} -eq 14 ]; then # YYYYMMDDHHMMSS
@@ -223,12 +222,12 @@ fi
 cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
 
 # Make keyspace discovery more robust by using cqlsh.
-# The || true prevents the script from exiting if cqlsh fails, allowing us to log a warning instead.
-KEYSPACES_LIST=$("${cqlsh_command_parts[@]}" -e 'DESCRIBE KEYSPACES;' 2>>"$LOG_FILE" || true)
+KEYSPACES_LIST=$("${cqlsh_command_parts[@]}" -e 'DESCRIBE KEYSPACES;' 2>>"$LOG_FILE" || echo "")
 
 
 if [ -z "$KEYSPACES_LIST" ]; then
-    log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
+    log_message "ERROR: Could not discover keyspaces using cqlsh. Cannot proceed with backup."
+    exit 1
 else
     # Define system keyspaces to INCLUDE. 
     INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
@@ -257,7 +256,7 @@ else
             
             # Check if snapshot dir exists and is not empty
             if [ -d "$snapshot_dir" ] && [ -n "$(ls -A "$snapshot_dir")" ]; then
-                log_message "Backing up table: $ks.$table_dir_name"
+                log_message "Backing up table: $ks/$table_dir_name"
                 
                 if [ "$BACKUP_BACKEND" == "s3" ]; then
                     s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks/$table_dir_name/$table_dir_name.tar.gz.enc"
@@ -271,10 +270,10 @@ else
                         # Check all exit codes in the pipeline
                         pipeline_status=("${PIPESTATUS[@]}")
                         if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
-                            log_message "ERROR: Streaming backup failed for $ks.$table_dir_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                            log_message "ERROR: Streaming backup failed for $ks/$table_dir_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
-                            log_message "Successfully streamed backup for $ks.$table_dir_name"
+                            log_message "Successfully streamed backup for $ks/$table_dir_name"
                             TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                         fi
                     else
@@ -284,14 +283,14 @@ else
 
                         # Step 1: Archive and compress
                         if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
-                            log_message "ERROR: Failed to archive $ks.$table_dir_name. Skipping."
+                            log_message "ERROR: Failed to archive $ks/$table_dir_name. Skipping."
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                             continue
                         fi
 
                         # Step 2: Encrypt
                         if ! openssl enc -aes-256-cbc -salt -pbkdf2 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                            log_message "ERROR: Failed to encrypt $ks.$table_dir_name. Skipping."
+                            log_message "ERROR: Failed to encrypt $ks/$table_dir_name. Skipping."
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                             rm -f "$local_tar_file"
                             continue
@@ -299,10 +298,10 @@ else
                         
                         # Step 3: Upload
                         if ! aws s3 cp "$local_enc_file" "$s3_path"; then
-                            log_message "ERROR: Failed to upload backup for $ks.$table_dir_name"
+                            log_message "ERROR: Failed to upload backup for $ks/$table_dir_name"
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
-                            log_message "Successfully uploaded backup for $ks.$table_dir_name"
+                            log_message "Successfully uploaded backup for $ks/$table_dir_name"
                             TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                         fi
 
@@ -310,7 +309,7 @@ else
                         rm -f "$local_tar_file" "$local_enc_file"
                     fi
                 else
-                    log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks.$table_dir_name."
+                    log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks/$table_dir_name."
                     TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                 fi
             fi
@@ -339,7 +338,14 @@ fi
 NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b" || echo "Unknown UNKNOWN $LISTEN_ADDRESS UNKNOWN UNKNOWN UNKNOWN")
 NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
 NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
-NODE_TOKENS=$(nodetool ring | grep "\b$NODE_IP\b" | awk '{print $NF}' | tr '\n' ',' | sed 's/,$//')
+
+# Robust token gathering
+NODE_TOKENS_RAW=$(nodetool ring | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
+if [ -z "$NODE_TOKENS_RAW" ]; then
+    log_message "ERROR: Could not get tokens for node $NODE_IP from 'nodetool ring'. Cannot create a valid manifest."
+    exit 1
+fi
+NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
 
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
