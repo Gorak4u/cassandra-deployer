@@ -48,8 +48,8 @@ usage() {
     log_message ""
     log_message "Modes (choose one):"
     log_message "  --full-restore                       Performs a full, destructive restore of the entire node."
-    log_message "  --schema-only                        Extracts only the schema from the relevant full backup."
-    log_message "  --keyspace <ks> [--table <table>]  Targets a specific keyspace or table for a granular restore (requires an action)."
+    log_message "  --schema-only                        DEPRECATED: Schema is now restored with system keyspaces."
+    log_message "  --keyspace <ks> [--table <table>]    Targets a specific keyspace or table for a granular restore (requires an action)."
     log_message ""
     log_message "Actions for Granular Restore (required if --keyspace is used):"
     log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
@@ -65,7 +65,6 @@ usage() {
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 CASSANDRA_CONF_DIR=$(jq -r '.config_dir_path' "$CONFIG_FILE")
-JVM_OPTIONS_FILE="$CASSANDRA_CONF_DIR/cassandra-env.sh" # Changed to a file that is sourced
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -172,14 +171,17 @@ echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 cqlsh_wrapper() {
     local query_to_run="$1"
     
-    local cqlsh_cmd_parts=("cqlsh" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD" "-e" "$query_to_run")
+    local cqlsh_cmd_parts=("cqlsh" "$LISTEN_ADDRESS" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD" "-e" "$query_to_run")
     
     if [ "$SSL_ENABLED" == "true" ]; then
         cqlsh_cmd_parts+=("--ssl")
     fi
     
     # Execute the command
-    "${cqlsh_cmd_parts[@]}"
+    if ! "${cqlsh_cmd_parts[@]}"; then
+        log_message "ERROR: cqlsh command failed. Using password from config.json."
+        return 1
+    fi
 }
 
 
@@ -253,24 +255,9 @@ find_backup_chain() {
 }
 
 do_schema_restore() {
-    log_message "--- Starting Schema-Only Restore from Full Backup: $BASE_FULL_BACKUP ---"
-    
-    local cqlsh_cmd_parts=("cqlsh" "-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
-    if [ "$SSL_ENABLED" == "true" ]; then
-        cqlsh_cmd_parts+=("--ssl")
-    fi
-    
-    local schema_s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/schema.cql"
-    log_message "Downloading schema from $schema_s3_path"
-
-    if aws s3 cp "$schema_s3_path" "/tmp/schema_restore.cql"; then
-        log_message "SUCCESS: Schema extracted to /tmp/schema_restore.cql"
-        log_message "Please review this file, then apply it to your cluster using: ${cqlsh_cmd_parts[*]} -f /tmp/schema_restore.cql"
-    else
-        log_message "ERROR: Failed to download schema.cql from the backup. The full backup may be corrupted or missing its schema file."
-        exit 1
-    fi
-    log_message "--- Schema-Only Restore Finished ---"
+    log_message "--- Schema-Only Restore is DEPRECATED ---"
+    log_message "Schema, roles, and passwords are now restored as part of a full restore by backing up system keyspaces."
+    log_message "Please use --full-restore on a stopped node to recover the schema and data together."
 }
 
 
@@ -281,8 +268,9 @@ do_full_restore() {
     log_message "1. STOP the Cassandra service."
     log_message "2. WIPE ALL DATA AND COMMITLOGS from $CASSANDRA_DATA_DIR and $CASSANDRA_COMMITLOG_DIR."
     log_message "3. DOWNLOAD all backup data to a temporary location."
-    log_message "4. MOVE the restored data into the final Cassandra data directory."
-    log_message "5. START Cassandra with the restored data."
+    log_message "4. CONFIGURE cassandra.yaml with the node's original tokens."
+    log_message "5. MOVE the restored data into the final Cassandra data directory."
+    log_message "6. START Cassandra with the restored data and tokens."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -313,58 +301,86 @@ do_full_restore() {
     mkdir -p "$CASSANDRA_CACHES_DIR"
     log_message "Old directories wiped and recreated."
     
-    # Create the single temporary directory for the entire restore
-    TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_staging_$$"
+    TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
     log_message "3. Creating temporary restore directory: $TEMP_RESTORE_DIR"
     mkdir -p "$TEMP_RESTORE_DIR"
 
-    # === PHASE 2: DATA DOWNLOAD (OFFLINE) ===
-    log_message "--- PHASE 2: DATA DOWNLOAD ---"
+    # === PHASE 2: TOKEN RESTORATION & DATA DOWNLOAD (OFFLINE) ===
+    log_message "--- PHASE 2: CONFIGURATION & DATA DOWNLOAD ---"
     
-    # Download and Stage all data
-    log_message "4. Downloading and extracting all data from backup chain into staging directory..."
+    log_message "4. Downloading manifest from base full backup to extract tokens..."
+    local base_manifest
+    base_manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
+    if [ -z "$base_manifest" ]; then
+        log_message "ERROR: Cannot download manifest for base backup $BASE_FULL_BACKUP. Aborting."
+        exit 1
+    fi
+    
+    local tokens_csv
+    tokens_csv=$(echo "$base_manifest" | jq -r '.source_node.tokens | join(",")')
+    local token_count
+    token_count=$(echo "$base_manifest" | jq -r '.source_node.tokens | length')
+
+    if [ -z "$tokens_csv" ] || [ "$token_count" -le 0 ]; then
+        log_message "ERROR: No tokens found in the backup manifest. Cannot restore node identity."
+        exit 1
+    fi
+    
+    log_message "5. Applying original tokens to cassandra.yaml..."
+    local cassandra_yaml="$CASSANDRA_CONF_DIR/cassandra.yaml"
+    
+    # Remove existing lines to prevent duplicates
+    sed -i '/^initial_token:/d' "$cassandra_yaml"
+    sed -i '/^num_tokens:/d' "$cassandra_yaml"
+    
+    # Append the restored token configuration
+    echo "num_tokens: $token_count" >> "$cassandra_yaml"
+    echo "initial_token: $tokens_csv" >> "$cassandra_yaml"
+    log_message "Successfully configured node with $token_count tokens."
+
+    log_message "6. Downloading and extracting all data from backup chain..."
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
         local table_archives
-        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep -E '(\.tar\.gz\.enc|incremental\.tar\.gz\.enc)$' | awk '{print $4}')
+        table_archives=$(aws s3 ls --recursive "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}')
 
         for archive_key in $table_archives; do
-            # Parse keyspace and table directory name from the S3 key
-            local full_path_part
-            full_path_part=$(dirname "$archive_key")
-            local table_dir_name
-            table_dir_name=$(basename "$full_path_part")
-            local ks_name
-            ks_name=$(basename "$(dirname "$full_path_part")")
+            local archive_basename
+            archive_basename=$(basename "$archive_key" .tar.gz.enc)
             
-            # All data goes into the temporary restore directory
-            local output_dir="$TEMP_RESTORE_DIR/$ks_name/$table_dir_name"
+            # The path format is now <keyspace>/<table-name-uuid>/<file>
+            local ks_and_table_path
+            ks_and_table_path=$(dirname "$archive_key") # e.g. host/timestamp/keyspace/table-uuid
+            local table_dir
+            table_dir=$(basename "$ks_and_table_path")
+            local ks_dir
+            ks_dir=$(basename "$(dirname "$ks_and_table_path")")
+            
+            local output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_dir"
             
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
         done
     done
-    log_message "All data from backup chain downloaded and extracted."
+    log_message "All data from backup chain downloaded and extracted to temporary directory."
 
     # === PHASE 3: DATA PLACEMENT AND STARTUP ===
     log_message "--- PHASE 3: FINALIZATION ---"
 
-    log_message "5. Moving restored data from staging to final data directory..."
-    # Use rsync for efficiency and to handle large numbers of files better than mv
+    log_message "7. Moving restored data from temporary dir to final data directory..."
     rsync -a "$TEMP_RESTORE_DIR/" "$CASSANDRA_DATA_DIR/"
     log_message "Data moved successfully."
     
-    log_message "6. Setting correct ownership for all Cassandra directories..."
+    log_message "8. Setting correct ownership for all Cassandra directories..."
     chown -R cassandra:cassandra "$CASSANDRA_DATA_DIR"
     chown -R cassandra:cassandra "$CASSANDRA_COMMITLOG_DIR"
     chown -R cassandra:cassandra "$CASSANDRA_CACHES_DIR"
 
-    log_message "7. Starting Cassandra service..."
+    log_message "9. Starting Cassandra service..."
     systemctl start cassandra
     
     log_message "Waiting for Cassandra to initialize and come online..."
     local CASSANDRA_READY=false
     for i in {1..60}; do # Wait up to 10 minutes
-        # This check uses the final credentials, which should be restored now from system_auth.
         if cqlsh_wrapper "SELECT cluster_name FROM system.local;" > /dev/null 2>&1; then
             if nodetool status | grep "$LISTEN_ADDRESS" | grep -q 'UN'; then
                 CASSANDRA_READY=true
@@ -382,9 +398,8 @@ do_full_restore() {
     fi
     
     log_message "Cassandra is online and ready."
-    log_message "8. Restore complete."
-    log_message "The temporary staging directory $TEMP_RESTORE_DIR will now be removed."
-    # The trap will handle the final cleanup of the staging directory.
+    log_message "10. Restore complete."
+    log_message "The temporary directory $TEMP_RESTORE_DIR will now be removed."
     
     log_message "--- Full Restore Process Finished Successfully ---"
 }
@@ -470,11 +485,11 @@ do_granular_restore() {
             # Find the actual table directory name with UUID from the manifest
             local manifest
             manifest=$(aws s3 cp "s3://$S3_BUCKET_NAME/$HOSTNAME/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
-            local full_table_name
-            full_table_name=$(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" --arg tbl "$TABLE_NAME" '.tables_backed_up[] | select(startswith($ks + "." + $tbl + "-"))' | head -n 1 | cut -d'.' -f2)
+            local table_dir
+            table_dir=$(echo "$manifest" | jq -r --arg ks "$KEYSPACE_NAME" --arg tbl "$TABLE_NAME" '.tables_backed_up[] | select(startswith($ks + "/" + $tbl + "-"))' | head -n 1 | cut -d'/' -f2)
 
-            if [ -n "$full_table_name" ]; then
-                path_to_search+="$full_table_name/"
+            if [ -n "$table_dir" ]; then
+                path_to_search+="$table_dir/"
             else
                 log_message "WARNING: Could not find table '$TABLE_NAME' in manifest for backup '$backup_ts'. It may not have been backed up. Skipping."
                 continue

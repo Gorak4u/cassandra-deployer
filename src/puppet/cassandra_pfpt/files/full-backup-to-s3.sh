@@ -94,7 +94,7 @@ cleanup_old_snapshots() {
     # Get a unique, sorted list of snapshot tags. This is more robust than parsing line by line.
     # The grep finds lines that start with a snapshot name, ignoring headers/footers.
     local tags
-    tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9]' | awk '{print $1}' | sort -u || true)
+    tags=$(nodetool listsnapshots 2>&1 | grep -E '^[a-zA-Z0-9_.-]+$' | awk '{print $1}' | sort -u || true)
     
     if [ -z "$tags" ]; then
         log_message "INFO: No snapshots found to evaluate for cleanup. This may be due to an error running listsnapshots or because there are none."
@@ -230,14 +230,24 @@ KEYSPACES_LIST=$("${cqlsh_command_parts[@]}" -e 'DESCRIBE KEYSPACES;' 2>>"$LOG_F
 if [ -z "$KEYSPACES_LIST" ]; then
     log_message "WARNING: Could not discover keyspaces using 'cqlsh -e \"DESCRIBE KEYSPACES;\"'. Skipping table data backup."
 else
-    # Define system keyspaces to EXCLUDE. We now back up most system tables.
-    EXCLUDED_SYSTEM_KEYSPACES="system system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+    # Define system keyspaces to INCLUDE. 
+    INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
     
     # Use a for loop to iterate over the space-separated list from cqlsh
     for ks in $KEYSPACES_LIST; do
-        if [[ " $EXCLUDED_SYSTEM_KEYSPACES " =~ " $ks " ]]; then
+        is_system_ks=false
+        for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
+            if [ "$ks" == "$included_ks" ]; then
+                is_system_ks=true
+                break
+            fi
+        done
+        
+        # If it's a system keyspace, but not one of the included ones, skip it.
+        if [[ "$ks" == system* || "$ks" == dse* || "$ks" == solr* ]] && [ "$is_system_ks" = false ]; then
             continue
         fi
+
         log_message "Processing keyspace: $ks"
         
         # Use a robust find and while loop to handle table directories
@@ -265,7 +275,7 @@ else
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
                             log_message "Successfully streamed backup for $ks.$table_dir_name"
-                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                         fi
                     else
                         # Non-streaming (safer) method using temporary files
@@ -293,7 +303,7 @@ else
                             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                         else
                             log_message "Successfully uploaded backup for $ks.$table_dir_name"
-                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
+                            TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                         fi
 
                         # Step 4: Cleanup local temp files
@@ -301,7 +311,7 @@ else
                     fi
                 else
                     log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks.$table_dir_name."
-                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks.$table_dir_name\"]")
+                    TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks/$table_dir_name\"]")
                 fi
             fi
         done
@@ -357,17 +367,7 @@ jq -n \
 
 log_message "Manifest created successfully."
 
-# 5. Archive the schema (for --schema-only restore mode and manual inspection)
-log_message "Backing up schema as a CQL file for convenience..."
-SCHEMA_FILE="$BACKUP_TEMP_DIR/schema.cql"
-if "${cqlsh_command_parts[@]}" -e 'DESCRIBE SCHEMA;' > "$SCHEMA_FILE"; then
-  log_message "Schema backup created successfully."
-else
-  log_message "WARNING: Failed to dump schema. Backup manifest will be uploaded without it."
-  rm -f "$SCHEMA_FILE" # Ensure partial schema file is not uploaded
-fi
-
-# 6. Upload Manifest and Schema to S3
+# 5. Upload Manifest and Schema to S3
 if [ -f "/var/lib/upload-disabled" ]; then
     log_message "INFO: S3 upload is disabled via /var/lib/upload-disabled."
     log_message "Backup artifacts are available locally with tag: $BACKUP_TAG"
@@ -381,16 +381,6 @@ else
           exit 1
         fi
         log_message "Manifest uploaded successfully."
-        
-        if [ -f "$SCHEMA_FILE" ]; then
-            log_message "Uploading schema file..."
-            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
-            if ! aws s3 cp "$SCHEMA_FILE" "$SCHEMA_S3_PATH"; then
-              log_message "ERROR: Failed to upload schema to S3."
-            else
-              log_message "Schema uploaded successfully."
-            fi
-        fi
     else
         log_message "INFO: Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping manifest upload."
         log_message "Local snapshot is available with tag: $BACKUP_TAG"
