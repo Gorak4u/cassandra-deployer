@@ -204,7 +204,7 @@ log_message "Full snapshot taken successfully."
 
 # 3. Archive and Upload, per-table
 log_message "Discovering keyspaces and tables to back up..."
-SYSTEM_KEYSPACES="system system_auth system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
 TABLES_BACKED_UP="[]"
 UPLOAD_ERRORS=0
 

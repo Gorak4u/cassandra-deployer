@@ -150,7 +150,7 @@ MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 
 UPLOAD_ERRORS=0
 TABLES_BACKED_UP="[]"
-SYSTEM_KEYSPACES="system system_auth system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
+SYSTEM_KEYSPACES="system system_distributed system_schema system_traces system_views system_virtual_schema dse_system dse_perf dse_security solr_admin"
 
 # Loop through each directory containing incremental backups
 echo "$INCREMENTAL_DIRS" | while read -r backup_dir; do
