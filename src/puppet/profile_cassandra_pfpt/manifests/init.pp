@@ -1,5 +1,4 @@
-# @summary Profile for a complete Cassandra node.
-# @api private
+# @summary Configures a complete Cassandra node using data from Hiera.
 class profile_cassandra_pfpt {
   # Hiera Lookups for Cassandra Configuration
   # This section gathers all configuration from Hiera, providing sensible defaults.
@@ -296,6 +295,6 @@ class profile_cassandra_pfpt {
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
     repair_keyspace                  => $repair_keyspace,
-    manage_stress_tools              => $manage_stress_test,
+    manage_stress_test               => $manage_stress_test,
   }
 }
