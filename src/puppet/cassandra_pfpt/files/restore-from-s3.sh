@@ -291,7 +291,11 @@ do_full_restore() {
     log_message "--- PHASE 1: PREPARATION ---"
 
     log_message "1. Stopping Cassandra service..."
-    systemctl stop cassandra
+    if systemctl is-active --quiet cassandra; then
+      systemctl stop cassandra
+    else
+      log_message "Cassandra service is already stopped."
+    fi
 
     log_message "2. Wiping old data directories..."
     rm -rf "$CASSANDRA_DATA_DIR"
