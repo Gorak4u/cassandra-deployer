@@ -438,7 +438,7 @@ download_and_extract_table() {
         return 1
     fi
 
-    if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
         log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
@@ -555,9 +555,9 @@ do_granular_restore() {
 
             loader_cmd+=("$path_to_load")
 
-            log_message "Executing: ${loader_cmd[*]}"
+            log_message "Executing: ${loader_cmd[@]}"
             
-            if eval "${loader_cmd[*]}"; then
+            if "${loader_cmd[@]}"; then
                 log_message "--- Granular Restore (Download & Restore) Finished Successfully ---"
             else
                 log_message "ERROR: sstableloader failed. The downloaded data is still available in $base_output_dir for inspection."
