@@ -3,3 +3,7 @@
 
 [Service]
 TimeoutStartSec=<%= @service_timeout_start_sec %>
+
+# Automatically restart the service if it fails
+Restart=<%= @service_restart %>
+RestartSec=<%= @service_restart_sec %>

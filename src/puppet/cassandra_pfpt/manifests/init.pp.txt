@@ -88,6 +88,8 @@ class cassandra_pfpt (
   String $jmx_password_file_path,
   String $jmx_access_file_path,
   String $service_timeout_start_sec,
+  String $service_restart,
+  Integer $service_restart_sec,
   Optional[String] $authorizer,
   Optional[String] $authenticator,
   Optional[Integer] $num_tokens,

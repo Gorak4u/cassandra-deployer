@@ -111,6 +111,8 @@ class profile_cassandra_pfpt {
   $user                             = lookup('profile_cassandra_pfpt::user', { 'default_value' => 'cassandra' })
   $group                            = lookup('profile_cassandra_pfpt::group', { 'default_value' => 'cassandra' })
   $service_timeout_start_sec        = lookup('profile_cassandra_pfpt::service_timeout_start_sec', { 'default_value' => '400s' })
+  $service_restart                  = lookup('profile_cassandra_pfpt::service_restart', { 'default_value' => 'always' })
+  $service_restart_sec              = lookup('profile_cassandra_pfpt::service_restart_sec', { 'default_value' => 10 })
 
   # --- Repositories & Packages ---
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
@@ -302,6 +304,8 @@ class profile_cassandra_pfpt {
     user                             => $user,
     group                            => $group,
     service_timeout_start_sec        => $service_timeout_start_sec,
+    service_restart                  => $service_restart,
+    service_restart_sec              => $service_restart_sec,
     # Repositories & Packages
     manage_repo                      => $manage_repo,
     repo_baseurl                     => $repo_baseurl,

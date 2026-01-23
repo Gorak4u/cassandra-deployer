@@ -27,9 +27,10 @@
     5.  [Restore Scenario 3: Full Cluster Restore (Cold Start DR)](#restore-scenario-3-full-cluster-restore-cold-start-dr)
     6.  [Restore Scenario 4: Recovering from Accidental Schema Changes](#restore-scenario-4-recovering-from-accidental-schema-changes)
 8.  [Production Readiness Guide](#production-readiness-guide)
-    1.  [Monitoring Backups and Alerting](#monitoring-backups-and-alerting)
-    2.  [Testing Your Disaster Recovery Plan (Fire Drills)](#testing-your-disaster-recovery-plan-fire-drills)
-    3.  [Important Security and Cost Considerations](#important-security-and-cost-considerations)
+    1.  [Automated Service Monitoring and Restart](#automated-service-monitoring-and-restart)
+    2.  [Monitoring Backups and Alerting](#monitoring-backups-and-alerting)
+    3.  [Testing Your Disaster Recovery Plan (Fire Drills)](#testing-your-disaster-recovery-plan-fire-drills)
+    4.  [Important Security and Cost Considerations](#important-security-and-cost-considerations)
 9.  [Hiera Parameter Reference](#hiera-parameter-reference)
 10. [Puppet Agent Management](#puppet-agent-management)
 
@@ -159,6 +160,7 @@ Usage: /usr/local/bin/cassandra-admin <command> [arguments...]
   upgrade-sstables [opts]Run 'nodetool upgradesstables' with safety checks. Use 'upgrade-sstables -- --help' for options.
 
 --- Backup & Recovery ---
+  backup                 Manually trigger a full, node-local backup to S3.
   snapshot [<keyspaces>] Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces.
   restore [opts]         Restore data from S3 backups. This is a complex command; run 'restore -- --help' for its usage.
 
@@ -488,6 +490,14 @@ The `schema.cql` file included in every full backup is your safety net.
 
 Having functional backups is the first step. Ensuring they are reliable and secure is the next.
 
+### Automated Service Monitoring and Restart
+
+This module uses the native capabilities of `systemd` to ensure the Cassandra service remains running. If the Cassandra process crashes or is terminated unexpectedly, `systemd` will automatically attempt to restart it.
+
+*   **How it Works:** Puppet creates a `systemd` override file that configures `Restart=always` and `RestartSec=10`. This means `systemd` will always try to bring the service back up, waiting 10 seconds between attempts to prevent rapid-fire restart loops.
+*   **Configuration:** You can customize this behavior in Hiera. For example, to disable it, set `profile_cassandra_pfpt::service_restart: 'no'`. See the Hiera reference for more details.
+*   **Monitoring:** While this provides automatic recovery, it's still critical to have external alerting (e.g., via Prometheus) to notify you *when* a restart has occurred, as it often points to an underlying issue that needs investigation.
+
 ### Monitoring Backups and Alerting
 
 A backup that fails silently is not a backup. The automated backup jobs run via `cron`. You must monitor their status.
@@ -556,6 +566,10 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::rpc_port` (Integer): The port for the Thrift RPC service. Default: `9160`.
 *   `profile_cassandra_pfpt::start_native_transport` (Boolean): Whether to start the CQL native transport service. Default: `true`.
 *   `profile_cassandra_pfpt::start_rpc` (Boolean): Whether to start the legacy Thrift RPC service. Default: `true`.
+
+### Service Management
+*   `profile_cassandra_pfpt::service_restart` (String): The `Restart` policy for the `systemd` service. Can be `no`, `on-success`, `on-failure`, `on-abnormal`, `on-watchdog`, `on-abort`, or `always`. Default: `'always'`.
+*   `profile_cassandra_pfpt::service_restart_sec` (Integer): The number of seconds to wait before restarting the service. Default: `10`.
 
 ### Directories & Paths
 *   `profile_cassandra_pfpt::data_dir` (String): Path to the data directories. Default: `'/var/lib/cassandra/data'`.
