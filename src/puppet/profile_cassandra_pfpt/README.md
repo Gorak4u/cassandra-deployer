@@ -147,7 +147,6 @@ This profile installs a suite of robust management scripts in `/usr/local/bin` o
 | `incremental-backup-to-s3.sh`  | (Automated) Script executed by `systemd` to perform scheduled incremental backups.                          |
 | `stress-test.sh`               | A robust wrapper for running `cassandra-stress` performance tests.                                          |
 | `cassandra-upgrade-precheck.sh`| A detailed, non-invasive script to validate readiness for a major version upgrade (e.g., 3.11 to 4.0).         |
-| `robust_backup.sh`             | Deprecated. Use `full-backup-to-s3.sh` with `backup_backend: 'local'`.                                     |
 
 ---
 
