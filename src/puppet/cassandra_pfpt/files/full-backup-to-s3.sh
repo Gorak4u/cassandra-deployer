@@ -46,6 +46,7 @@ CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
+S3_RETENTION_PERIOD=$(jq -r '.s3_retention_period // 0' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -79,6 +80,58 @@ check_aws_credentials() {
   return 0
 }
 
+# --- AWS Lifecycle Management Function ---
+manage_s3_lifecycle() {
+    if [ "$BACKUP_BACKEND" != "s3" ] || [[ ! "$S3_RETENTION_PERIOD" =~ ^[1-9][0-9]*$ ]]; then
+        log_message "INFO: S3 lifecycle management is skipped. Backend is not 's3' or retention period is not a positive number."
+        return 0
+    fi
+
+    local policy_id="auto-expire-backups"
+    log_message "INFO: Checking for S3 lifecycle policy '$policy_id' with retention of $S3_RETENTION_PERIOD days..."
+
+    # Check if a policy with our ID already exists
+    local existing_policy_days
+    existing_policy_days=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days')
+
+    if [[ "$existing_policy_days" == "$S3_RETENTION_PERIOD" ]]; then
+        log_message "INFO: Correct lifecycle policy already in place. Nothing to do."
+        return 0
+    elif [[ -n "$existing_policy_days" ]]; then
+        log_message "WARNING: A lifecycle policy with ID '$policy_id' exists but has a different retention ($existing_policy_days days). It will be updated."
+    else
+        log_message "INFO: No lifecycle policy named '$policy_id' found. A new one will be created."
+    fi
+
+    # Construct the lifecycle policy JSON
+    local lifecycle_json
+    lifecycle_json=$(jq -n \
+        --arg ID "$policy_id" \
+        --argjson DAYS "$S3_RETENTION_PERIOD" \
+        '{
+            "Rules": [
+                {
+                    "ID": $ID,
+                    "Filter": {
+                        "Prefix": ""
+                    },
+                    "Status": "Enabled",
+                    "Expiration": {
+                        "Days": $DAYS
+                    }
+                }
+            ]
+        }')
+
+    log_message "INFO: Applying lifecycle policy to bucket '$S3_BUCKET_NAME'..."
+    if ! aws s3api put-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" --lifecycle-configuration "$lifecycle_json"; then
+        log_message "ERROR: Failed to apply S3 lifecycle policy. Backups will still proceed, but will not be automatically deleted."
+        # Do not fail the backup for this.
+        return 0
+    fi
+
+    log_message "INFO: S3 lifecycle policy applied successfully."
+}
 
 # --- Cleanup Snapshot Function ---
 cleanup_old_snapshots() {
@@ -161,6 +214,9 @@ fi
 if ! check_aws_credentials; then
     exit 1
 fi
+
+# Manage S3 lifecycle policy
+manage_s3_lifecycle
 
 if [ -f "$LOCK_FILE" ]; then
     log_message "Lock file $LOCK_FILE exists. Checking if process is running..."

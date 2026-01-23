@@ -88,6 +88,7 @@ profile_cassandra_pfpt::manage_incremental_backups: true
 profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # cron spec
 profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 profile_cassandra_pfpt::clearsnapshot_keep_days: 7
+profile_cassandra_pfpt::s3_retention_period: 30 # Keep backups in S3 for 30 days
 profile_cassandra_pfpt::upload_streaming: false # Set to true to use faster but less-robust streaming uploads
 
 # --- Automated Repair Configuration ---
@@ -251,6 +252,7 @@ This profile provides a fully automated, S3-based backup solution using `systemd
 3.  **Execution:** `systemd` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`).
 4.  **Process:** The scripts generate a `backup_manifest.json` with critical metadata for each backup run (identified by a `YYYY-MM-DD-HH-MM` timestamp), encrypt the archives, and upload them to a structured path in S3.
 5.  **Local Snapshot Cleanup:** The full backup script automatically deletes local snapshots older than `clearsnapshot_keep_days`.
+6.  **S3 Lifecycle Management:** The full backup script also ensures an S3 lifecycle policy is in place on the bucket to automatically delete old backups after the `s3_retention_period`.
 
 #### Pausing Backups
 > To temporarily disable backups on a node for maintenance, create a flag file:
@@ -498,7 +500,8 @@ The only way to trust your backups is to test them regularly.
 
 *   **S3 Cost Management:**
     *   S3 costs can grow significantly over time.
-    *   **Implement S3 Lifecycle Policies** on your backup bucket. A typical policy would be:
+    *   The backup script now automatically manages a lifecycle policy to expire objects after `s3_retention_period` days.
+    *   For more advanced strategies, consider using **S3 Lifecycle Policies** on your backup bucket directly. A typical policy would be:
         *   Transition backups older than 30 days to a cheaper storage class (e.g., S3 Infrequent Access).
         *   Transition backups older than 90 days to archival storage (e.g., S3 Glacier Deep Archive).
         *   Permanently delete backups older than your retention policy (e.g., 1 year).
@@ -569,8 +572,10 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. **WARNING:** This has an insecure default value to prevent Puppet runs from failing. You **MUST** override this with a strong, unique secret in your production Hiera data. Default: `'MustBeChanged-ChangeMe-ChangeMe!!'`.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
+*   `profile_cassandra_pfpt::s3_retention_period` (Integer): The number of days to keep backups in S3 before they are automatically deleted by a lifecycle policy. The policy is applied automatically by the backup script. Set to 0 to disable. Default: `15`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
+*   `profile_cassandra_pfpt::backup_parallelism` (Integer): The number of concurrent tables to process during backup or restore operations. Default: `4`.
 *   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/bin/stress-test.sh` wrapper script. Default: `false`.
 
 ---

@@ -160,6 +160,7 @@ class profile_cassandra_pfpt {
   $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
   $backup_parallelism               = lookup('profile_cassandra_pfpt::backup_parallelism', { 'default_value' => 4 })
+  $s3_retention_period              = lookup('profile_cassandra_pfpt::s3_retention_period', { 'default_value' => 15 })
   $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
@@ -331,6 +332,7 @@ class profile_cassandra_pfpt {
     clearsnapshot_keep_days          => $clearsnapshot_keep_days,
     backup_upload_streaming          => $backup_upload_streaming,
     backup_parallelism               => $backup_parallelism,
+    s3_retention_period              => $s3_retention_period,
     full_backup_script_path          => $full_backup_script_path,
     incremental_backup_script_path   => $incremental_backup_script_path,
     full_backup_log_file             => $full_backup_log_file,

@@ -138,6 +138,7 @@ class cassandra_pfpt (
   Integer $clearsnapshot_keep_days = 3,
   Boolean $backup_upload_streaming = false,
   Integer $backup_parallelism = 4,
+  Integer $s3_retention_period = 15,
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
