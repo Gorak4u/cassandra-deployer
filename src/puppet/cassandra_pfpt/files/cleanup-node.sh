@@ -10,14 +10,21 @@ WARNING_THRESHOLD=80
 CRITICAL_THRESHOLD=90
 LOG_FILE="/var/log/cassandra/cleanup.log"
 
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 # --- Logging ---
 log_message() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 # --- Usage ---
 usage() {
-    log_message "Usage: $0 [OPTIONS]"
+    log_message "${YELLOW}Usage: $0 [OPTIONS]${NC}"
     log_message "Safely runs 'nodetool cleanup' with pre-flight disk space checks."
     log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
     log_message "  -t, --table <name>          Specify a table to clean up. Can be used multiple times."
@@ -39,18 +46,18 @@ while [[ "$#" -gt 0 ]]; do
         -w|--warning) WARNING_THRESHOLD="$2"; shift ;;
         -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
         -h|--help) usage ;;
-        *) log_message "Unknown parameter passed: $1"; usage ;;
+        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
     esac
     shift
 done
 
 if [[ -n "$TABLE_LIST" && -z "$KEYSPACE" ]]; then
-    log_message "ERROR: A keyspace (-k) must be specified when cleaning up specific tables (-t)."
+    log_message "${RED}ERROR: A keyspace (-k) must be specified when cleaning up specific tables (-t).${NC}"
     exit 1
 fi
 
 # --- Main Logic ---
-log_message "--- Starting Nodetool Cleanup Manager ---"
+log_message "${BLUE}--- Starting Nodetool Cleanup Manager ---${NC}"
 
 # Build the nodetool command
 CMD="nodetool cleanup"
@@ -72,26 +79,26 @@ if [[ -n "$KEYSPACE" ]]; then
     fi
 fi
 
-log_message "Target: $TARGET_DESC"
-log_message "Disk path to check: $DISK_CHECK_PATH"
-log_message "Warning usage threshold: $WARNING_THRESHOLD%"
-log_message "Critical usage threshold: $CRITICAL_THRESHOLD%"
+log_message "${BLUE}Target: $TARGET_DESC${NC}"
+log_message "${BLUE}Disk path to check: $DISK_CHECK_PATH${NC}"
+log_message "${BLUE}Warning usage threshold: $WARNING_THRESHOLD%${NC}"
+log_message "${BLUE}Critical usage threshold: $CRITICAL_THRESHOLD%${NC}"
 log_message "Command to be executed: $CMD"
 
 # Pre-flight disk space check
-log_message "Performing pre-flight disk space check..."
+log_message "${BLUE}Performing pre-flight disk space check...${NC}"
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
-    log_message "ERROR: Pre-flight disk usage check failed. Aborting cleanup to prevent disk space issues."
+    log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting cleanup to prevent disk space issues.${NC}"
     exit 1
 fi
-log_message "Disk usage OK. Proceeding with cleanup."
+log_message "${GREEN}Disk usage OK. Proceeding with cleanup.${NC}"
 
 # Execute the command
 if $CMD; then
-    log_message "--- Nodetool Cleanup Finished Successfully ---"
+    log_message "${GREEN}--- Nodetool Cleanup Finished Successfully ---${NC}"
     exit 0
 else
     CLEANUP_EXIT_CODE=$?
-    log_message "ERROR: Nodetool cleanup command failed with exit code $CLEANUP_EXIT_CODE."
+    log_message "${RED}ERROR: Nodetool cleanup command failed with exit code $CLEANUP_EXIT_CODE.${NC}"
     exit $CLEANUP_EXIT_CODE
 fi

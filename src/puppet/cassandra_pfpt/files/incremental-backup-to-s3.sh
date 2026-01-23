@@ -8,27 +8,48 @@ if [ -z "$BASH_VERSION" ]; then
     exec /bin/bash "$0" "$@"
 fi
 
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 # --- Configuration & Logging Initialization ---
 CONFIG_FILE="/etc/backup/config.json"
 # Define a default log file path in case config loading fails, ensuring early errors are logged.
 LOG_FILE="/var/log/cassandra/incremental_backup.log"
 
 log_message() {
-  echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+  # This version of log_message does not add colors, as the caller functions will.
+  echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+log_info() {
+    log_message "${BLUE}$1${NC}"
+}
+log_success() {
+    log_message "${GREEN}$1${NC}"
+}
+log_warn() {
+    log_message "${YELLOW}$1${NC}"
+}
+log_error() {
+    log_message "${RED}$1${NC}"
 }
 
 # --- Pre-flight Checks ---
 # Check for required tools first, so we can log errors if they are missing.
 for tool in jq aws openssl nodetool; do
     if ! command -v $tool &> /dev/null; then
-        log_message "ERROR: Required tool '$tool' is not installed or in PATH."
+        log_error "Required tool '$tool' is not installed or in PATH."
         exit 1
     fi
 done
 
 # Check for config file
 if [ ! -f "$CONFIG_FILE" ]; then
-  log_message "ERROR: Backup configuration file not found at $CONFIG_FILE"
+  log_error "Backup configuration file not found at $CONFIG_FILE"
   exit 1
 fi
 
@@ -44,7 +65,7 @@ UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
-  log_message "ERROR: One or more required configuration values are missing from $CONFIG_FILE"
+  log_error "One or more required configuration values are missing from $CONFIG_FILE"
   exit 1
 fi
 
@@ -62,14 +83,14 @@ check_aws_credentials() {
     return 0
   fi
   
-  log_message "INFO: Verifying AWS credentials..."
+  log_info "Verifying AWS credentials..."
   if ! aws sts get-caller-identity > /dev/null 2>&1; then
-    log_message "ERROR: AWS credentials not found or invalid."
-    log_message "Please configure credentials for this node, e.g., via an IAM role."
-    log_message "Aborting backup."
+    log_error "AWS credentials not found or invalid."
+    log_error "Please configure credentials for this node, e.g., via an IAM role."
+    log_error "Aborting backup."
     return 1
   fi
-  log_message "INFO: AWS credentials are valid."
+  log_success "AWS credentials are valid."
   return 0
 }
 
@@ -77,20 +98,20 @@ check_aws_credentials() {
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
   if [ -d "$BACKUP_TEMP_DIR" ]; then
-    log_message "Cleaning up temporary directory: $BACKUP_TEMP_DIR"
+    log_info "Cleaning up temporary directory: $BACKUP_TEMP_DIR"
     rm -rf "$BACKUP_TEMP_DIR"
   fi
 }
 
 # --- Main Logic ---
 if [ "$(id -u)" -ne 0 ]; then
-  log_message "ERROR: This script must be run as root."
+  log_error "This script must be run as root."
   exit 1
 fi
 
 # Pre-flight checks before creating a lock or doing any work
 if [ -f "/var/lib/backup-disabled" ]; then
-    log_message "INFO: Backup is disabled via /var/lib/backup-disabled. Aborting."
+    log_info "Backup is disabled via /var/lib/backup-disabled. Aborting."
     exit 0
 fi
 
@@ -100,13 +121,13 @@ fi
 
 
 if [ -f "$LOCK_FILE" ]; then
-    log_message "Lock file $LOCK_FILE exists. Checking if process is running..."
+    log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
     OLD_PID=$(cat "$LOCK_FILE")
     if ps -p "$OLD_PID" > /dev/null; then
-        log_message "Backup process with PID $OLD_PID is still running. Exiting."
+        log_warn "Backup process with PID $OLD_PID is still running. Exiting."
         exit 1
     else
-        log_message "Stale lock file found for dead PID $OLD_PID. Removing."
+        log_warn "Stale lock file found for dead PID $OLD_PID. Removing."
         rm -f "$LOCK_FILE"
     fi
 fi
@@ -124,23 +145,23 @@ trap 'rm -f "$LOCK_FILE"; rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
 # Extract key from config and write to temp file
 ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
 if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
-    log_message "ERROR: encryption_key is empty or not found in $CONFIG_FILE"
+    log_error "encryption_key is empty or not found in $CONFIG_FILE"
     exit 1
 fi
 echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 
-log_message "--- Starting Granular Incremental Cassandra Backup Process ---"
-log_message "S3 Bucket: $S3_BUCKET_NAME"
-log_message "Backup Timestamp (Tag): $BACKUP_TAG"
-log_message "Streaming Mode: $UPLOAD_STREAMING"
+log_info "--- Starting Granular Incremental Cassandra Backup Process ---"
+log_info "S3 Bucket: $S3_BUCKET_NAME"
+log_info "Backup Timestamp (Tag): $BACKUP_TAG"
+log_info "Streaming Mode: $UPLOAD_STREAMING"
 
 
 # Find all incremental backup directories that are not empty
 INCREMENTAL_DIRS_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print | wc -l)
 
 if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
-    log_message "No new incremental backup files found. Nothing to do."
+    log_info "No new incremental backup files found. Nothing to do."
     exit 0
 fi
 
@@ -171,7 +192,7 @@ while IFS= read -r table_path; do
 done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups')
 
 echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
-log_message "Schema-to-directory mapping generated."
+log_info "Schema-to-directory mapping generated."
 
 # Use a robust find and while loop to handle any filenames
 find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
@@ -193,7 +214,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
     table_dir_name=$(echo "$relative_path" | cut -d'/' -f2)
     table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
     
-    log_message "Processing incremental backup for: $ks_name.$table_name"
+    log_info "Processing incremental backup for: $ks_name.$table_name"
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/incremental.tar.gz.enc"
@@ -203,18 +224,18 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             nice -n 19 ionice -c 3 tar -C "$backup_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
-            aws s3 cp - "$s3_path"
+            nice -n 19 ionice -c 3 aws s3 cp - "$s3_path"
             
             pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
-                log_message "ERROR: Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
-                log_message "Local incremental files will not be deleted."
+                log_error "Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                log_warn "Local incremental files will not be deleted."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
             else
-                log_message "Successfully streamed incremental backup for $ks_name.$table_name"
+                log_success "Successfully streamed incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
                 
-                log_message "Cleaning up local incremental files for $ks_name.$table_name"
+                log_info "Cleaning up local incremental files for $ks_name.$table_name"
                 rm -f "$backup_dir"/*
             fi
         else
@@ -224,14 +245,14 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
 
             # Step 1: Archive and compress
             if ! nice -n 19 ionice -c 3 tar -C "$backup_dir" -czf "$local_tar_file" .; then
-                log_message "ERROR: Failed to archive incremental backup for $ks_name.$table_name. Skipping."
+                log_error "Failed to archive incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 continue
             fi
 
             # Step 2: Encrypt
             if ! nice -n 19 ionice -c 3 openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-                log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
+                log_error "Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 rm -f "$local_tar_file"
                 continue
@@ -239,13 +260,13 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             
             # Step 3: Upload
             if nice -n 19 ionice -c 3 aws s3 cp "$local_enc_file" "$s3_path"; then
-                log_message "Successfully uploaded incremental backup for $ks_name.$table_name"
+                log_success "Successfully uploaded incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
                 
-                log_message "Cleaning up local incremental files for $ks_name.$table_name"
+                log_info "Cleaning up local incremental files for $ks_name.$table_name"
                 rm -f "$backup_dir"/*
             else
-                log_message "ERROR: Failed to upload incremental backup for $ks_name.$table_name. Local files will not be deleted."
+                log_error "Failed to upload incremental backup for $ks_name.$table_name. Local files will not be deleted."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
             fi
 
@@ -253,18 +274,18 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             rm -f "$local_tar_file" "$local_enc_file"
         fi
     else
-        log_message "INFO: Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_name."
-        log_message "IMPORTANT: Local incremental files at '$backup_dir' are NOT deleted for non-S3 backends."
+        log_info "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_name."
+        log_warn "IMPORTANT: Local incremental files at '$backup_dir' are NOT deleted for non-S3 backends."
         TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
     fi
 done
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_message "ERROR: $UPLOAD_ERRORS incremental backup(s) failed to upload. The backup is incomplete."
+    log_error "$UPLOAD_ERRORS incremental backup(s) failed to upload. The backup is incomplete."
 fi
 
 # Create and Upload Manifest
-log_message "Creating backup manifest at $MANIFEST_FILE..."
+log_info "Creating backup manifest at $MANIFEST_FILE..."
 
 CLUSTER_NAME=$(nodetool describecluster | grep 'Name:' | awk '{print $2}')
 
@@ -301,34 +322,32 @@ jq -n \
   }' > "$MANIFEST_FILE"
 
 if [ -f "/var/lib/upload-disabled" ]; then
-    log_message "INFO: S3 upload is disabled. Manifest and backups are local."
+    log_info "S3 upload is disabled. Manifest and backups are local."
 else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        log_message "Uploading manifest file..."
+        log_info "Uploading manifest file..."
         MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
         if ! aws s3 cp "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
-            log_message "ERROR: Failed to upload manifest to S3. The backup is not properly indexed."
+            log_error "Failed to upload manifest to S3. The backup is not properly indexed."
         else
-            log_message "Manifest uploaded successfully."
+            log_success "Manifest uploaded successfully."
         fi
 
-        log_message "Uploading schema mapping file..."
+        log_info "Uploading schema mapping file..."
         SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
         if ! aws s3 cp "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
-            log_message "ERROR: Failed to upload schema mapping file to S3."
+            log_error "Failed to upload schema mapping file to S3."
         else
-            log_message "Schema mapping file uploaded successfully."
+            log_success "Schema mapping file uploaded successfully."
         fi
     fi
 fi
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_message "--- Granular Incremental Backup Process Finished with ERRORS ---"
+    log_error "--- Granular Incremental Backup Process Finished with ERRORS ---"
     exit 1
 else
-    log_message "--- Granular Incremental Backup Process Finished Successfully ---"
+    log_success "--- Granular Incremental Backup Process Finished Successfully ---"
 fi
 
 exit 0
-
-    

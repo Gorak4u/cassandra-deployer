@@ -1,6 +1,12 @@
 #!/bin/bash
 # Description: Audit script to check and print versions of various components.
 
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 usage() {
     echo "Usage: $(basename "$0") [-h|--help]"
     echo ""
@@ -28,17 +34,17 @@ log_version() {
     local command_to_run="$2"
     local output
 
-    echo "--- Checking $component_name ---"
+    echo -e "${BLUE}--- Checking $component_name ---${NC}"
     if command -v $(echo "$command_to_run" | awk '{print $1}') >/dev/null 2>&1; then
         output=$(eval "$command_to_run" 2>&1)
         if [ $? -eq 0 ]; then
-            echo "Version:"
+            echo -e "${GREEN}Version:${NC}"
             echo "$output" | head -n 5 # Limit output to relevant lines
         else
-            echo "Error running command for $component_name: $output"
+            echo -e "${RED}Error running command for $component_name: $output${NC}"
         fi
     else
-        echo "$component_name command not found: $(echo "$command_to_run" | awk '{print $1}')"
+        echo -e "${RED}$component_name command not found: $(echo "$command_to_run" | awk '{print $1}')${NC}"
     fi
     echo ""
 }

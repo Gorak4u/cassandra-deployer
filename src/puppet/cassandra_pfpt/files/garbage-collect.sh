@@ -11,14 +11,21 @@ WARNING_THRESHOLD=70
 CRITICAL_THRESHOLD=80
 LOG_FILE="/var/log/cassandra/garbagecollect.log"
 
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
 # --- Logging ---
 log_message() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 # --- Usage ---
 usage() {
-    log_message "Usage: $0 [OPTIONS]"
+    log_message "${YELLOW}Usage: $0 [OPTIONS]${NC}"
     log_message "Safely runs 'nodetool garbagecollect' with pre-flight disk space checks."
     log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
     log_message "  -t, --table <name>          Specify a table to collect. Can be used multiple times."
@@ -48,18 +55,18 @@ while [[ "$#" -gt 0 ]]; do
         -w|--warning) WARNING_THRESHOLD="$2"; shift ;;
         -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
         -h|--help) usage ;;
-        *) log_message "Unknown parameter passed: $1"; usage ;;
+        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
     esac
     shift
 done
 
 if [[ -n "$TABLE_LIST" && -z "$KEYSPACE" ]]; then
-    log_message "ERROR: A keyspace (-k) must be specified when collecting on specific tables (-t)."
+    log_message "${RED}ERROR: A keyspace (-k) must be specified when collecting on specific tables (-t).${NC}"
     exit 1
 fi
 
 # --- Main Logic ---
-log_message "--- Starting Garbage Collect Manager ---"
+log_message "${BLUE}--- Starting Garbage Collect Manager ---${NC}"
 
 # Build the nodetool command
 CMD="nodetool garbagecollect"
@@ -83,36 +90,36 @@ if [[ -n "$KEYSPACE" ]]; then
     fi
 fi
 
-log_message "Target: $TARGET_DESC"
-log_message "Disk path to check: $DISK_CHECK_PATH"
-log_message "Warning usage threshold: $WARNING_THRESHOLD%"
-log_message "Critical usage threshold: $CRITICAL_THRESHOLD%"
+log_message "${BLUE}Target: $TARGET_DESC${NC}"
+log_message "${BLUE}Disk path to check: $DISK_CHECK_PATH${NC}"
+log_message "${BLUE}Warning usage threshold: $WARNING_THRESHOLD%${NC}"
+log_message "${BLUE}Critical usage threshold: $CRITICAL_THRESHOLD%${NC}"
 log_message "Command to be executed: $CMD"
 
 # Pre-flight disk space check
-log_message "Performing pre-flight disk usage check..."
+log_message "${BLUE}Performing pre-flight disk usage check...${NC}"
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
-    log_message "ERROR: Pre-flight disk usage check failed. Aborting garbage collection to prevent disk space issues."
+    log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting garbage collection to prevent disk space issues.${NC}"
     exit 1
 fi
-log_message "Disk usage OK. Proceeding."
+log_message "${GREEN}Disk usage OK. Proceeding.${NC}"
 
 # Pre-flight node state check
-log_message "Performing pre-flight node state check..."
+log_message "${BLUE}Performing pre-flight node state check...${NC}"
 if ! nodetool netstats | grep -q "Mode: NORMAL"; then
-    log_message "ERROR: Node is not in NORMAL mode. It may be streaming, joining, or leaving the cluster."
+    log_message "${YELLOW}ERROR: Node is not in NORMAL mode. It may be streaming, joining, or leaving the cluster.${NC}"
     log_message "Aborting garbage collection. Please wait for the node to become idle."
     nodetool netstats
     exit 1
 fi
-log_message "Node state is NORMAL. Proceeding."
+log_message "${GREEN}Node state is NORMAL. Proceeding.${NC}"
 
 # Execute the command
 if $CMD; then
-    log_message "--- Garbage Collect Finished Successfully ---"
+    log_message "${GREEN}--- Garbage Collect Finished Successfully ---${NC}"
     exit 0
 else
     GC_EXIT_CODE=$?
-    log_message "ERROR: Garbage collection command failed with exit code $GC_EXIT_CODE."
+    log_message "${RED}ERROR: Garbage collection command failed with exit code $GC_EXIT_CODE.${NC}"
     exit $GC_EXIT_CODE
 fi
