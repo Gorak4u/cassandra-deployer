@@ -20,7 +20,7 @@ log_message() {
 
 # --- Pre-flight Checks ---
 # Check for required tools first, so we can log errors if they are missing.
-for tool in jq aws openssl nodetool cqlsh; do
+for tool in jq aws openssl nodetool cqlsh xargs; do
     if ! command -v $tool &> /dev/null; then
         log_message "ERROR: Required tool '$tool' is not installed or in PATH."
         exit 1
@@ -45,6 +45,7 @@ UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
+PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -58,6 +59,7 @@ HOSTNAME=$(hostname -s)
 # Derive temp dir from data dir to ensure it's on the correct large volume
 BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
+ERROR_DIR="$BACKUP_TEMP_DIR/errors"
 
 # --- AWS Credential Check Function ---
 check_aws_credentials() {
@@ -196,9 +198,11 @@ log_message "--- Starting Granular Cassandra Snapshot Backup Process ---"
 log_message "S3 Bucket: $S3_BUCKET_NAME"
 log_message "Backup Timestamp (Tag): $BACKUP_TAG"
 log_message "Streaming Mode: $UPLOAD_STREAMING"
+log_message "Parallelism: $PARALLELISM"
 
-# 1. Create temporary directory for manifest
+# 1. Create temporary directories
 mkdir -p "$BACKUP_TEMP_DIR" || { log_message "ERROR: Failed to create temp backup directory on data volume."; exit 1; }
+mkdir -p "$ERROR_DIR"
 
 # 2. Take a node-local snapshot
 log_message "Taking full snapshot with tag: $BACKUP_TAG..."
@@ -210,8 +214,6 @@ log_message "Full snapshot taken successfully."
 
 # 3. Archive and Upload, per-table
 log_message "Discovering keyspaces and tables to back up..."
-TABLES_BACKED_UP="[]"
-UPLOAD_ERRORS=0
 INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
 
 # Create a mapping of clean table names to their UUID-based directory names
@@ -234,20 +236,24 @@ done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '
 echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
 log_message "Schema-to-directory mapping generated."
 
+# --- Function to process a single table backup (for parallel execution) ---
+process_table_backup() {
+    local snapshot_dir="$1"
+    
+    # Required variables for the subshell
+    local S3_BUCKET_NAME
+    S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+    local BACKUP_BACKEND
+    BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
+    local UPLOAD_STREAMING
+    UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 
-# Use a more robust find command to discover all non-empty snapshot directories directly.
-# This avoids fragile parsing of `cqlsh` output.
-find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | while IFS= read -r -d $'\0' snapshot_dir; do
-    # snapshot_dir is e.g., /var/lib/cassandra/data/my_keyspace/my_table-uuid/snapshots/backup_tag
-    path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
-    # e.g., my_keyspace/my_table-uuid/snapshots/backup_tag
+    local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
+    local ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
+    local table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
+    local table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
 
-    ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
-    table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
-    table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
-
-    # Filter out non-essential system keyspaces
-    is_system_ks=false
+    local is_system_ks=false
     for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
         if [ "$ks_name" == "$included_ks" ]; then
             is_system_ks=true
@@ -257,71 +263,66 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
 
     if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then
         log_message "Skipping non-essential system keyspace backup: $ks_name"
-        continue
+        return 0
     fi
     
     log_message "Backing up table: $ks_name.$table_name"
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
-        s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/$table_name.tar.gz.enc"
+        local s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/$table_name.tar.gz.enc"
         if [ "$UPLOAD_STREAMING" = "true" ]; then
-            # Streaming pipeline: tar -> gzip -> openssl -> aws s3
             tar -C "$snapshot_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
             
-            # Check all exit codes in the pipeline
-            pipeline_status=("${PIPESTATUS[@]}")
+            local pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
                 log_message "ERROR: Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
             else
                 log_message "Successfully streamed backup for $ks_name.$table_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
             fi
         else
-            # Non-streaming (safer) method using temporary files
-            local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
-            local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
+            local local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
+            local local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
-            # Step 1: Archive and compress
             if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
                 log_message "ERROR: Failed to archive $ks_name.$table_name. Skipping."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-                continue
+                touch "$ERROR_DIR/$ks_name.$table_name"
+                return 1
             fi
-
-            # Step 2: Encrypt
             if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_message "ERROR: Failed to encrypt $ks_name.$table_name. Skipping."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
                 rm -f "$local_tar_file"
-                continue
+                return 1
             fi
-            
-            # Step 3: Upload
             if ! aws s3 cp "$local_enc_file" "$s3_path"; then
                 log_message "ERROR: Failed to upload backup for $ks_name.$table_name"
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
             else
                 log_message "Successfully uploaded backup for $ks_name.$table_name"
-                TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
             fi
-
-            # Step 4: Cleanup local temp files
             rm -f "$local_tar_file" "$local_enc_file"
         fi
     else
         log_message "INFO: Backup backend is '$BACKUP_BACKEND', skipping upload for $ks_name.$table_name."
-        TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
     fi
-done
+}
+export -f process_table_backup
+export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR
+export -f log_message
 
+# --- Parallel backup execution ---
+log_message "Starting parallel backup of tables..."
+find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
+    xargs -0 -n 1 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
 
-if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_message "ERROR: $UPLOAD_ERRORS table(s) failed to upload. The backup is incomplete."
-fi
+UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f | wc -l)
+TABLES_BACKED_UP_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
+TABLES_BACKED_UP_SUCCESS_COUNT=$((TABLES_BACKED_UP_COUNT - UPLOAD_ERRORS))
+
 
 # 4. Dump cluster schema
 SCHEMA_DUMP_FILE="$BACKUP_TEMP_DIR/schema.cql"
@@ -373,6 +374,7 @@ if [ -z "$NODE_TOKENS_RAW" ]; then
 fi
 NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
 
+# For the manifest, we will just list the count of tables
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
   --arg backup_id "$BACKUP_TAG" \
@@ -382,7 +384,7 @@ jq -n \
   --arg node_dc "$NODE_DC" \
   --arg node_rack "$NODE_RACK" \
   --arg tokens "$NODE_TOKENS" \
-  --argjson tables "$TABLES_BACKED_UP" \
+  --argjson tables_count "$TABLES_BACKED_UP_SUCCESS_COUNT" \
   '{
     "cluster_name": $cluster_name,
     "backup_id": $backup_id,
@@ -394,7 +396,7 @@ jq -n \
       "rack": $node_rack,
       "tokens": ($tokens | split(","))
     },
-    "tables_backed_up": $tables
+    "tables_backed_up_count": $tables_count
   }' > "$MANIFEST_FILE"
 
 log_message "Manifest created successfully."
@@ -439,10 +441,12 @@ else
 fi
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_message "--- Granular Cassandra Backup Process Finished with ERRORS ---"
+    log_message "--- Granular Cassandra Backup Process Finished with $UPLOAD_ERRORS ERRORS ---"
     exit 1
 else
     log_message "--- Granular Cassandra Backup Process Finished Successfully ---"
 fi
 
 exit 0
+
+    

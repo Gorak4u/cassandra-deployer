@@ -22,7 +22,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-for tool in jq aws sstableloader openssl pgrep ps cqlsh rsync /usr/local/bin/disk-health-check.sh; do
+for tool in jq aws sstableloader openssl pgrep ps cqlsh rsync xargs /usr/local/bin/disk-health-check.sh; do
     if ! command -v $tool &>/dev/null; then
         log_message "ERROR: Required tool '$tool' is not installed or not in PATH."
         exit 1
@@ -76,6 +76,7 @@ CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
+PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 
 # Validate essential configuration
 if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ] || [ ! -d "$CASSANDRA_CONF_DIR" ]; then log_message "ERROR: 'config_dir_path' is not set or invalid in $CONFIG_FILE."; exit 1; fi
@@ -258,6 +259,53 @@ find_backup_chain() {
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
+download_and_extract_table() {
+    local archive_key="$1"
+    local output_dir="$2"
+    local temp_download_dir="$3"
+    local check_path="$4"
+
+    # Required variables for the subshell
+    local EFFECTIVE_S3_BUCKET
+    EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$(jq -r '.s3_bucket_name' "$CONFIG_FILE")}
+
+    # Safety check before downloading this table's data
+    log_message "Checking disk usage on $check_path before downloading..."
+    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 90 -c 95; then
+        log_message "ERROR: Disk usage is high. Aborting download for archive $archive_key."
+        return 1
+    fi
+
+    mkdir -p "$output_dir"
+    
+    log_message "Downloading data for $archive_key to $output_dir"
+    
+    local pid=$$
+    local tid=$(date +%s%N)
+    local temp_enc_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz.enc"
+    local temp_tar_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz"
+
+    if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
+        log_message "ERROR: Failed to download $archive_key."
+        rm -f "$temp_enc_file" # Clean up partial download
+        return 1
+    fi
+
+    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+        log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
+        rm -f "$temp_enc_file" "$temp_tar_file"
+        return 1
+    fi
+
+    if ! tar -xzf "$temp_tar_file" -C "$output_dir"; then
+        log_message "ERROR: Failed to extract $archive_key. Archive is likely corrupt."
+        rm -f "$temp_enc_file" "$temp_tar_file"
+        return 1
+    fi
+    
+    rm -f "$temp_enc_file" "$temp_tar_file"
+    return 0
+}
 
 do_full_restore() {
     log_message "--- Starting SIMPLIFIED FULL DESTRUCTIVE Node Restore ---"
@@ -327,17 +375,14 @@ do_full_restore() {
     log_message "5. Applying original tokens to cassandra.yaml..."
     local cassandra_yaml="$CASSANDRA_CONF_DIR/cassandra.yaml"
     
-    # Remove existing lines to prevent duplicates
     sed -i '/^initial_token:/d' "$cassandra_yaml"
     sed -i '/^num_tokens:/d' "$cassandra_yaml"
     
-    # Append the restored token configuration
     echo "num_tokens: $token_count" >> "$cassandra_yaml"
     echo "initial_token: $tokens_csv" >> "$cassandra_yaml"
     log_message "Successfully configured node with $token_count tokens."
 
-    log_message "6. Downloading and extracting all data from backup chain..."
-    # Download the schema mapping first
+    log_message "6. Downloading and extracting all data from backup chain in parallel..."
     local SCHEMA_MAP_JSON
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if [ -z "$SCHEMA_MAP_JSON" ]; then
@@ -345,33 +390,31 @@ do_full_restore() {
         exit 1
     fi
     log_message "Schema-to-directory mapping downloaded."
+    
+    export -f download_and_extract_table log_message
+    export CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
-        # List all S3 objects ending in .tar.gz.enc for the current backup timestamp
         aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
+            echo "$archive_key"
+        done | xargs -I{} -P"$PARALLELISM" bash -c '
+            archive_key="{}"
+            SCHEMA_MAP_JSON=$(cat)
             
-            # Extract keyspace and table name from the clean S3 path
-            local s3_path_no_host
             s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
-            local ks_dir
-            ks_dir=$(echo "$s3_path_no_host" | cut -d'/' -f1)
-            local table_name
-            table_name=$(echo "$s3_path_no_host" | cut -d'/' -f2)
+            ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
+            table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
 
-            # Look up the correct UUID-based directory name from the map
-            local table_uuid_dir
             table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key"
-                continue
+                exit 0
             fi
             
-            # The local output directory must use the UUID
-            local output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_uuid_dir"
-            
-            download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$TEMP_RESTORE_DIR"
-        done
+            output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_uuid_dir"
+            download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
+        ' <<< "$SCHEMA_MAP_JSON"
     done
     log_message "All data from backup chain downloaded and extracted to temporary directory."
 
@@ -379,7 +422,6 @@ do_full_restore() {
     log_message "--- PHASE 3: FINALIZATION ---"
 
     log_message "7. Moving restored data from temporary dir to final data directory..."
-    # rsync is safer than mv as it can be resumed.
     rsync -a "$TEMP_RESTORE_DIR/" "$CASSANDRA_DATA_DIR/"
     log_message "Data moved successfully."
     
@@ -404,7 +446,6 @@ do_full_restore() {
 
     if [ "$CASSANDRA_READY" = false ]; then
         log_message "ERROR: Cassandra did not become ready. Check system logs."
-        log_message "The restored data is in place, but the service failed to start correctly."
         exit 1
     fi
     
@@ -414,55 +455,6 @@ do_full_restore() {
     
     log_message "--- Full Restore Process Finished Successfully ---"
 }
-
-
-download_and_extract_table() {
-    local archive_key="$1"
-    local output_dir="$2"
-    local temp_download_dir="$3"
-    local check_path="$4"
-
-    # Safety check before downloading this table's data
-    log_message "Checking disk usage on $check_path before downloading..."
-    if ! /usr/local/bin/disk-health-check.sh -p "$check_path" -w 90 -c 95; then
-        log_message "ERROR: Disk usage is high. Aborting download for archive $archive_key."
-        return 1
-    fi
-
-    mkdir -p "$output_dir"
-    
-    log_message "Downloading data for $archive_key to $output_dir"
-    
-    # Use clean, static temporary filenames within this function's scope.
-    local temp_enc_file="$temp_download_dir/temp.tar.gz.enc"
-    local temp_tar_file="$temp_download_dir/temp.tar.gz"
-
-    # Ensure no old temp files exist from a failed previous run.
-    rm -f "$temp_enc_file" "$temp_tar_file"
-
-    if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
-        log_message "ERROR: Failed to download $archive_key."
-        rm -f "$temp_enc_file" # Clean up partial download
-        return 1
-    fi
-
-    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
-        log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
-        rm -f "$temp_enc_file" "$temp_tar_file"
-        return 1
-    fi
-
-    if ! tar -xzf "$temp_tar_file" -C "$output_dir"; then
-        log_message "ERROR: Failed to extract $archive_key. Archive is likely corrupt."
-        rm -f "$temp_enc_file" "$temp_tar_file"
-        return 1
-    fi
-    
-    # Final cleanup of temp files for this run.
-    rm -f "$temp_enc_file" "$temp_tar_file"
-    return 0
-}
-
 
 do_granular_restore() {
     log_message "--- Starting GRANULAR Restore for $KEYSPACE_NAME${TABLE_NAME:+.${TABLE_NAME}} ---"
@@ -477,7 +469,7 @@ do_granular_restore() {
         check_path="$DOWNLOAD_ONLY_PATH"
         log_message "Action: Download-Only. Data will be saved to $base_output_dir"
         mkdir -p "$base_output_dir"
-    else # download_and_restore
+    else
         TEMP_RESTORE_DIR="${RESTORE_BASE_PATH}/restore_temp_$$"
         base_output_dir="$TEMP_RESTORE_DIR"
         temp_download_dir="$TEMP_RESTORE_DIR"
@@ -493,7 +485,6 @@ do_granular_restore() {
     fi
     log_message "Disk usage is sufficient to begin."
 
-    # Download the schema mapping first
     local SCHEMA_MAP_JSON
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if [ -z "$SCHEMA_MAP_JSON" ]; then
@@ -502,126 +493,93 @@ do_granular_restore() {
     fi
     log_message "Schema-to-directory mapping downloaded."
 
-    # Step 1: Download and extract all data from the entire chain.
+    export -f download_and_extract_table log_message
+    export CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE EFFECTIVE_SOURCE_HOST KEYSPACE_NAME TABLE_NAME
+
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_message "Processing backup: $backup_ts"
-        
-        # Only list objects under the specified keyspace
         aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
-            # The archive_key is now relative to the bucket, e.g., source_host/backup_ts/ks/tbl/tbl.tar.gz.enc
-            
-            # If a table name is specified, only process archives for that table.
             if [ -n "$TABLE_NAME" ] && [[ ! "$archive_key" =~ "/${TABLE_NAME}/" ]]; then
                 continue
             fi
+            echo "$archive_key"
+        done | xargs -I{} -P"$PARALLELISM" bash -c '
+            archive_key="{}"
+            SCHEMA_MAP_JSON=$(cat)
             
-            local s3_path_no_host
             s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
-            local ks_dir
-            ks_dir=$(echo "$s3_path_no_host" | cut -d'/' -f1)
-            local table_name
-            table_name=$(echo "$s3_path_no_host" | cut -d'/' -f2)
+            ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
+            table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
 
-            # Look up the correct UUID-based directory name from the map
-            local table_uuid_dir
             table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key"
-                continue
+                exit 0
             fi
-
-            local output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
             
-            if ! download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"; then
-                log_message "ERROR: Failed to download/extract table data for ${ks_dir}.${table_name}. Restore cannot proceed reliably for this table."
-            fi
-        done
+            output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
+            download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
+        ' <<< "$SCHEMA_MAP_JSON"
     done
     
-    # Step 2: Decide on the final action.
     if [ "$RESTORE_ACTION" == "download_only" ]; then
         log_message "--- Granular Restore (Download Only) Finished Successfully ---"
         log_message "All data has been downloaded and decrypted to: $base_output_dir"
-    else # download_and_restore
-        log_message "All data has been downloaded. Preparing to load into cluster by iterating through each downloaded table."
+    else
+        log_message "All data has been downloaded. Preparing to load into cluster."
         
-        # Check if any tables were actually downloaded before proceeding
-        local downloaded_tables_exist
-        downloaded_tables_exist=$(find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -n 1)
-        if [ -z "$downloaded_tables_exist" ]; then
-            log_message "WARNING: No data was downloaded for the specified keyspace/table. Nothing to load."
-            exit 0
-        fi
-        
-        find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | while IFS= read -r source_table_dir; do
+        load_table_data() {
+            local source_table_dir="$1"
             local downloaded_table_name_with_uuid
             downloaded_table_name_with_uuid=$(basename "$source_table_dir")
             local downloaded_table_name
             downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | rev | cut -d'-' -f2- | rev)
 
-            if [ -n "$TABLE_NAME" ] && [ "$downloaded_table_name" != "$TABLE_NAME" ]; then
-                continue
-            fi
-            
             log_message "Processing table for restore: $KEYSPACE_NAME.$downloaded_table_name"
 
             local live_table_dir
             live_table_dir=$(find "$CASSANDRA_DATA_DIR/$KEYSPACE_NAME" -maxdepth 1 -type d -name "$downloaded_table_name-*" 2>/dev/null | head -n 1)
             
-            if [ -z "$live_table_dir" ];
-            then
-                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name' on this node. Skipping restore for this table."
-                log_message "This usually means the schema has not been created in the cluster. Use the --schema-only mode first to get the schema file."
-                continue
+            if [ -z "$live_table_dir" ]; then
+                log_message "ERROR: Cannot find live table directory for '$KEYSPACE_NAME.$downloaded_table_name'. Skipping restore."
+                return 1
             fi
 
             local live_table_dirname
             live_table_dirname=$(basename "$live_table_dir")
-            
             local final_table_dir_path
             final_table_dir_path="$(dirname "$source_table_dir")/$live_table_dirname"
 
             if [ "$downloaded_table_name_with_uuid" != "$live_table_dirname" ]; then
-                log_message "UUID mismatch for '$downloaded_table_name'. Renaming downloaded directory to match live cluster."
-                log_message "From: $source_table_dir"
-                log_message "To:   $final_table_dir_path"
+                log_message "Renaming downloaded directory for '$downloaded_table_name' to match live cluster UUID."
                 mv "$source_table_dir" "$final_table_dir_path"
-            else
-                log_message "UUIDs match for '$downloaded_table_name'. No rename necessary."
             fi
             
-            log_message "Setting correct ownership on downloaded data for this table..."
             chown -R "$CASSANDRA_USER":"$CASSANDRA_USER" "$final_table_dir_path"
 
             export CASSANDRA_CONF="$CASSANDRA_CONF_DIR"
-            log_message "Using Cassandra config directory: $CASSANDRA_CONF"
-
             local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
                 loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
             fi
-            
             if [ "$SSL_ENABLED" == "true" ]; then
                 loader_cmd+=("--ssl-storage-port" "7001")
             fi
-
-            log_message "Pointing sstableloader to specific table directory: $final_table_dir_path"
             loader_cmd+=("$final_table_dir_path")
 
-            log_message "The following command will be executed:"
-            printf '%q ' "${loader_cmd[@]}"
-            echo ""
-            
+            log_message "Executing sstableloader for $KEYSPACE_NAME.$downloaded_table_name"
             if ! "${loader_cmd[@]}"; then
-                log_message "ERROR: sstableloader failed for table $KEYSPACE_NAME.$downloaded_table_name. The downloaded data is still available in $base_output_dir for inspection. Continuing to next table."
+                log_message "ERROR: sstableloader failed for table $KEYSPACE_NAME.$downloaded_table_name."
             else
                  log_message "Successfully loaded data for table $KEYSPACE_NAME.$downloaded_table_name."
                  rm -rf "$final_table_dir_path"
-                 log_message "Cleaned up temporary data for $downloaded_table_name."
             fi
-
-        done
+        }
+        export -f load_table_data log_message
+        export CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED
+        
+        find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | xargs -I{} -P"$PARALLELISM" bash -c 'load_table_data "{}"'
 
         log_message "--- Granular Restore (Download & Restore) Finished ---"
     fi
@@ -642,8 +600,7 @@ do_schema_only_restore() {
 
     log_message "Downloading schema from: $schema_s3_path"
     if ! aws s3 cp "$schema_s3_path" "$local_schema_path"; then
-        log_message "ERROR: Failed to download schema.cql. The backup might be incomplete or from an older version of the backup script."
-        log_message "Please check the S3 path manually: $schema_s3_path"
+        log_message "ERROR: Failed to download schema.cql."
         exit 1
     fi
 
@@ -663,8 +620,7 @@ do_schema_only_restore() {
         cqlsh_ssl="--ssl"
     fi
     log_message "   cqlsh $cqlsh_creds $cqlsh_ssl -f $local_schema_path"
-
-    log_message "3. Once the schema is applied cluster-wide, you can proceed with the data restore on each node."
+    log_message "3. Once the schema is applied, you can proceed with the data restore."
 }
 
 # --- Main Execution ---
@@ -672,10 +628,10 @@ do_schema_only_restore() {
 log_message "--- Starting Point-in-Time Restore Manager ---"
 log_message "Target S3 Bucket: $EFFECTIVE_S3_BUCKET"
 log_message "Source Hostname for Restore: $EFFECTIVE_SOURCE_HOST"
+log_message "Parallelism: $PARALLELISM"
 
 if [ "$BACKUP_BACKEND" != "s3" ]; then
     log_message "ERROR: This restore script only supports the 's3' backup backend."
-    log_message "The current backup_backend is configured as '$BACKUP_BACKEND'."
     exit 1
 fi
 
@@ -713,3 +669,5 @@ case $MODE in
 esac
 
 exit 0
+
+    

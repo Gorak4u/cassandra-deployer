@@ -11,8 +11,11 @@
     "seeds_list": <%= @seeds.to_json %>,
     "clearsnapshot_keep_days": <%= @clearsnapshot_keep_days %>,
     "upload_streaming": <%= @backup_upload_streaming %>,
+    "parallelism": <%= @backup_parallelism %>,
     "encryption_key": "<%= @backup_encryption_key.unwrap %>",
     "cassandra_user": "<%= @user %>",
     "cassandra_password": "<%= @cassandra_password.unwrap %>",
     "ssl_enabled": <%= @ssl_enabled %>
 }
+
+    

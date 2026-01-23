@@ -137,6 +137,7 @@ class cassandra_pfpt (
   String $backup_backend = 's3',
   Integer $clearsnapshot_keep_days = 3,
   Boolean $backup_upload_streaming = false,
+  Integer $backup_parallelism = 4,
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
@@ -223,3 +224,5 @@ class cassandra_pfpt (
   -> Class['cassandra_pfpt::config']
   ~> Class['cassandra_pfpt::service']
 }
+
+    
