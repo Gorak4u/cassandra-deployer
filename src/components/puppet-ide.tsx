@@ -103,7 +103,6 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
         case 'puppet':
             return <Puzzle className="h-4 w-4" />;
         case 'ruby':
-        case 'python':
             return <FileCode className="h-4 w-4" />;
         case 'yaml':
         case 'json':
@@ -164,7 +163,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
   const handleRepoChange = (repoName: string) => {
     setSelectedRepo(repoName);
     setValidationResult(null);
-    const firstFile = allFiles.find(f => f.repo === repoName && f.name.endsWith('init.pp'));
+    const firstFile = allFiles.find(f => f.repo === repoName && (f.name.endsWith('init.pp') || f.name.endsWith('init.pp.txt')));
     if(firstFile) {
         handleFileSelect(firstFile);
     } else {
@@ -255,7 +254,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
             <div className="flex-1">
                  {selectedFile && (
                     <span className="font-mono text-sm bg-muted px-2 py-1 rounded">
-                        {selectedFile.path}
+                        {selectedFile.path.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb')}
                     </span>
                  )}
             </div>

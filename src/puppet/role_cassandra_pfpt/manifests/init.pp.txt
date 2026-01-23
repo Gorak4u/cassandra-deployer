@@ -1,0 +1,8 @@
+# Defines a Cassandra Server role.
+#
+# This is a simple role class that includes the `profile_cassandra_pfpt` class.
+# Its purpose is to define a machine as a "Cassandra Server".
+#
+class role_cassandra_pfpt {
+  include profile_cassandra_pfpt
+}
