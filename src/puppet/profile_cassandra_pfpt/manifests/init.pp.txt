@@ -114,13 +114,29 @@ class profile_cassandra_pfpt {
 
   # --- Repositories & Packages ---
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
-  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra/' })
-  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => 'https://repocache.nonprod.ppops.net/artifactory/apache-org-cassandra-gpg-keys/KEYS' })
+  $default_repo_baseurl = $facts['os']['family'] ? {
+    'RedHat' => 'https://dlcdn.apache.org/cassandra/redhat/41x/',
+    'Debian' => 'https://debian.cassandra.apache.org',
+    default  => undef,
+  }
+  $default_repo_gpgkey = $facts['os']['family'] ? {
+    'RedHat' => 'https://dlcdn.apache.org/cassandra/KEYS',
+    'Debian' => 'https://downloads.apache.org/cassandra/KEYS',
+    default  => undef,
+  }
+  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => $default_repo_baseurl })
+  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => $default_repo_gpgkey })
   $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
   $repo_sslverify                   = lookup('profile_cassandra_pfpt::repo_sslverify', { 'default_value' => true })
-  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli'] })
+  $default_dependencies = $facts['os']['family'] ? {
+    'RedHat' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli', 'policycoreutils-python-utils'],
+    'Debian' => ['libsasl2-modules', 'libjemalloc2', 'python3', 'numactl', 'jq', 'awscli'],
+    default  => [],
+  }
+  $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => $default_dependencies })
+
 
   # --- Timeouts & Failure Policies ---
   $request_timeout_in_ms            = lookup('profile_cassandra_pfpt::request_timeout_in_ms', { 'default_value' => 10000 })

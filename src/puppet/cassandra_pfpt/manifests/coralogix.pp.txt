@@ -1,35 +1,65 @@
 # @summary Manages Coralogix agent installation and configuration.
 class cassandra_pfpt::coralogix inherits cassandra_pfpt {
-  if $facts['os']['family'] == 'RedHat' {
-    $repo_url = $coralogix_baseurl ? {
-      undef   => 'https://yum.coralogix.com/coralogix-el8-x86_64',
-      default => $coralogix_baseurl,
+  case $facts['os']['family'] {
+    'RedHat': {
+      $repo_url = $coralogix_baseurl ? {
+        undef   => 'https://yum.coralogix.com/coralogix-el8-x86_64',
+        default => $coralogix_baseurl,
+      }
+      yumrepo { 'coralogix':
+        ensure   => 'present',
+        baseurl  => $repo_url,
+        descr    => 'coralogix repo',
+        enabled  => 1,
+        gpgcheck => 0,
+      }
+      $repo_require = Yumrepo['coralogix']
     }
-    yumrepo { 'coralogix':
-      ensure   => 'present',
-      baseurl  => $repo_url,
-      descr    => 'coralogix repo',
-      enabled  => 1,
-      gpgcheck => 0,
+    'Debian': {
+      package { ['apt-transport-https', 'ca-certificates', 'curl', 'gnupg']:
+        ensure => present,
+      }
+      exec { 'add-coralogix-repo-key':
+        command => 'curl -s https://cgx.jfrog.io/artifactory/api/gpg/key/public | apt-key add -',
+        path    => ['/bin', '/usr/bin'],
+        unless  => "apt-key list | grep -q 'Coralogix'",
+        require => Package['curl'],
+        notify  => Exec['coralogix_apt_update'],
+      }
+      file { '/etc/apt/sources.list.d/coralogix.list':
+        ensure  => 'file',
+        content => 'deb https://cgx.jfrog.io/artifactory/coralogix-apt-prod stable main',
+        notify  => Exec['coralogix_apt_update'],
+      }
+      exec { 'coralogix_apt_update':
+        command     => 'apt-get update',
+        path        => ['/usr/bin', '/bin'],
+        refreshonly => true,
+      }
+      $repo_require = Exec['coralogix_apt_update']
     }
-    package { 'coralogix-agent':
-      ensure  => 'installed',
-      require => Yumrepo['coralogix'],
+    default: {
+      fail("Unsupported OS for Coralogix agent: ${facts['os']['family']}")
     }
-    file { '/etc/coralogix/agent.conf':
-      ensure  => 'file',
-      content => template('cassandra_pfpt/coralogix-agent.conf.erb'),
-      owner   => 'root',
-      group   => 'root',
-      mode    => '0640',
-      require => Package['coralogix-agent'],
-      notify  => Service['coralogix-agent'],
-    }
-    service { 'coralogix-agent':
-      ensure    => 'running',
-      enable    => true,
-      hasstatus => true,
-      require   => File['/etc/coralogix/agent.conf'],
-    }
+  }
+
+  package { 'coralogix-agent':
+    ensure  => 'installed',
+    require => $repo_require,
+  }
+  file { '/etc/coralogix/agent.conf':
+    ensure  => 'file',
+    content => template('cassandra_pfpt/coralogix-agent.conf.erb'),
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0640',
+    require => Package['coralogix-agent'],
+    notify  => Service['coralogix-agent'],
+  }
+  service { 'coralogix-agent':
+    ensure    => 'running',
+    enable    => true,
+    hasstatus => true,
+    require   => File['/etc/coralogix/agent.conf'],
   }
 }

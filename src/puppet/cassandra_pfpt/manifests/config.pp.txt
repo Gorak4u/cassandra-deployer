@@ -167,7 +167,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       notify  => Class['cassandra_pfpt::service'],
     }
   }
-  if $facts['os']['family'] == 'RedHat' and Integer($facts['os']['release']['major']) >= 7 {
+  if $facts['service_provider'] == 'systemd' {
     file { '/etc/systemd/system/cassandra.service.d':
       ensure => 'directory',
       owner  => 'root',
