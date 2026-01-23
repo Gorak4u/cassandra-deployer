@@ -133,7 +133,6 @@ class cassandra_pfpt (
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
   String $full_backup_log_file = '/var/log/cassandra/full_backup.log',
   String $incremental_backup_log_file = '/var/log/cassandra/incremental_backup.log',
-  Optional[String] $puppet_cron_schedule = undef,
   String $backup_backend = 's3',
   Integer $clearsnapshot_keep_days = 3,
   Boolean $backup_upload_streaming = false,
@@ -216,9 +215,6 @@ class cassandra_pfpt (
     }
     Class['cassandra_pfpt::install'] -> Class['cassandra_pfpt::stress']
   }
-
-  # Manage the puppet agent itself
-  contain cassandra_pfpt::puppet
 
   Class['cassandra_pfpt::java']
   -> Class['cassandra_pfpt::install']

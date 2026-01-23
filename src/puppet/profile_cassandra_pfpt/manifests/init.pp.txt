@@ -163,7 +163,6 @@ class profile_cassandra_pfpt {
   $cqlsh_path_env                   = lookup('profile_cassandra_pfpt::cqlsh_path_env', { 'default_value' => '/usr/bin/' })
   $jamm_source                      = lookup('profile_cassandra_pfpt::jamm_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jamm-0.3.2.jar' })
   $jamm_target                      = lookup('profile_cassandra_pfpt::jamm_target', { 'default_value' => '/usr/share/cassandra/lib/jamm-0.3.2.jar' })
-  $puppet_cron_schedule             = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => undef })
   
   # --- Backup & Recovery ---
   $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => false })
@@ -336,7 +335,6 @@ class profile_cassandra_pfpt {
     cqlsh_path_env                   => $cqlsh_path_env,
     jamm_source                      => $jamm_source,
     jamm_target                      => $jamm_target,
-    puppet_cron_schedule             => $puppet_cron_schedule,
     # Backup & Recovery
     manage_full_backups              => $manage_full_backups,
     manage_incremental_backups       => $manage_incremental_backups,
