@@ -327,7 +327,7 @@ process_table_backup() {
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         local s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name/$table_name.tar.gz.enc"
         if [ "$UPLOAD_STREAMING" = "true" ]; then
-            tar -C "$snapshot_dir" -c . | \
+            nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
@@ -343,18 +343,18 @@ process_table_backup() {
             local local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
             local local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
-            if ! tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
+            if ! nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
                 log_message "ERROR: Failed to archive $ks_name.$table_name. Skipping."
                 touch "$ERROR_DIR/$ks_name.$table_name"
                 return 1
             fi
-            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+            if ! nice -n 19 ionice -c 3 openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_message "ERROR: Failed to encrypt $ks_name.$table_name. Skipping."
                 touch "$ERROR_DIR/$ks_name.$table_name"
                 rm -f "$local_tar_file"
                 return 1
             fi
-            if ! aws s3 cp "$local_enc_file" "$s3_path"; then
+            if ! nice -n 19 ionice -c 3 aws s3 cp "$local_enc_file" "$s3_path"; then
                 log_message "ERROR: Failed to upload backup for $ks_name.$table_name"
                 touch "$ERROR_DIR/$ks_name.$table_name"
             else
@@ -504,5 +504,7 @@ else
 fi
 
 exit 0
+
+    
 
     

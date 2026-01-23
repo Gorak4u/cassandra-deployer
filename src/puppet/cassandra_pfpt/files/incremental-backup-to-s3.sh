@@ -200,7 +200,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
         
         if [ "$UPLOAD_STREAMING" = "true" ]; then
             # Streaming pipeline
-            tar -C "$backup_dir" -c . | \
+            nice -n 19 ionice -c 3 tar -C "$backup_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
             aws s3 cp - "$s3_path"
@@ -223,14 +223,14 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
             # Step 1: Archive and compress
-            if ! tar -C "$backup_dir" -czf "$local_tar_file" .; then
+            if ! nice -n 19 ionice -c 3 tar -C "$backup_dir" -czf "$local_tar_file" .; then
                 log_message "ERROR: Failed to archive incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 continue
             fi
 
             # Step 2: Encrypt
-            if ! openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+            if ! nice -n 19 ionice -c 3 openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_message "ERROR: Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
                 UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
                 rm -f "$local_tar_file"
@@ -238,7 +238,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             fi
             
             # Step 3: Upload
-            if aws s3 cp "$local_enc_file" "$s3_path"; then
+            if nice -n 19 ionice -c 3 aws s3 cp "$local_enc_file" "$s3_path"; then
                 log_message "Successfully uploaded incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
                 
@@ -330,3 +330,5 @@ else
 fi
 
 exit 0
+
+    

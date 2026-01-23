@@ -285,19 +285,19 @@ download_and_extract_table() {
     local temp_enc_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz.enc"
     local temp_tar_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz"
 
-    if ! aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
+    if ! nice -n 19 ionice -c 3 aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_message "ERROR: Failed to download $archive_key."
         rm -f "$temp_enc_file" # Clean up partial download
         return 1
     fi
 
-    if ! openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
+    if ! nice -n 19 ionice -c 3 openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$temp_enc_file" -out "$temp_tar_file" -pass "file:$TMP_KEY_FILE"; then
         log_message "ERROR: Failed to decrypt $archive_key. Check encryption key and file integrity."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
     fi
 
-    if ! tar -xzf "$temp_tar_file" -C "$output_dir"; then
+    if ! nice -n 19 ionice -c 3 tar -xzf "$temp_tar_file" -C "$output_dir"; then
         log_message "ERROR: Failed to extract $archive_key. Archive is likely corrupt."
         rm -f "$temp_enc_file" "$temp_tar_file"
         return 1
@@ -669,5 +669,7 @@ case $MODE in
 esac
 
 exit 0
+
+    
 
     
