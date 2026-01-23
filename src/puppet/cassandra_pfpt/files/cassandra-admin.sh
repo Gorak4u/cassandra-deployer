@@ -17,6 +17,9 @@ usage() {
     echo ""
     echo -e "${YELLOW}Usage: $0 <command> [arguments...]${NC}"
     echo ""
+    echo -e "${BLUE}--- Documentation ---${NC}"
+    echo -e "  ${GREEN}manual${NC}                 Display the full operations manual in the terminal."
+    echo ""
     echo -e "${BLUE}--- Node & Cluster Status ---${NC}"
     echo -e "  ${GREEN}health${NC}                 Run a comprehensive health check on the local node."
     echo -e "  ${GREEN}cluster-health${NC}          Quickly check cluster connectivity and nodetool status."
@@ -125,6 +128,9 @@ case "$COMMAND" in
         ;;
     stress)
         /usr/local/bin/stress-test.sh "$@"
+        ;;
+    manual)
+        /usr/local/bin/cassandra-manual.sh "$@"
         ;;
     help|--help|-h)
         usage
