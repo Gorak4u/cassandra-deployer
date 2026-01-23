@@ -1,3 +1,4 @@
+
 # A profile for configuring Cassandra.
 #
 # @summary This profile class configures a complete Cassandra node by wrapping the `cassandra_pfpt` component module and providing all its data via Hiera lookups.
@@ -9,7 +10,7 @@ class profile_cassandra_pfpt {
   $java_version                     = lookup('profile_cassandra_pfpt::java_version', { 'default_value' => '11' })
   $java_package_name                = lookup('profile_cassandra_pfpt::java_package_name', { 'default_value' => undef })
   $cluster_name                     = lookup('profile_cassandra_pfpt::cluster_name', { 'default_value' => 'pfpt-cassandra-cluster' })
-  $seeds_from_hiera                 = lookup('profile_cassandra_pfpt::seeds', { 'default_value' => [] })
+  $seeds_from_hiera                 = lookup('profile_cassandra_pfpt::seeds', { value_type    => Array[String], merge  => 'unique', 'default_value' => [] })
   $use_shenandoah_gc                = lookup('profile_cassandra_pfpt::use_shenandoah_gc', { 'default_value' => false })
   $racks                            = lookup('profile_cassandra_pfpt::racks', { 'default_value' => {} })
   $datacenter                       = lookup('profile_cassandra_pfpt::datacenter', { 'default_value' => 'dc1' })

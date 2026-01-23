@@ -27,8 +27,8 @@ export type FileTreeNode = {
 
 
 const getLang = (fileName: string) => {
-    if (fileName.endsWith('.pp')) return 'puppet';
-    if (fileName.endsWith('.erb') || fileName.endsWith('.epp')) return 'ruby';
+    if (fileName.endsWith('.pp') || fileName.endsWith('.pp.txt')) return 'puppet';
+    if (fileName.endsWith('.erb') || fileName.endsWith('.epp') || fileName.endsWith('.erb.txt')) return 'ruby';
     if (fileName.endsWith('.yaml')) return 'yaml';
     if (fileName.endsWith('.sh')) return 'bash';
     if (fileName.endsWith('.py')) return 'python';
@@ -45,28 +45,19 @@ export async function getPuppetFileTree(): Promise<{tree: Record<string, FileTre
     const parts = file.split(path.sep);
     const repo = parts[0];
     let group = 'root';
-    let name = parts[parts.length - 1];
-
     if (parts.length > 2) {
       group = parts[1];
-      name = parts.slice(2).join(path.sep);
-    } else {
-      name = parts[1];
     }
     
-    if (parts.length === 2) {
-        group = 'root';
-        name = parts[1];
-    } else if (parts.length > 2) {
-        group = parts[1];
-        name = parts.slice(2).join(path.sep);
-    }
-
+    const relativePath = parts.slice(1).join('/');
+    const displayName = relativePath
+      .replace(/\.pp\.txt$/, '.pp')
+      .replace(/\.erb\.txt$/, '.erb');
 
     return {
       repo,
       group,
-      name: parts.slice(1).join('/'),
+      name: displayName,
       path: file,
       lang: getLang(parts[parts.length - 1]),
     };
@@ -82,10 +73,11 @@ export async function getPuppetFileTree(): Promise<{tree: Record<string, FileTre
     let currentLevel = tree[file.repo];
 
     pathParts.forEach((part, index) => {
-        let node = currentLevel.find(n => n.name === part);
+        let node = currentLevel.find(n => n.name === part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb'));
 
         if (!node) {
-            node = { name: part, path: file.path.split(path.sep).slice(0, index + 2).join(path.sep) };
+            const nodeName = part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb');
+            node = { name: nodeName, path: file.path.split(path.sep).slice(0, index + 2).join(path.sep) };
             currentLevel.push(node);
         }
         
@@ -132,8 +124,26 @@ export async function getZippedModules(): Promise<string> {
             stream.on('end', () => resolve(Buffer.concat(chunks)));
         });
     };
+    
+    const files = await glob('**/*', { cwd: puppetDir, nodir: true, dot: true });
 
-    archive.directory(puppetDir, false);
+    for (const file of files) {
+        const filePath = path.join(puppetDir, file);
+        const stat = await fs.lstat(filePath);
+        if (stat.isFile()) {
+            const fileContent = await fs.readFile(filePath);
+            
+            let zipPath = file;
+            if (file.endsWith('.pp.txt')) {
+                zipPath = file.replace(/\.pp\.txt$/, '.pp');
+            } else if (file.endsWith('.erb.txt')) {
+                zipPath = file.replace(/\.erb\.txt$/, '.erb');
+            }
+            
+            archive.append(fileContent, { name: zipPath });
+        }
+    }
+
     await archive.finalize();
 
     const buffer = await streamToBuffer(archive);
