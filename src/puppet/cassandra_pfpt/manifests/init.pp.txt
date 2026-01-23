@@ -127,7 +127,7 @@ class cassandra_pfpt (
   Boolean $manage_full_backups = false,
   Boolean $manage_incremental_backups = false,
   String $full_backup_schedule = 'daily',
-  Variant[String, Array[String]] $incremental_backup_schedule = '0 */4 * * *',
+  String $incremental_backup_schedule = '0 */4 * * *',
   String $backup_s3_bucket = 'your-s3-backup-bucket',
   String $full_backup_script_path = '/usr/local/bin/full-backup-to-s3.sh',
   String $incremental_backup_script_path = '/usr/local/bin/incremental-backup-to-s3.sh',
