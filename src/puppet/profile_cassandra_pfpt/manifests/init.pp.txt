@@ -178,7 +178,7 @@ class profile_cassandra_pfpt {
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
   $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
   # JMX Exporter
-  $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
+  $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => true })
   $jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
   $jmx_exporter_jar_source          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_source', { 'default_value' => "puppet:///modules/cassandra_pfpt/jmx_prometheus_javaagent-${jmx_exporter_version}.jar" })
   $jmx_exporter_jar_target          = lookup('profile_cassandra_pfpt::jmx_exporter_jar_target', { 'default_value' => "/usr/share/cassandra/lib/jmx_prometheus_javaagent-${jmx_exporter_version}.jar" })
