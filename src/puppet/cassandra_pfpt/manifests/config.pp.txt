@@ -68,7 +68,8 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',
     'cassandra_range_repair.py', 'range-repair.sh',
     'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
-    'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh' ].each |$script| {
+    'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh',
+    'cassandra-admin.sh', 'stress-test.sh' ].each |$script| {
     file { "${$manage_bin_dir}/${$script}":
       ensure  => 'file',
       source  => "puppet:///modules/cassandra_pfpt/${$script}",

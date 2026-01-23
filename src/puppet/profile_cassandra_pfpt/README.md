@@ -11,7 +11,7 @@
 1.  [Description](#description)
 2.  [Setup](#setup)
 3.  [Usage Examples](#usage-examples)
-4.  [Operator's Quick Reference: Management Scripts](#operators-quick-reference-management-scripts)
+4.  [Operator's Quick Reference: The `cassandra-admin` Command](#operators-quick-reference-the-cassandra-admin-command)
 5.  [Day-2 Operations Guide](#day-2-operations-guide)
     1.  [Node and Cluster Health Checks](#node-and-cluster-health-checks)
     2.  [Node Lifecycle Management](#node-lifecycle-management)
@@ -123,30 +123,51 @@ profile_cassandra_pfpt::cassandra_roles:
 
 ---
 
-## Operator's Quick Reference: Management Scripts
+## Operator's Quick Reference: The `cassandra-admin` Command
 
-This profile installs a suite of robust management scripts in `/usr/local/bin` on every Cassandra node. These are your primary tools for safe, manual operations.
+This profile installs a unified administrative wrapper script at `/usr/local/bin/cassandra-admin`. This is your primary entry point for all manual operational tasks. It simplifies management by providing a single, memorable command with clear sub-commands.
 
-| Script Name                    | Purpose                                                                                                     |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `node_health_check.sh`         | Performs a comprehensive health check of the local node (disk, status, gossip, logs).                       |
-| `cluster-health.sh`            | Quickly verifies `nodetool status`, `cqlsh` connectivity, and the native transport port.                       |
-| `disk-health-check.sh`         | Checks available disk space against warning/critical thresholds. Used by other scripts.                     |
-| `version-check.sh`             | Audits and prints the versions of key software (OS, Java, Cassandra, Puppet).                               |
-| `rolling_restart.sh`           | Safely performs a rolling restart of the Cassandra service on the local node (drain, stop, start, verify).  |
-| `decommission-node.sh`         | Securely decommissions the local node, streaming its data to other replicas.                                |
-| `prepare-replacement.sh`       | Configures a **new, stopped** node to replace a dead node in the cluster by setting the correct JVM flag.   |
-| `rebuild-node.sh`              | Rebuilds the data on a node by streaming from another data center. Used for adding a node to a new DC.       |
-| `range-repair.sh`              | **(Primary Repair Tool)** Initiates a safe, granular, low-impact repair of the node's data.                  |
-| `compaction-manager.sh`        | Safely runs `nodetool compact` while monitoring disk space to prevent failures.                               |
-| `garbage-collect.sh`           | Safely runs `nodetool garbagecollect` with pre-flight safety checks.                                      |
-| `cleanup-node.sh`              | Safely runs `nodetool cleanup` after a new node is added to the cluster.                                    |
-| `upgrade-sstables.sh`          | Safely runs `nodetool upgradesstables` after a major Cassandra version upgrade.                               |
-| `restore-from-s3.sh`           | **(Primary Restore Tool)** A powerful script to restore data to a point in time from S3 backups.              |
-| `full-backup-to-s3.sh`         | (Automated) Script executed by `systemd` to perform scheduled full backups.                                 |
-| `incremental-backup-to-s3.sh`  | (Automated) Script executed by `systemd` to perform scheduled incremental backups.                          |
-| `stress-test.sh`               | A robust wrapper for running `cassandra-stress` performance tests.                                          |
-| `cassandra-upgrade-precheck.sh`| A detailed, non-invasive script to validate readiness for a major version upgrade (e.g., 3.11 to 4.0).         |
+To see all available commands, simply run it with `help`:
+
+```
+$ sudo /usr/local/bin/cassandra-admin help
+
+Cassandra Operations Master Script
+
+A unified wrapper for managing common Cassandra operational tasks on this node.
+
+Usage: /usr/local/bin/cassandra-admin <command> [arguments...]
+
+--- Node & Cluster Status ---
+  health                 Run a comprehensive health check on the local node.
+  cluster-health         Quickly check cluster connectivity and nodetool status.
+  disk-health            Check disk usage against warning/critical thresholds. Usage: disk-health [-p /path] [-w 80] [-c 90]
+  version                Audit and print versions of key software (OS, Java, Cassandra).
+
+--- Node Lifecycle & Maintenance ---
+  restart                Perform a safe, rolling restart of the Cassandra service.
+  drain                  Drain the node, flushing memtables and stopping client traffic.
+  decommission           Permanently remove this node from the cluster after streaming its data.
+  replace <dead_node_ip> Configure this NEW, STOPPED node to replace a dead node.
+  rebuild <source_dc>    Rebuild the data on this node by streaming from another datacenter.
+
+--- Data Management & Repair ---
+  repair [<keyspace>]    Run a safe, granular repair on the node's token ranges. Can target a specific keyspace.
+  cleanup [opts]         Run 'nodetool cleanup' with safety checks. Use 'cleanup -- --help' for options.
+  compact [opts]         Run 'nodetool compact' with safety checks. Use 'compact -- --help' for options.
+  garbage-collect [opts] Run 'nodetool garbagecollect' with safety checks. Use 'garbage-collect -- --help' for options.
+  upgrade-sstables [opts]Run 'nodetool upgradesstables' with safety checks. Use 'upgrade-sstables -- --help' for options.
+
+--- Backup & Recovery ---
+  snapshot [<keyspaces>] Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces.
+  restore [opts]         Restore data from S3 backups. This is a complex command; run 'restore -- --help' for its usage.
+
+--- Advanced & Destructive Operations (Use with caution!) ---
+  assassinate <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring.
+
+--- Performance Testing ---
+  stress [opts]          Run 'cassandra-stress' via a robust wrapper. Run 'stress -- --help' for options.
+```
 
 ---
 
@@ -158,9 +179,9 @@ This section provides a practical guide for common operational tasks.
 
 > Before performing any maintenance, always check the health of the node and cluster.
 
-*   **Check the Local Node:** Run `sudo /usr/local/bin/node_health_check.sh`. This script is your first stop. It checks disk space, node status (UN), gossip state, active streams, and recent log exceptions, giving you a quick "go/no-go" for maintenance.
-*   **Check Cluster Connectivity:** Run `sudo /usr/local/bin/cluster-health.sh`. This verifies that the node can communicate with the cluster and that the CQL port is open.
-*   **Check Disk Space Manually:** Run `sudo /usr/local/bin/disk-health-check.sh` to see the current free space percentage on the data volume.
+*   **Check the Local Node:** Run `sudo /usr/local/bin/cassandra-admin health`. This script is your first stop. It checks disk space, node status (UN), gossip state, active streams, and recent log exceptions, giving you a quick "go/no-go" for maintenance.
+*   **Check Cluster Connectivity:** Run `sudo /usr/local/bin/cassandra-admin cluster-health`. This verifies that the node can communicate with the cluster and that the CQL port is open.
+*   **Check Disk Space Manually:** Run `sudo /usr/local/bin/cassandra-admin disk-health` to see the current free space percentage on the data volume.
 
 ### Node Lifecycle Management
 
@@ -168,14 +189,14 @@ This section provides a practical guide for common operational tasks.
 To apply configuration changes or for other maintenance, always use the provided script for a safe restart.
 
 1.  SSH into the node you wish to restart.
-2.  Execute `sudo /usr/local/bin/rolling_restart.sh`.
+2.  Execute `sudo /usr/local/bin/cassandra-admin restart`.
 3.  The script will automatically drain the node, stop the service, start it again, and wait until it verifies the node has successfully rejoined the cluster in `UN` state.
 
 #### Decommissioning a Node
 When you need to permanently remove a node from the cluster:
 
 1.  SSH into the node you want to remove.
-2.  Run `sudo /usr/local/bin/decommission-node.sh`.
+2.  Run `sudo /usr/local/bin/cassandra-admin decommission`.
 3.  The script will ask for confirmation, then run `nodetool decommission`. After it completes successfully, it is safe to shut down and terminate the instance.
 
 #### Replacing a Failed Node
@@ -183,58 +204,58 @@ If a node has failed permanently and cannot be recovered, you must replace it wi
 
 1.  Provision a new machine with the same resources and apply this Puppet profile. **Do not start the Cassandra service.**
 2.  SSH into the **new, stopped** node.
-3.  Execute the `prepare-replacement.sh` script, providing the IP of the dead node it is replacing:
+3.  Execute the `replace` command, providing the IP of the dead node it is replacing:
     ```bash
-    sudo /usr/local/bin/prepare-replacement.sh <ip_of_dead_node>
+    sudo /usr/local/bin/cassandra-admin replace <ip_of_dead_node>
     ```
 4.  The script will configure the necessary JVM flag (`-Dcassandra.replace_address_first_boot`).
 5.  You can now **start the Cassandra service** on the new node. It will automatically bootstrap into the cluster, assuming the identity and token ranges of the dead node.
 
 ### Data and Maintenance Operations
 
-#### Repairing Data (`range-repair.sh`)
+#### Repairing Data
 This is the primary script for running manual repairs. It intelligently breaks the repair into small token ranges to minimize performance impact.
 
 *   **To repair all keyspaces (most common):**
     ```bash
-    sudo /usr/local/bin/range-repair.sh
+    sudo /usr/local/bin/cassandra-admin repair
     ```
 *   **To repair a specific keyspace:**
     ```bash
-    sudo /usr/local/bin/range-repair.sh my_keyspace
+    sudo /usr/local/bin/cassandra-admin repair my_keyspace
     ```
 > Run this sequentially on each node in the cluster for a full, safe, rolling repair.
 
-#### Compaction (`compaction-manager.sh`)
+#### Compaction
 To manually trigger compaction while safely monitoring disk space:
 
 ```bash
 # Compact a specific table
-sudo /usr/local/bin/compaction-manager.sh -k my_keyspace -t my_table
+sudo /usr/local/bin/cassandra-admin compact -- -k my_keyspace -t my_table
 
 # Compact an entire keyspace
-sudo /usr/local/bin/compaction-manager.sh -k my_keyspace
+sudo /usr/local/bin/cassandra-admin compact -- -k my_keyspace
 ```
 
-#### Garbage Collection (`garbage-collect.sh`)
+#### Garbage Collection
 To manually remove droppable tombstones with pre-flight safety checks:
 
 ```bash
-sudo /usr/local/bin/garbage-collect.sh -k my_keyspace -t users
+sudo /usr/local/bin/cassandra-admin garbage-collect -- -k my_keyspace -t users
 ```
 
-#### SSTable Upgrades (`upgrade-sstables.sh`)
+#### SSTable Upgrades
 After a major Cassandra version upgrade, run this on each node sequentially:
 
 ```bash
-sudo /usr/local/bin/upgrade-sstables.sh
+sudo /usr/local/bin/cassandra-admin upgrade-sstables
 ```
 
-#### Node Cleanup (`cleanup-node.sh`)
+#### Node Cleanup
 After adding a new node to the cluster, run `cleanup` on the existing nodes in the same DC to remove data that no longer belongs to them.
 
 ```bash
-sudo /usr/local/bin/cleanup-node.sh
+sudo /usr/local/bin/cassandra-admin cleanup
 ```
 
 ---
@@ -243,12 +264,12 @@ sudo /usr/local/bin/cleanup-node.sh
 
 ### Automated Backups
 
-This profile provides a fully automated, S3-based backup solution using `systemd` timers.
+This profile provides a fully automated, S3-based backup solution using `cron`.
 
 #### How It Works
 1.  **Granular Backups:** Backups are no longer single, large archives. Instead, each table (for full backups) or set of incremental changes is archived and uploaded as a small, separate file to S3.
-2.  **Scheduling:** Puppet creates `systemd` timer units (`cassandra-full-backup.timer`, `cassandra-incremental-backup.timer`) on each node.
-3.  **Execution:** `systemd` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`).
+2.  **Scheduling:** Puppet creates `cron` job files in `/etc/cron.d/` on each node.
+3.  **Execution:** `cron` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`).
 4.  **Process:** The scripts generate a `backup_manifest.json` with critical metadata for each backup run (identified by a `YYYY-MM-DD-HH-MM` timestamp), encrypt the archives, and upload them to a structured path in S3.
 5.  **Local Snapshot Cleanup:** The full backup script automatically deletes local snapshots older than `clearsnapshot_keep_days`.
 6.  **S3 Lifecycle Management:** The full backup script also ensures an S3 lifecycle policy is in place on the bucket to automatically delete old backups after the `s3_retention_period`.
@@ -275,7 +296,7 @@ A safe, low-impact, automated repair process is critical for data consistency.
 
 ## Disaster Recovery Guide: A Deep Dive into Point-in-Time Recovery
 
-This guide provides an in-depth, step-by-step walkthrough for recovering your Cassandra cluster from S3 backups using the powerful `/usr/local/bin/restore-from-s3.sh` script.
+This guide provides an in-depth, step-by-step walkthrough for recovering your Cassandra cluster from S3 backups using the powerful `cassandra-admin restore` command.
 
 ### Understanding the Backup Strategy
 
@@ -289,7 +310,7 @@ Before restoring, it's critical to understand how backups are structured:
 
 ### The Restore Process: Building the Chain
 
-The `restore-from-s3.sh` script performs Point-in-Time Recovery (PITR). When you provide a target timestamp with `--date`:
+The `cassandra-admin restore` script performs Point-in-Time Recovery (PITR). When you provide a target timestamp with `--date`:
 
 1.  **Find the Base:** It searches S3 for the most recent **full** backup that occurred *at or before* your target time. This is the foundation of the restore.
 2.  **Find the Deltas:** It then finds all **incremental** backups that occurred *between* the full backup and your target time.
@@ -316,20 +337,20 @@ This is a non-destructive operation that streams data into a **live, running clu
 ```bash
 # Example 1: Restore a single table ('users') to its state as of 6:00 PM on Jan 20, 2026.
 # The script will find the correct backup chain and load the data.
-sudo /usr/local/bin/restore-from-s3.sh \
+sudo /usr/local/bin/cassandra-admin restore -- \
   --date "2026-01-20-18-00" \
   --keyspace my_app \
   --table users \
   --download-and-restore
 
 # Example 2: Restore an entire keyspace ('auditing').
-sudo /usr/local/bin/restore-from-s3.sh \
+sudo /usr/local/bin/cassandra-admin restore -- \
   --date "2026-01-20-18-00" \
   --keyspace auditing \
   --download-and-restore
 
 # Example 3: Download data for a table for inspection without loading it.
-sudo /usr/local/bin/restore-from-s3.sh \
+sudo /usr/local/bin/cassandra-admin restore -- \
   --date "2026-01-20-18-00" \
   --keyspace my_app \
   --table users \
@@ -358,7 +379,7 @@ This is a **destructive** operation performed on a **new, stopped node**.
     ```bash
     # Restore this new node using the backup data from 'cassandra-node-03.example.com'
     # to the point in time of the latest available backup.
-    sudo /usr/local/bin/restore-from-s3.sh \
+    sudo /usr/local/bin/cassandra-admin restore -- \
       --date "2026-01-22-10-00" \
       --source-host cassandra-node-03.example.com \
       --full-restore \
@@ -395,7 +416,7 @@ The first step is to create the keyspaces and table structures in the new, empty
 4.  Run the restore script in `--schema-only` mode. You need to specify the `--source-host` of one of your original backed-up nodes.
     ```bash
     # Download the schema from the latest full backup of an original node.
-    sudo /usr/local/bin/restore-from-s3.sh \
+    sudo /usr/local/bin/cassandra-admin restore -- \
       --date "2026-01-22-10-00" \
       --source-host original-node-01.example.com \
       --schema-only
@@ -417,7 +438,7 @@ Now, you will perform a full node restore on each new machine, one at a time.
     *   SSH into the new node (e.g., `new-node-01`).
     *   Run the full restore, pointing it to the backup of its corresponding original node.
         ```bash
-        sudo /usr/local/bin/restore-from-s3.sh \
+        sudo /usr/local/bin/cassandra-admin restore -- \
           --date "2026-01-22-10-00" \
           --source-host original-node-01.example.com \
           --full-restore \
@@ -429,7 +450,7 @@ Now, you will perform a full node restore on each new machine, one at a time.
     *   SSH into the next new node (e.g., `new-node-02`).
     *   Run the same command, but change the `--source-host` to its corresponding original node.
         ```bash
-        sudo /usr/local/bin/restore-from-s3.sh \
+        sudo /usr/local/bin/cassandra-admin restore -- \
           --date "2026-01-22-10-00" \
           --source-host original-node-02.example.com \
           --full-restore \
@@ -451,7 +472,7 @@ The `schema.cql` file included in every full backup is your safety net.
 1.  **Identify the last known-good backup** before the schema change occurred.
 2.  **Download the schema file** from that backup set using the `--schema-only` mode:
     ```bash
-    sudo /usr/local/bin/restore-from-s3.sh \
+    sudo /usr/local/bin/cassandra-admin restore -- \
       --date "2026-01-20-18-00" \
       --source-host cassandra-node-01.example.com \
       --schema-only
@@ -469,16 +490,15 @@ Having functional backups is the first step. Ensuring they are reliable and secu
 
 ### Monitoring Backups and Alerting
 
-A backup that fails silently is not a backup. The automated backup and repair jobs run as `systemd` services. You must monitor their status.
+A backup that fails silently is not a backup. The automated backup jobs run via `cron`. You must monitor their status.
 
 *   **Manual Checks:**
-    *   Check the status of timers: `systemctl list-timers 'cassandra-*'`
-    *   Check the result of the last run: `systemctl status cassandra-full-backup.service`
-    *   View detailed logs: `journalctl -u cassandra-full-backup.service`
+    *   Check the cron log file (typically `/var/log/cron` or `/var/log/syslog` depending on your OS) for entries related to `cassandra-full-backup` and `cassandra-incremental-backup`.
+    *   Check the dedicated backup logs: `/var/log/cassandra/full_backup.log` and `/var/log/cassandra/incremental_backup.log`.
 
 *   **Automated Alerting (Recommended):**
-    *   Integrate your monitoring system (e.g., Prometheus with `node_exporter`'s textfile collector, Datadog) to parse the output of `systemctl status` or the log files in `/var/log/cassandra/`.
-    *   **Create alerts that trigger if a backup service enters a `failed` state.**
+    *   Integrate your monitoring system (e.g., Prometheus with `node_exporter`'s textfile collector, Datadog) to parse the output of the backup log files.
+    *   **Create alerts that trigger if a backup log has not been updated in 24 hours or if it contains "ERROR".**
 
 ### Testing Your Disaster Recovery Plan (Fire Drills)
 
