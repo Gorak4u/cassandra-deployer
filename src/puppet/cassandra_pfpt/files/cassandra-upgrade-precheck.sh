@@ -261,7 +261,7 @@ check_schema_objects() {
 
     # Check for Materialized Views
     log_info "Querying for Materialized Views..."
-    local mv_count=$($CQLSH ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.views;" 2>/dev/null | awk 'NR==3 {print $1}')
+    local mv_count=$($CQLSH --cqlshrc "$CQLSH_CONFIG" ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.views;" 2>/dev/null | awk 'NR==3 {print $1}')
     
     if [[ "$mv_count" =~ ^[0-9]+$ ]] && [[ "$mv_count" -gt 0 ]]; then
         log_fail "Found $mv_count Materialized Views (MVs)."
@@ -274,7 +274,7 @@ check_schema_objects() {
 
     # Check for Secondary Indexes
     log_info "Querying for Secondary Indexes..."
-    local idx_count=$($CQLSH ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.indexes;" 2>/dev/null | awk 'NR==3 {print $1}')
+    local idx_count=$($CQLSH --cqlshrc "$CQLSH_CONFIG" ${CQLSH_SSL_OPT} -e "SELECT count(*) FROM system_schema.indexes;" 2>/dev/null | awk 'NR==3 {print $1}')
     if [[ "$idx_count" =~ ^[0-9]+$ ]] && [[ "$idx_count" -gt 0 ]]; then
         log_warn "Found $idx_count Secondary Indexes. Ensure application logic handles latency if indexes rebuild on startup."
     elif ! [[ "$idx_count" =~ ^[0-9]+$ ]]; then
