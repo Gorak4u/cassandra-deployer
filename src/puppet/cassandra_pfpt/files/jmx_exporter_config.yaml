@@ -1,0 +1,90 @@
+---
+# Default configuration for Prometheus JMX Exporter for Apache Cassandra
+# For a full list of options, see: https://github.com/prometheus/jmx_exporter
+
+# The port is configured via the javaagent argument in jvm-server.options
+
+# Default to lowercase output for metric names
+lowercaseOutputName: true
+
+# Default to lowercase labels for metric labels
+lowercaseOutputLabelNames: true
+
+# Rules for what JMX MBeans to scrape and how to format them.
+rules:
+# Cassandra node status
+- pattern: "org.apache.cassandra.db<type=StorageService><>LiveNodes"
+  name: "cassandra_storage_service_live_nodes"
+  type: GAUGE
+  valueFactor: 1
+- pattern: "org.apache.cassandra.db<type=StorageService><>UnreachableNodes"
+  name: "cassandra_storage_service_unreachable_nodes"
+  type: GAUGE
+  valueFactor: 1
+- pattern: "org.apache.cassandra.db<type=StorageService><>Token"
+  name: "cassandra_storage_service_token"
+  type: UNTYPED
+- pattern: "org.apache.cassandra.db<type=StorageService><>Load"
+  name: "cassandra_storage_service_load_bytes"
+  type: GAUGE
+  valueFactor: 1
+
+# Compaction metrics
+- pattern: "org.apache.cassandra.metrics<type=Compaction, name=PendingTasks><>Value"
+  name: "cassandra_compaction_pending_tasks"
+  type: GAUGE
+- pattern: "org.apache.cassandra.metrics<type=Compaction, name=BytesCompacted><>Count"
+  name: "cassandra_compaction_bytes_compacted_total"
+  type: COUNTER
+- pattern: "org.apache.cassandra.metrics<type=Compaction, name=CompletedTasks><>Count"
+  name: "cassandra_compaction_completed_tasks_total"
+  type: COUNTER
+
+# Client Request Latency (Read/Write)
+- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>(\w+)"
+  name: "cassandra_client_request_latency_seconds"
+  labels:
+    "request_type": "$1"
+    "quantile": "0.$2"
+  valueFactor: 0.000001 # Convert microseconds to seconds for 50th, 95th, 99th, etc.
+- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>Count"
+  name: "cassandra_client_request_latency_count"
+  labels:
+    "request_type": "$1"
+  type: COUNTER
+- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=TotalLatency><>Count"
+  name: "cassandra_client_request_total_latency_seconds"
+  labels:
+    "request_type": "$1"
+  type: COUNTER
+  valueFactor: 0.000001
+
+# JVM Memory
+- pattern: "java.lang<type=Memory><HeapMemoryUsage>(\w+)"
+  name: "cassandra_jvm_memory_heap_usage"
+  labels:
+    "area": "Heap"
+    "state": "$1"
+  type: GAUGE
+- pattern: "java.lang<type=Memory><NonHeapMemoryUsage>(\w+)"
+  name: "cassandra_jvm_memory_nonheap_usage"
+  labels:
+    "area": "NonHeap"
+    "state": "$1"
+  type: GAUGE
+
+# Garbage Collection
+- pattern: "java.lang<type=GarbageCollector, name=(.*)><>(\w+)"
+  name: "cassandra_jvm_gc"
+  labels:
+    "collector": "$1"
+  attrNameSnakeCase: true
+  type: COUNTER
+
+# Cache metrics
+- pattern: "org.apache.cassandra.metrics<type=Cache, scope=(\w+), name=(\w+)><>(\w+)"
+  name: "cassandra_cache"
+  labels:
+    "cache_type": "$1"
+    "cache_name": "$2"
+  attrNameSnakeCase: true
