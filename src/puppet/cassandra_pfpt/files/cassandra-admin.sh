@@ -24,7 +24,9 @@ usage() {
     echo -e "  ${GREEN}version${NC}                 Audit and print versions of key software (OS, Java, Cassandra)."
     echo ""
     echo -e "${BLUE}--- Node Lifecycle & Maintenance ---${NC}"
+    echo -e "  ${GREEN}stop${NC}                   Safely drain and stop the Cassandra service."
     echo -e "  ${GREEN}restart${NC}                Perform a safe, rolling restart of the Cassandra service."
+    echo -e "  ${GREEN}reboot${NC}                 Safely drain Cassandra and reboot the machine."
     echo -e "  ${GREEN}drain${NC}                  Drain the node, flushing memtables and stopping client traffic."
     echo -e "  ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data."
     echo -e "  ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node."
@@ -72,8 +74,14 @@ case "$COMMAND" in
     version)
         /usr/local/bin/version-check.sh "$@"
         ;;
+    stop)
+        /usr/local/bin/stop-node.sh "$@"
+        ;;
     restart)
         /usr/local/bin/rolling_restart.sh "$@"
+        ;;
+    reboot)
+        /usr/local/bin/reboot-node.sh "$@"
         ;;
     drain)
         /usr/local/bin/drain-node.sh "$@"

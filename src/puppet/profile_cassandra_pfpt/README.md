@@ -146,7 +146,9 @@ Usage: /usr/local/bin/cassandra-admin <command> [arguments...]
   version                Audit and print versions of key software (OS, Java, Cassandra).
 
 --- Node Lifecycle & Maintenance ---
+  stop                   Safely drain and stop the Cassandra service.
   restart                Perform a safe, rolling restart of the Cassandra service.
+  reboot                 Safely drain Cassandra and reboot the machine.
   drain                  Drain the node, flushing memtables and stopping client traffic.
   decommission           Permanently remove this node from the cluster after streaming its data.
   replace <dead_node_ip> Configure this NEW, STOPPED node to replace a dead node.
