@@ -1,0 +1,13 @@
+# /etc/systemd/system/cassandra-repair.timer
+# Managed by Puppet
+
+[Unit]
+Description=Timer to schedule Cassandra node repair
+
+[Timer]
+OnCalendar=<%= @repair_schedule %>
+Persistent=true
+Unit=cassandra-repair.service
+
+[Install]
+WantedBy=timers.target

@@ -1,9 +1,0 @@
-# This is a test file to verify surgical editing.
-
-class test_class {
-  # This comment was added during the test.
-  $test_variable        = 'a_value'
-  $another_variable     = 'another_value'
-  $third_variable       = 'third'
-  $fourth_variable      = 'fourth'
-}

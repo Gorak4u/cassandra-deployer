@@ -1,0 +1,17 @@
+# /etc/systemd/system/cassandra-repair.service
+# Managed by Puppet
+
+[Unit]
+Description=Cassandra Node Scheduled Repair Service
+Wants=cassandra.service
+After=cassandra.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+<% if @repair_keyspace and @repair_keyspace != '' -%>
+ExecStart=<%= @manage_bin_dir %>/range-repair.sh <%= @repair_keyspace %>
+<% else -%>
+ExecStart=<%= @manage_bin_dir %>/range-repair.sh
+<% end -%>

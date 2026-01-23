@@ -1,0 +1,40 @@
+# @summary Manages scheduled repair for Cassandra.
+class cassandra_pfpt::repair inherits cassandra_pfpt {
+  # This class is responsible for scheduling the execution of the repair scripts.
+
+  # Repair Service and Timer
+  file { '/etc/systemd/system/cassandra-repair.service':
+    ensure  => 'file',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    content => template('cassandra_pfpt/cassandra-repair.service.erb'),
+    notify  => Exec['cassandra-repair-systemd-reload'],
+    require => File["${manage_bin_dir}/range-repair.sh"],
+  }
+
+  file { '/etc/systemd/system/cassandra-repair.timer':
+    ensure  => 'file',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    content => template('cassandra_pfpt/cassandra-repair.timer.erb'),
+    notify  => Service['cassandra-repair.timer'],
+  }
+
+  service { 'cassandra-repair.timer':
+    ensure  => 'running',
+    enable  => true,
+    require => [
+      File['/etc/systemd/system/cassandra-repair.service'],
+      File['/etc/systemd/system/cassandra-repair.timer'],
+    ],
+  }
+
+  # Common daemon-reload exec
+  exec { 'cassandra-repair-systemd-reload':
+    command     => 'systemctl daemon-reload',
+    path        => ['/bin', '/usr/bin'],
+    refreshonly => true,
+  }
+}
