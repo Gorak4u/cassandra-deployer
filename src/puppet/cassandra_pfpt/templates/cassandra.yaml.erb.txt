@@ -74,7 +74,8 @@ thrift_framed_transport_size_in_mb: <%= @thrift_framed_transport_size_in_mb %>
 <% end -%>
 
 # Cassandra 4.x / 5.x+ specific settings
-<% if @enable_transient_replication -%>
+<%# The enable_transient_replication parameter was removed in Cassandra 5.0 -%>
+<% if @cassandra_major_version.to_i < 5 -%>
 enable_transient_replication: <%= @enable_transient_replication %>
 <% end -%>
 

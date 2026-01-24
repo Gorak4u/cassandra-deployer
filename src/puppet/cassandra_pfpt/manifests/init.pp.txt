@@ -83,6 +83,7 @@ class cassandra_pfpt (
   Boolean $rpc_keepalive,
   Integer $thrift_framed_transport_size_in_mb,
   Boolean $enable_transient_replication,
+  Boolean $enable_materialized_views,
   Boolean $manage_jmx_security,
   String $jmx_password_file_content,
   String $jmx_access_file_content,
@@ -166,7 +167,8 @@ class cassandra_pfpt (
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
-  if Integer($cassandra_major_version) >= 4 and Integer($java_version) < 11 {
+  if (Integer($cassandra_major_version) == 4 and Integer($java_version) < 11) or
+     (Integer($cassandra_major_version) >= 5 and Integer($java_version) < 11) {
     fail("Cassandra version ${cassandra_version} requires Java 11 or newer, but Java ${java_version} was specified.")
   }
 
