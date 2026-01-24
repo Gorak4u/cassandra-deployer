@@ -219,7 +219,7 @@ export async function pushToGit(data: {
       http,
       dir: tempRepoDir,
       remote: 'origin',
-      ref: 'main',
+      remoteRef: 'refs/heads/main',
       force: true, // Force push to overwrite history, simpler for this use case
       onAuth: () => ({ username: data.pat }),
     });
