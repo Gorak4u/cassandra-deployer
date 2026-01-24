@@ -97,29 +97,45 @@ profile_cassandra_pfpt::manage_scheduled_repair: true
 profile_cassandra_pfpt::repair_schedule: '*-*-1/5 01:00:00' # Every 5 days
 ```
 
-### Managing Cassandra Roles
+### Managing Cassandra Schema via Hiera
 
-You can declaratively manage Cassandra user roles. For production environments, it is highly recommended to encrypt passwords using **Hiera-eyaml**. The profile supports this automatically, as Puppet will decrypt the secrets before passing them to the module.
-
-Here is an example showing both a plain-text password and an encrypted one:
+You can declaratively manage your entire Cassandra schema—users, keyspaces, and tables—via Hiera. For production environments, it is highly recommended to encrypt passwords using **Hiera-eyaml**.
 
 ```yaml
 # In your Hiera data
-profile_cassandra_pfpt::cassandra_roles:
+profile_cassandra_pfpt::schema_users:
   # Example with a plain-text password (suitable for development)
   'readonly_user':
     password: 'SafePassword123'
     is_superuser: false
     can_login: true
-
   # Example with a securely encrypted password using eyaml (for production)
   'app_admin':
     password: >
-      ENC[PKCS7,MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAq3s4/L5W
-      ... (rest of your encrypted string) ...
-      9y9gBFdCIg4a5A==]
+      ENC[PKCS7,MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAq3s4/L5W...9y9gBFdCIg4a5A==]
     is_superuser: true
     can_login: true
+
+profile_cassandra_pfpt::schema_keyspaces:
+  'my_app':
+    ensure: 'present'
+    replication:
+      class: 'NetworkTopologyStrategy'
+      dc1: 3
+    durable_writes: true
+
+profile_cassandra_pfpt::schema_tables:
+  'users':
+    ensure: 'present'
+    keyspace: 'my_app'
+    columns:
+      - name: 'user_id'
+        type: 'uuid'
+      - name: 'first_name'
+        type: 'text'
+      - name: 'last_name'
+        type: 'text'
+    primary_key: 'user_id'
 ```
 
 ---
@@ -592,12 +608,15 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::compaction_throughput_mb_per_sec` (Integer): Throttles compaction to a specific throughput. Default: `16`.
 *   `profile_cassandra_pfpt::jvm_additional_opts` (Hash): A hash of extra JVM arguments to add or override in `jvm-server.options`. Default: `{}`.
 
-### Security & Authentication
+### Security & Schema
 *   `profile_cassandra_pfpt::authenticator` (String): The authentication backend. Default: `'PasswordAuthenticator'`.
 *   `profile_cassandra_pfpt::authorizer` (String): The authorization backend. Default: `'CassandraAuthorizer'`.
 *   `profile_cassandra_pfpt::role_manager` (String): The role management backend. Default: `'CassandraRoleManager'`.
-*   `profile_cassandra_pfpt::cassandra_roles` (Hash): A hash defining user roles to be managed declaratively. See example above. Default: `{}`.
 *   `profile_cassandra_pfpt::system_keyspaces_replication` (Hash): Defines the replication factor for system keyspaces in a multi-DC setup. Example: `{ 'dc1' => 3, 'dc2' => 3 }`. Default: `{}`.
+*   `profile_cassandra_pfpt::schema_users` (Hash): A hash defining user accounts. Default: `{}`.
+*   `profile_cassandra_pfpt::schema_keyspaces` (Hash): A hash defining keyspaces. Default: `{}`.
+*   `profile_cassandra_pfpt::schema_tables` (Hash): A hash defining tables. Default: `{}`.
+*   `profile_cassandra_pfpt::schema_cql_types` (Hash): A hash defining user-defined types. Default: `{}`.
 
 ### Automated Maintenance
 *   `profile_cassandra_pfpt::manage_scheduled_repair` (Boolean): Set to `true` to enable the automated weekly repair job. Default: `false`.

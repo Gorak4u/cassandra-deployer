@@ -70,7 +70,6 @@ class profile_cassandra_pfpt {
   $authorizer                       = lookup('profile_cassandra_pfpt::authorizer', { 'default_value' => 'CassandraAuthorizer' })
   $role_manager                     = lookup('profile_cassandra_pfpt::role_manager', { 'default_value' => 'CassandraRoleManager' })
   $cassandra_password               = Sensitive(lookup('profile_cassandra_pfpt::cassandra_password', { 'default_value' => 'PP#C@ss@ndr@000' }))
-  $cassandra_roles                  = lookup('profile_cassandra_pfpt::cassandra_roles', { 'default_value' => {} })
   # JMX Security
   $manage_jmx_security              = lookup('profile_cassandra_pfpt::manage_jmx_security', { 'default_value' => true })
   $jmx_password_file_path           = lookup('profile_cassandra_pfpt::jmx_password_file_path', { 'default_value' => '/etc/cassandra/jmxremote.password' })
@@ -190,6 +189,12 @@ class profile_cassandra_pfpt {
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
   $repair_keyspace                  = lookup('profile_cassandra_pfpt::repair_keyspace', { 'default_value' => undef })
 
+  # --- Schema Management ---
+  $schema_users                     = lookup('profile_cassandra_pfpt::schema_users', { 'default_value' => {} })
+  $schema_keyspaces                 = lookup('profile_cassandra_pfpt::schema_keyspaces', { 'default_value' => {} })
+  $schema_tables                    = lookup('profile_cassandra_pfpt::schema_tables', { 'default_value' => {} })
+  $schema_cql_types                 = lookup('profile_cassandra_pfpt::schema_cql_types', { 'default_value' => {} })
+
   # --- Monitoring & Agent Integrations ---
   # Coralogix
   $manage_coralogix_agent           = lookup('profile_cassandra_pfpt::manage_coralogix_agent', { 'default_value' => false })
@@ -287,7 +292,6 @@ class profile_cassandra_pfpt {
     authorizer                       => $authorizer,
     role_manager                     => $role_manager,
     cassandra_password               => $cassandra_password,
-    cassandra_roles                  => $cassandra_roles,
     manage_jmx_security              => $manage_jmx_security,
     jmx_password_file_path           => $jmx_password_file_path,
     jmx_access_file_path             => $jmx_access_file_path,
@@ -311,6 +315,11 @@ class profile_cassandra_pfpt {
     tls_protocol                     => $tls_protocol,
     tls_algorithm                    => $tls_algorithm,
     store_type                       => $store_type,
+    # Schema Management
+    schema_users                     => $schema_users,
+    schema_keyspaces                 => $schema_keyspaces,
+    schema_tables                    => $schema_tables,
+    schema_cql_types                 => $schema_cql_types,
     # General & Feature Flags
     auto_snapshot                    => $auto_snapshot,
     dynamic_snitch                   => $dynamic_snitch,
@@ -413,5 +422,3 @@ class profile_cassandra_pfpt {
     manage_stress_test               => $manage_stress_test,
   }
 }
-
-    

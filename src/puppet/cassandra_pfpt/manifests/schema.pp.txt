@@ -1,0 +1,120 @@
+# @summary Manages Cassandra schema elements like users, keyspaces, tables, and types.
+class cassandra_pfpt::schema inherits cassandra_pfpt {
+  # This class requires the cassandra service to be running and the password to be set.
+  Class['cassandra_pfpt::service'] -> Class['cassandra_pfpt::schema']
+
+  # --- Manage Users (formerly roles) ---
+  if !empty($schema_users) {
+    $schema_users.each |$user_name, $user_details| {
+      $cql_file_path = "/tmp/create_user_${user_name}.cql"
+      $user_options = "WITH SUPERUSER = ${user_details['is_superuser']} AND LOGIN = ${user_details['can_login']} AND PASSWORD = '${user_details['password']}'"
+      $create_cql = "CREATE USER IF NOT EXISTS \"${user_name}\" ${user_options};"
+
+      file { $cql_file_path:
+        ensure  => 'file',
+        content => $create_cql,
+        owner   => 'root',
+        group   => 'root',
+        mode    => '0600',
+      }
+
+      exec { "create_cassandra_user_${user_name}":
+        command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -f ${cql_file_path}",
+        path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+        unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE USER \\\"${user_name}\\\"\" >/dev/null 2>&1",
+        require   => File[$cql_file_path],
+        logoutput => on_failure,
+      }
+    }
+  }
+
+  # --- Manage Keyspaces ---
+  if !empty($schema_keyspaces) {
+    $schema_keyspaces.each |$keyspace_name, $keyspace_details| {
+      $replication_map_parts = $keyspace_details['replication'].map |$key, $value| {
+        if $value =~ String { "'${key}': '${value}'" } else { "'${key}': ${value}" }
+      }
+      $replication_string = "{ ${join($replication_map_parts, ', ')} }"
+      $durable_writes = $keyspace_details.get('durable_writes', true)
+      $create_cql = "CREATE KEYSPACE IF NOT EXISTS \"${keyspace_name}\" WITH replication = ${replication_string} AND durable_writes = ${durable_writes}"
+      $alter_cql = "ALTER KEYSPACE \"${keyspace_name}\" WITH replication = ${replication_string} AND durable_writes = ${durable_writes}"
+      $drop_cql = "DROP KEYSPACE IF EXISTS \"${keyspace_name}\""
+      $check_command = "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE KEYSPACE \\\"${keyspace_name}\\\"\" | grep -q \"replication = ${replication_string}\""
+
+      if $keyspace_details['ensure'] == 'present' {
+        exec { "create_keyspace_${keyspace_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${create_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE KEYSPACE \\\"${keyspace_name}\\\"\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+        -> exec { "alter_keyspace_${keyspace_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${alter_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          unless    => $check_command,
+          logoutput => on_failure,
+        }
+      } else { # absent
+        exec { "drop_keyspace_${keyspace_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${drop_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE KEYSPACE \\\"${keyspace_name}\\\"\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+      }
+    }
+  }
+
+  # --- Manage Tables ---
+  if !empty($schema_tables) {
+    $schema_tables.each |$table_name, $table_details| {
+      $full_table_name = "\"${table_details['keyspace']}\".\"${table_name}\""
+      $columns_string = $table_details['columns'].map |$col| { "\"${col['name']}\" ${col['type']}" }.join(', ')
+      $primary_key_string = "PRIMARY KEY (${$table_details['primary_key']})"
+      $create_cql = "CREATE TABLE IF NOT EXISTS ${full_table_name} (${columns_string}, ${primary_key_string})"
+      $drop_cql = "DROP TABLE IF EXISTS ${full_table_name}"
+
+      if $table_details['ensure'] == 'present' {
+        exec { "create_table_${table_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${create_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TABLE ${full_table_name}\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+      } else { # absent
+        exec { "drop_table_${table_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${drop_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TABLE ${full_table_name}\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+      }
+    }
+  }
+
+  # --- Manage CQL Types (UDTs) ---
+  if !empty($schema_cql_types) {
+    $schema_cql_types.each |$type_name, $type_details| {
+      $full_type_name = "\"${type_details['keyspace']}\".\"${type_name}\""
+      $fields_string = $type_details['fields'].map |$field| { "\"${field['name']}\" ${field['type']}" }.join(', ')
+      $create_cql = "CREATE TYPE IF NOT EXISTS ${full_type_name} (${fields_string})"
+      $drop_cql = "DROP TYPE IF EXISTS ${full_type_name}"
+
+      if $type_details['ensure'] == 'present' {
+        exec { "create_type_${type_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${create_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TYPE ${full_type_name}\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+      } else { # absent
+        exec { "drop_type_${type_name}":
+          command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${drop_cql}\"",
+          path      => ['/bin', '/usr/bin', $cqlsh_path_env],
+          onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TYPE ${full_type_name}\" > /dev/null 2>&1",
+          logoutput => on_failure,
+        }
+      }
+    }
+  }
+}

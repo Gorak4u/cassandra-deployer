@@ -123,7 +123,10 @@ class cassandra_pfpt (
   String $coralogix_jmx_endpoint,
   Optional[String] $coralogix_baseurl = undef,
   Hash $system_keyspaces_replication = {},
-  Hash $cassandra_roles = {},
+  Hash $schema_users = {},
+  Hash $schema_keyspaces = {},
+  Hash $schema_tables = {},
+  Hash $schema_cql_types = {},
   Boolean $manage_jmx_exporter,
   String $jmx_exporter_version,
   String $jmx_exporter_jar_source,
@@ -216,7 +219,7 @@ class cassandra_pfpt (
   contain cassandra_pfpt::service
   contain cassandra_pfpt::firewall
   contain cassandra_pfpt::system_keyspaces
-  contain cassandra_pfpt::roles
+  contain cassandra_pfpt::schema
 
   if $manage_node_exporter {
     contain cassandra_pfpt::node_exporter
