@@ -1,4 +1,5 @@
 # @summary Manages system keyspace replication for multi-DC clusters.
+# This file is managed by Puppet.
 class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
   # Only proceed if a replication strategy is defined.
   if !empty($system_keyspaces_replication) {
@@ -20,6 +21,7 @@ class cassandra_pfpt::system_keyspaces inherits cassandra_pfpt {
       command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${alter_auth_cql}; ${alter_dist_cql}; ${alter_traces_cql};\"",
       path      => ['/bin', '/usr/bin', $cqlsh_path_env],
       unless    => $check_command,
+      onlyif    => "${manage_bin_dir}/cluster-health.sh --silent",
       logoutput => on_failure,
       require   => Exec['change_cassandra_password'], # Ensure password is set first
     }
