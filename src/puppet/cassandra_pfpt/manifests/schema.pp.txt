@@ -24,7 +24,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
         path      => ['/bin', '/usr/bin', $cqlsh_path_env],
         unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE USER \\\"${user_name}\\\"\" >/dev/null 2>&1",
         onlyif    => "${manage_bin_dir}/cluster-health.sh --silent",
-        require   => File[$cql_file_path],
+        require   => [File[$cql_file_path], Exec['change_cassandra_password']],
         logoutput => on_failure,
       }
     }
@@ -50,6 +50,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE KEYSPACE \\\"${keyspace_name}\\\"\" > /dev/null 2>&1",
           onlyif    => "${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
         -> exec { "alter_keyspace_${keyspace_name}":
           command   => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"${alter_cql}\"",
@@ -64,6 +65,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           path      => ['/bin', '/usr/bin', $cqlsh_path_env],
           onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE KEYSPACE \\\"${keyspace_name}\\\"\" > /dev/null 2>&1 && ${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
       }
     }
@@ -85,6 +87,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TABLE ${full_table_name}\" > /dev/null 2>&1",
           onlyif    => "${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
       } else { # absent
         exec { "drop_table_${table_name}":
@@ -92,6 +95,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           path      => ['/bin', '/usr/bin', $cqlsh_path_env],
           onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TABLE ${full_table_name}\" > /dev/null 2>&1 && ${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
       }
     }
@@ -112,6 +116,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           unless    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TYPE ${full_type_name}\" > /dev/null 2>&1",
           onlyif    => "${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
       } else { # absent
         exec { "drop_type_${type_name}":
@@ -119,6 +124,7 @@ class cassandra_pfpt::schema inherits cassandra_pfpt {
           path      => ['/bin', '/usr/bin', $cqlsh_path_env],
           onlyif    => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"DESCRIBE TYPE ${full_type_name}\" > /dev/null 2>&1 && ${manage_bin_dir}/cluster-health.sh --silent",
           logoutput => on_failure,
+          require   => Exec['change_cassandra_password'],
         }
       }
     }
