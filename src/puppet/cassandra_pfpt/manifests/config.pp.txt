@@ -79,6 +79,23 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       require => File[$manage_bin_dir],
     }
   }
+  
+  # Deploy the external facts script
+  file { '/etc/puppetlabs/facter/facts.d':
+    ensure => 'directory',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0755',
+  }
+  file { '/etc/puppetlabs/facter/facts.d/cassandra_facts.sh':
+    ensure  => 'file',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0755', # Must be executable
+    source  => 'puppet:///modules/cassandra_pfpt/cassandra_facts.sh',
+    require => File['/etc/puppetlabs/facter/facts.d'],
+  }
+
   if $disable_swap {
     exec { 'swapoff -a':
       command => '/sbin/swapoff -a',
