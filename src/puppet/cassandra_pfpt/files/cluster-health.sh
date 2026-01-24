@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Checks Cassandra cluster health, Cqlsh connectivity, and native transport port
 
 # --- Default Configuration ---

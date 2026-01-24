@@ -1,3 +1,4 @@
+# This file is managed by Puppet.
 # This profile is for use with the `cassandra-stress` tool to generate a large dataset.
 # It defines a new table `users_large` within the `my_app` keyspace.
 

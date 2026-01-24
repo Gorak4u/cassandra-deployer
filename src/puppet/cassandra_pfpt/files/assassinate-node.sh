@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Assassinate a node. Use with extreme caution.
 
 # --- Color Codes ---

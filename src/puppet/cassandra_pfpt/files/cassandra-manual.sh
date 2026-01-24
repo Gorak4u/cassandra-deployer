@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -605,18 +606,6 @@ echo -e "*   \`profile_cassandra_pfpt::clearsnapshot_keep_days\` (Integer): The 
 echo -e "*   \`profile_cassandra_pfpt::upload_streaming\` (Boolean): Whether to use a direct streaming pipeline for backups (\`true\`) or a more robust method using temporary files (\`false\`). Streaming is faster but can hide errors. Default: \`false\`."
 echo -e "*   \`profile_cassandra_pfpt::backup_parallelism\` (Integer): The number of concurrent tables to process during backup or restore operations. Default: \`4\`."
 echo -e "*   \`profile_cassandra_pfpt::manage_stress_test\` (Boolean): Set to \`true\` to install the \`cassandra-stress\` tools and the \`/usr/local/bin/stress-test.sh\` wrapper script. Default: \`false\`."
-) | less -R
-}
-
-show_puppet_agent() {
-(
-echo -e "${BOLD}${BLUE}## Puppet Agent Management${NC}"
-echo -e ""
-echo -e "The base \`cassandra_pfpt\` component module includes logic to manage the Puppet agent itself by ensuring a scheduled run is in place via cron."
-echo -e ""
-echo -e "*   ${BOLD}Scheduled Runs:${NC} By default, the Puppet agent will run twice per hour at a staggered minute."
-echo -e "*   ${BOLD}Maintenance Window:${NC} The cron job will ${BOLD}not${NC} run if a file exists at \`/var/lib/puppet-disabled\`. Creating this file is the standard way to temporarily disable Puppet runs."
-echo -e "*   ${BOLD}Configuration:${NC} You can override the default schedule by setting the \`profile_cassandra_pfpt::puppet_cron_schedule\` key in Hiera to a standard 5-field cron string."
 ) | less -R
 }
 

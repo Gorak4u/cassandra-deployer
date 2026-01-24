@@ -1,3 +1,4 @@
+# This file is managed by Puppet. Do not edit manually.
 {
     "s3_bucket_name": "<%= @backup_s3_bucket %>",
     "backup_backend": "<%= @backup_backend %>",
@@ -20,5 +21,3 @@
     "ssl_truststore_path": "<%= @truststore_path %>",
     "ssl_truststore_password": "<%= @truststore_password.unwrap %>"
 }
-
-    

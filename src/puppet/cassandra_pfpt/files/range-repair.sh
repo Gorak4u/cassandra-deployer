@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 set -euo pipefail
 
 # --- Color Codes ---

@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # A comprehensive, non-invasive health check for a Cassandra node.
 
 # --- Color Codes ---

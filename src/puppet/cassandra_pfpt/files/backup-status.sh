@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Checks the status of the last successful backup by reading its manifest from S3.
 
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Restores a Cassandra node from backups in S3 to a specific point in time.
 # This script can combine a full backup with subsequent incremental backups.
 # Supports full node restore, granular keyspace/table restore.
@@ -281,7 +282,6 @@ download_and_extract_table() {
     local check_path="$4"
 
     # Required variables for the subshell
-    local EFFECTIVE_S3_BUCKET
     EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$(jq -r '.s3_bucket_name' "$CONFIG_FILE")}
 
     # Safety check before downloading this table's data
@@ -398,7 +398,6 @@ do_full_restore() {
     log_success "Successfully configured node with $token_count tokens."
 
     log_info "6. Downloading and extracting all data from backup chain in parallel..."
-    local SCHEMA_MAP_JSON
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if [ -z "$SCHEMA_MAP_JSON" ]; then
         log_error "Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
@@ -509,7 +508,6 @@ do_granular_restore() {
     fi
     log_success "Disk usage is sufficient to begin."
 
-    local SCHEMA_MAP_JSON
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if [ -z "$SCHEMA_MAP_JSON" ]; then
         log_error "Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
@@ -793,5 +791,3 @@ case $MODE in
 esac
 
 exit 0
-
-    

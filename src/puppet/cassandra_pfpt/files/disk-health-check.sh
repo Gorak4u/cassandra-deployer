@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# This file is managed by Puppet.
 set -euo pipefail
 
 # These are defaults if not passed via flags.

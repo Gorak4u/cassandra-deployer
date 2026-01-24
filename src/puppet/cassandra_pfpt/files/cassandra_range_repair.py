@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# This file is managed by Puppet.
 
 import subprocess
 import sys

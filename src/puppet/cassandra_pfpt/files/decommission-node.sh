@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Securely decommissions a Cassandra node from the cluster.
 
 # --- Color Codes ---

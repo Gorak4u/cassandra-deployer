@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Description: Audit script to check and print versions of various components.
 
 # --- Color Codes ---

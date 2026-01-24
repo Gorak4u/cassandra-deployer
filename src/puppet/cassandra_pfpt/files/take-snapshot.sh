@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # A simple wrapper script to take a snapshot with a generated tag.
 
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Archives and uploads existing incremental backup files to a simulated S3 bucket.
 
 set -euo pipefail
@@ -382,5 +383,3 @@ else
 fi
 
 exit 0
-
-    

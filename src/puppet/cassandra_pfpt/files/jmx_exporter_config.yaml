@@ -1,3 +1,4 @@
+# This file is managed by Puppet.
 ---
 # Default configuration for Prometheus JMX Exporter for Apache Cassandra
 # For a full list of options, see: https://github.com/prometheus/jmx_exporter

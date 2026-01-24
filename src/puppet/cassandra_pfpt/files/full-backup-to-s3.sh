@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 # Performs a full snapshot backup and uploads it to a simulated S3 bucket.
 
 set -euo pipefail
@@ -343,11 +344,8 @@ process_table_backup() {
     local snapshot_dir="$1"
     
     # Required variables for the subshell
-    local S3_BUCKET_NAME
     S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
-    local BACKUP_BACKEND
     BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
-    local UPLOAD_STREAMING
     UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
@@ -560,5 +558,3 @@ else
 fi
 
 exit 0
-
-    

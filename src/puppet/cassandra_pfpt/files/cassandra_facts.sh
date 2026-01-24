@@ -1,4 +1,5 @@
 #!/bin/bash
+# This file is managed by Puppet.
 #
 # /etc/puppetlabs/facter/facts.d/cassandra_facts.sh
 #
