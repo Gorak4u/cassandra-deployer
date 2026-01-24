@@ -64,17 +64,34 @@ run_checks() {
         CQLSH_SSL_OPT="--ssl"
     fi
 
-    # 1. Check nodetool status for 'UN' (Up, Normal)
-    log_message "${BLUE}Checking nodetool status...${NC}"
+    # 1. Check nodetool status for 'UN' (Up, Normal) on ALL nodes
+    log_message "${BLUE}Checking that all nodes are Up/Normal...${NC}"
     NODETOOL_STATUS=$(nodetool status 2>&1)
-    if ! echo "$NODETOOL_STATUS" | grep -q 'UN'; then
-      log_message "${YELLOW}Nodetool status: WARNING - No Up/Normal nodes found or nodetool failed.${NC}"
-      if [ "$SILENT" = false ]; then
-          echo "$NODETOOL_STATUS"
-      fi
-      # This is a warning, not a hard failure, as the node might be starting up.
+    
+    # Check for nodetool command failure first
+    if [ $? -ne 0 ]; then
+        log_message "${RED}Nodetool status command failed to execute.${NC}"
+        if [ "$SILENT" = false ]; then
+            echo "$NODETOOL_STATUS"
+        fi
+        FAILURE_REASON="Nodetool command failed"
+        return 1
+    fi
+
+    # Grep for any nodes that are NOT Up/Normal (UN). This includes DN, UJ, UL, etc.
+    # Exclude header and blank lines.
+    NON_UN_NODES=$(echo "$NODETOOL_STATUS" | tail -n +6 | head -n -1 | grep -v '^UN ' || true)
+    
+    if [ -n "$NON_UN_NODES" ]; then
+        log_message "${RED}Nodetool status: FAILED - Not all nodes are in UN state.${NC}"
+        if [ "$SILENT" = false ]; then
+            echo "The following nodes are not Up/Normal:"
+            echo "$NON_UN_NODES"
+        fi
+        FAILURE_REASON="One or more nodes are not Up/Normal"
+        return 1
     else
-      log_message "${GREEN}Nodetool status: OK - At least one Up/Normal node found.${NC}"
+        log_message "${GREEN}Nodetool status: OK - All nodes are Up/Normal.${NC}"
     fi
 
     # 2. Check cqlsh connectivity
