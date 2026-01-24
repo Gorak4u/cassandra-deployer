@@ -415,12 +415,18 @@ do_full_restore() {
             archive_key="$1"
             effective_source_host="$2"
             current_backup_ts="$3"
-            schema_map_json=$(cat)
+            schema_map_json="$4"
+
+            if [ -z "$schema_map_json" ]; then
+                log_message "${RED}FATAL: schema_map_json is empty inside parallel process for archive $archive_key.${NC}"
+                exit 1
+            fi
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
             table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
-            table_name=$(echo "$table_dir_name" | rev | cut -d"-" -f2- | rev)
+            # Correctly parse table name, stripping UUID
+            table_name=$(echo "$table_dir_name" | sed "s/-[0-9a-f]\{32\}$//")
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
@@ -430,7 +436,7 @@ do_full_restore() {
             
             output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_uuid_dir"
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
-        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" <<< "$SCHEMA_MAP_JSON"
+        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" "$SCHEMA_MAP_JSON"
     done
     log_success "All data from backup chain downloaded and extracted to temporary directory."
 
@@ -523,13 +529,19 @@ do_granular_restore() {
             archive_key="$1"
             effective_source_host="$2"
             current_backup_ts="$3"
-            schema_map_json=$(cat)
+            schema_map_json="$4"
+
+            if [ -z "$schema_map_json" ]; then
+                log_message "${RED}FATAL: schema_map_json is empty inside parallel process for archive $archive_key.${NC}"
+                exit 1
+            fi
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
             table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
-            table_name=$(echo "$table_dir_name" | rev | cut -d"-" -f2- | rev)
-
+            # Correctly parse table name, stripping UUID
+            table_name=$(echo "$table_dir_name" | sed "s/-[0-9a-f]\{32\}$//")
+            
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "${YELLOW}WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key${NC}"
@@ -538,7 +550,7 @@ do_granular_restore() {
             
             output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
             download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
-        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" <<< "$SCHEMA_MAP_JSON"
+        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" "$SCHEMA_MAP_JSON"
     done
     
     if [ "$MODE" == "download_only" ]; then
@@ -552,7 +564,7 @@ do_granular_restore() {
             local downloaded_table_name_with_uuid
             downloaded_table_name_with_uuid=$(basename "$source_table_dir")
             local downloaded_table_name
-            downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | rev | cut -d'-' -f2- | rev)
+            downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | sed "s/-[0-9a-f]\{32\}$//")
 
             log_info "Processing table for restore: $KEYSPACE_NAME.$downloaded_table_name"
 
