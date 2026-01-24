@@ -219,9 +219,13 @@ export async function pushToGit(data: {
       http,
       dir: tempRepoDir,
       remote: 'origin',
+      ref: 'HEAD',
       remoteRef: 'refs/heads/main',
       force: true, // Force push to overwrite history, simpler for this use case
-      onAuth: () => ({ username: data.pat }),
+      onAuth: () => ({
+        username: 'x-access-token',
+        password: data.pat,
+      }),
     });
 
     if (result.ok) {
