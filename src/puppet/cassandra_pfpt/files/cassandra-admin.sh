@@ -34,6 +34,7 @@ usage() {
     echo -e "  ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data."
     echo -e "  ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node."
     echo -e "  ${GREEN}rebuild${NC} <source_dc>     Rebuild the data on this node by streaming from another datacenter."
+    echo -e "  ${GREEN}upgrade-check${NC}          Run pre-flight checks before a major version upgrade."
     echo ""
     echo -e "${BLUE}--- Data Management & Repair ---${NC}"
     echo -e "  ${GREEN}repair${NC} [<keyspace>]     Run a safe, granular repair on the node's token ranges. Can target a specific keyspace."
@@ -97,6 +98,9 @@ case "$COMMAND" in
         ;;
     rebuild)
         /usr/local/bin/rebuild-node.sh "$@"
+        ;;
+    upgrade-check)
+        /usr/local/bin/cassandra-upgrade-precheck.sh "$@"
         ;;
     repair)
         /usr/local/bin/range-repair.sh "$@"

@@ -59,8 +59,18 @@ ssl_storage_port: <%= @ssl_storage_port %>
 start_native_transport: <%= @start_native_transport %>
 <% end -%>
 
-# The Thrift RPC service was removed in Cassandra 4.0 and is not available in later versions.
-# start_rpc: false
+<% if @start_rpc -%>
+start_rpc: <%= @start_rpc %>
+<% end -%>
+<% if @rpc_port -%>
+rpc_port: <%= @rpc_port %>
+<% end -%>
+<% if @rpc_keepalive -%>
+rpc_keepalive: <%= @rpc_keepalive %>
+<% end -%>
+<% if @thrift_framed_transport_size_in_mb -%>
+thrift_framed_transport_size_in_mb: <%= @thrift_framed_transport_size_in_mb %>
+<% end -%>
 
 # Cassandra 4.x / 5.x+ specific settings
 <% if @enable_transient_replication -%>
