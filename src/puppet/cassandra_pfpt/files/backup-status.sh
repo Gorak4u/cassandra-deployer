@@ -80,9 +80,9 @@ MANIFEST_S3_PATH="s3://${S3_BUCKET_NAME}/${EFFECTIVE_SOURCE_HOST}/${LATEST_BACKU
 log_message "Downloading manifest: ${MANIFEST_S3_PATH}"
 MANIFEST_JSON=$(aws s3 cp "$MANIFEST_S3_PATH" - 2>/dev/null)
 
-if [ -z "$MANIFEST_JSON" ]; then
-    log_message "${RED}Failed to download or read the manifest for backup set ${LATEST_BACKUP_TS}.${NC}"
-    log_message "${RED}The backup may be incomplete or corrupt.${NC}"
+if ! echo "$MANIFEST_JSON" | jq -e . > /dev/null 2>&1; then
+    log_message "${RED}Failed to download or read a valid manifest for backup set ${LATEST_BACKUP_TS}.${NC}"
+    log_message "${RED}The backup may be incomplete, corrupt, or there may be an S3 permissions issue.${NC}"
     exit 1
 fi
 
