@@ -82,10 +82,11 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
   
   # Deploy the external facts script
   file { '/etc/puppetlabs/facter/facts.d':
-    ensure => 'directory',
-    owner  => 'root',
-    group  => 'root',
-    mode   => '0755',
+    ensure  => 'directory',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0755',
+    parents => true,
   }
   file { '/etc/puppetlabs/facter/facts.d/cassandra_facts.sh':
     ensure  => 'file',
