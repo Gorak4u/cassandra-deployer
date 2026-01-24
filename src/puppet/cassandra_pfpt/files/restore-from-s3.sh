@@ -682,14 +682,14 @@ do_list_backups() {
         manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
         backup_type=$(echo "$manifest" | jq -r '.backup_type // "unknown"')
         
-        local type_color=$NC
+        type_color=$NC
         if [ "$backup_type" == "full" ]; then
             type_color=${CYAN}
         elif [ "$backup_type" == "incremental" ]; then
             type_color=${BLUE}
         fi
         
-        local formatted_line="  - ${BOLD}${backup_ts}${NC} (type: ${type_color}${backup_type}${NC})"
+        formatted_line="  - ${BOLD}${backup_ts}${NC} (type: ${type_color}${backup_type}${NC})"
         backups_to_sort+=("$(printf "${backup_ts}\t${formatted_line}")")
 
     done <<< "$all_backups"
@@ -793,3 +793,5 @@ case $MODE in
 esac
 
 exit 0
+
+    

@@ -266,7 +266,6 @@ fi
 
 if [ -f "$LOCK_FILE" ]; then
     log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
-    local OLD_PID
     OLD_PID=$(cat "$LOCK_FILE")
     if ps -p "$OLD_PID" > /dev/null; then
         log_warn "Backup process with PID $OLD_PID is still running. Exiting."
@@ -561,3 +560,5 @@ else
 fi
 
 exit 0
+
+    
