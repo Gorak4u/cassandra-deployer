@@ -249,29 +249,31 @@ find_backup_chain() {
 
     log_info "Analyzing backup manifests to build restore chain..."
     for backup_ts in "${sorted_backups[@]}"; do
-        local manifest
-        manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || continue)
+        local manifest_content
+        manifest_content=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null)
         
-        if [ -z "$manifest" ]; then
-            log_warn "Skipping backup '$backup_ts' as it has no manifest."
+        # Check if manifest is empty or not valid JSON
+        if ! echo "$manifest_content" | jq -e . > /dev/null 2>&1; then
+            log_warn "Skipping backup '$backup_ts' as its manifest is empty, invalid, or could not be downloaded."
             continue
         fi
 
         CHAIN_TO_RESTORE+=("$backup_ts")
         local backup_type
-        backup_type=$(echo "$manifest" | jq -r '.backup_type')
+        backup_type=$(echo "$manifest_content" | jq -r '.backup_type')
         
         if [ "$backup_type" == "full" ]; then
             BASE_FULL_BACKUP="$backup_ts"
-            break
+            break # Found the base, stop searching
         fi
     done
 
     if [ -z "$BASE_FULL_BACKUP" ]; then
-        log_error "Point-in-time recovery failed. Could not find a 'full' backup in the history for the specified date."
+        log_error "Point-in-time recovery failed. Could not find a valid 'full' backup in the history for the specified date."
         exit 1
     fi
 
+    # The chain is currently in reverse chronological order. Reverse it to be chronological.
     CHAIN_TO_RESTORE=($(printf "%s\n" "${CHAIN_TO_RESTORE[@]}" | sort))
 }
 
@@ -372,8 +374,8 @@ do_full_restore() {
     log_info "4. Downloading manifest from base full backup to extract tokens..."
     local base_manifest
     base_manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
-    if [ -z "$base_manifest" ]; then
-        log_error "Cannot download manifest for base backup $BASE_FULL_BACKUP. Aborting."
+    if ! echo "$base_manifest" | jq -e . > /dev/null 2>&1; then
+        log_error "Cannot download or parse manifest for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
     fi
     
@@ -399,8 +401,8 @@ do_full_restore() {
 
     log_info "6. Downloading and extracting all data from backup chain in parallel..."
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
-    if [ -z "$SCHEMA_MAP_JSON" ]; then
-        log_error "Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
+    if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
+        log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
     fi
     log_info "Schema-to-directory mapping downloaded."
@@ -509,8 +511,8 @@ do_granular_restore() {
     log_success "Disk usage is sufficient to begin."
 
     SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
-    if [ -z "$SCHEMA_MAP_JSON" ]; then
-        log_error "Cannot download schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
+    if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
+        log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
     fi
     log_info "Schema-to-directory mapping downloaded."
