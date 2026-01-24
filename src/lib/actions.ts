@@ -5,6 +5,8 @@ import fs from 'fs/promises';
 import { glob } from 'glob';
 import archiver from 'archiver';
 import { Readable } from 'stream';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node';
 import { validateCode } from '@/ai/flows/validate-code-flow';
 import type { ValidateCodeOutput } from '@/ai/flows/validate-code-flow';
 
@@ -166,5 +168,74 @@ export async function validateCodeAction(code: string, language: string): Promis
         'The AI validator failed to process the request. This may be due to an API error or content safety restrictions.',
       ],
     };
+  }
+}
+
+export async function pushToGit(data: {
+  repoUrl: string;
+  pat: string;
+}): Promise<{ success: boolean; message: string }> {
+  const tempRepoDir = path.join('/tmp', `puppet-repo-${Date.now()}`);
+
+  try {
+    // 1. Initialize a temporary git repository
+    await fs.mkdir(tempRepoDir, { recursive: true });
+    await git.init({ fs, dir: tempRepoDir });
+
+    // 2. Copy module files to the temporary repository
+    const puppetModulesDir = path.join(process.cwd(), 'src', 'puppet');
+    const allFiles = await glob('**/*', { cwd: puppetModulesDir, nodir: true, dot: true });
+
+    for (const file of allFiles) {
+      const srcPath = path.join(puppetModulesDir, file);
+      const destPath = path.join(tempRepoDir, file);
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      await fs.copyFile(srcPath, destPath);
+    }
+    
+    // 3. Add all files and commit
+    await git.add({ fs, dir: tempRepoDir, filepath: '.' });
+    
+    await git.commit({
+      fs,
+      dir: tempRepoDir,
+      author: {
+        name: 'Firebase Studio',
+        email: 'studio-bot@example.com',
+      },
+      message: 'Deploy Puppet modules from Firebase Studio',
+    });
+    
+    // 4. Add remote and push
+    await git.addRemote({
+      fs,
+      dir: tempRepoDir,
+      remote: 'origin',
+      url: data.repoUrl,
+    });
+
+    const result = await git.push({
+      fs,
+      http,
+      dir: tempRepoDir,
+      remote: 'origin',
+      ref: 'main',
+      force: true, // Force push to overwrite history, simpler for this use case
+      onAuth: () => ({ username: data.pat }),
+    });
+
+    if (result.ok) {
+      return { success: true, message: `Pushed successfully!` };
+    } else {
+      // The error object might contain sensitive info, so return a generic message.
+      console.error('Git push failed:', result.errors);
+      return { success: false, message: `Git push failed. Check repository URL and PAT.` };
+    }
+  } catch (error: any) {
+    console.error('An error occurred during git push:', error);
+    return { success: false, message: error.message || 'An unexpected error occurred.' };
+  } finally {
+    // 5. Clean up the temporary directory
+    await fs.rm(tempRepoDir, { recursive: true, force: true });
   }
 }

@@ -34,6 +34,7 @@ import {
     AlertTriangle,
     CheckCircle,
     Info,
+    Github,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -59,6 +60,7 @@ import { getFileContent, getZippedModules, validateCodeAction } from '@/lib/acti
 import type { ValidateCodeOutput } from '@/ai/flows/validate-code-flow';
 import { MarkdownView } from './markdown-view';
 import { Skeleton } from './ui/skeleton';
+import { GitPushDialog } from './git-push-dialog';
 
 
 const getRepoFilesByGroup = (repoName: string, allFiles: PuppetFile[]) => {
@@ -97,6 +99,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidateCodeOutput | null>(null);
+  const [isGitPushDialogOpen, setIsGitPushDialogOpen] = useState(false);
 
   const getFileIcon = (lang: string) => {
     switch (lang) {
@@ -248,6 +251,7 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
               </Button>
         </SidebarFooter>
       </Sidebar>
+      <GitPushDialog isOpen={isGitPushDialogOpen} onOpenChange={setIsGitPushDialogOpen} />
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur-sm px-4 lg:h-[60px] lg:px-6">
             <SidebarTrigger className="md:hidden" />
@@ -258,6 +262,10 @@ export function PuppetIDE({ allFiles, repoNames }: { allFiles: PuppetFile[], rep
                     </span>
                  )}
             </div>
+            <Button variant="outline" size="sm" onClick={() => setIsGitPushDialogOpen(true)}>
+                <Github className="mr-2 h-4 w-4" />
+                Push to Git
+            </Button>
             {selectedFile && selectedFile.lang !== 'binary' && (
               <Button variant="outline" size="sm" onClick={handleValidate} disabled={isValidating}>
                 {isValidating ? (
