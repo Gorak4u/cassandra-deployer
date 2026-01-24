@@ -197,6 +197,12 @@ class profile_cassandra_pfpt {
   $coralogix_logs_enabled           = lookup('profile_cassandra_pfpt::coralogix_logs_enabled', { 'default_value' => true })
   $coralogix_metrics_enabled        = lookup('profile_cassandra_pfpt::coralogix_metrics_enabled', { 'default_value' => true })
   $coralogix_baseurl                = lookup('profile_cassandra_pfpt::coralogix_baseurl', { 'default_value' => undef })
+  $coralogix_application_name       = lookup('profile_cassandra_pfpt::coralogix_application_name', { 'default_value' => 'cassandra' })
+  $coralogix_subsystem_name         = lookup('profile_cassandra_pfpt::coralogix_subsystem_name', { 'default_value' => $cluster_name })
+  $coralogix_log_files              = lookup('profile_cassandra_pfpt::coralogix_log_files', { 'default_value' => { 'Cassandra System' => '/var/log/cassandra/system.log', 'Cassandra GC' => '/var/log/cassandra/gc.log' } })
+  $coralogix_jmx_metrics            = lookup('profile_cassandra_pfpt::coralogix_jmx_metrics', { 'default_value' => [ 'org.apache.cassandra.metrics:type=ClientRequest,scope=Read,name=Latency', 'org.apache.cassandra.metrics:type=ClientRequest,scope=Write,name=Latency', 'org.apache.cassandra.metrics:type=Storage,name=Load', 'org.apache.cassandra.metrics:type=Compaction,name=PendingTasks' ]})
+  $coralogix_jmx_endpoint           = lookup('profile_cassandra_pfpt::coralogix_jmx_endpoint', { 'default_value' => 'service:jmx:rmi:///jndi/rmi://localhost:7199/jmxrmi'})
+
   # JMX Exporter
   $manage_jmx_exporter              = lookup('profile_cassandra_pfpt::manage_jmx_exporter', { 'default_value' => false })
   $jmx_exporter_version             = lookup('profile_cassandra_pfpt::jmx_exporter_version', { 'default_value' => '0.20.0' })
@@ -378,6 +384,11 @@ class profile_cassandra_pfpt {
     coralogix_region                 => $coralogix_region,
     coralogix_logs_enabled           => $coralogix_logs_enabled,
     coralogix_metrics_enabled        => $coralogix_metrics_enabled,
+    coralogix_application_name       => $coralogix_application_name,
+    coralogix_subsystem_name         => $coralogix_subsystem_name,
+    coralogix_log_files              => $coralogix_log_files,
+    coralogix_jmx_metrics            => $coralogix_jmx_metrics,
+    coralogix_jmx_endpoint           => $coralogix_jmx_endpoint,
     coralogix_baseurl                => $coralogix_baseurl,
     manage_jmx_exporter              => $manage_jmx_exporter,
     jmx_exporter_version             => $jmx_exporter_version,

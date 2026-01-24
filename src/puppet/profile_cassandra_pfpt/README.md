@@ -626,6 +626,11 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::manage_coralogix_agent` (Boolean): Set to `true` to install and configure the Coralogix agent. Default: `false`.
 *   `profile_cassandra_pfpt::coralogix_api_key` (Sensitive[String]): Your Coralogix private key. Required if `manage_coralogix_agent` is true. Default: `''`.
 *   `profile_cassandra_pfpt::coralogix_region` (String): Your Coralogix region (e.g., 'US', 'Europe'). Default: `'US'`.
+*   `profile_cassandra_pfpt::coralogix_application_name` (String): The application name to tag logs and metrics with. Default: `'cassandra'`.
+*   `profile_cassandra_pfpt::coralogix_subsystem_name` (String): The subsystem name to tag logs and metrics with. Defaults to the cluster name.
+*   `profile_cassandra_pfpt::coralogix_log_files` (Hash): A hash mapping a display name to a log file path to be monitored. Default: `{ 'Cassandra System' => '/var/log/cassandra/system.log', 'Cassandra GC' => '/var/log/cassandra/gc.log' }`.
+*   `profile_cassandra_pfpt::coralogix_jmx_metrics` (Array[String]): An array of JMX MBeans to collect as metrics. Default: A list of key latency and load metrics.
+*   `profile_cassandra_pfpt::coralogix_jmx_endpoint` (String): The JMX endpoint for the agent to connect to. Default: `'service:jmx:rmi:///jndi/rmi://localhost:7199/jmxrmi'`.
 
 ---
 
