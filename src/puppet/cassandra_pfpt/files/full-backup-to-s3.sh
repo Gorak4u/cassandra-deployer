@@ -116,7 +116,8 @@ manage_s3_lifecycle() {
     existing_policy_json=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null || echo "")
 
     local existing_policy_days=""
-    if [ -n "$existing_policy_json" ]; then
+    # Check if the returned string is valid JSON before trying to parse it
+    if echo "$existing_policy_json" | jq -e . > /dev/null 2>&1; then
         existing_policy_days=$(echo "$existing_policy_json" | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days // ""')
     fi
 
@@ -563,3 +564,5 @@ else
 fi
 
 exit 0
+
+    
