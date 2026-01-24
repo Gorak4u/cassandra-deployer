@@ -95,6 +95,27 @@ check_aws_credentials() {
   return 0
 }
 
+# --- S3 Bucket Management Functions ---
+ensure_s3_bucket_exists() {
+    if [ "$BACKUP_BACKEND" != "s3" ]; then
+        return 0
+    fi
+    log_info "Checking if S3 bucket 's3://$S3_BUCKET_NAME' exists..."
+    if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" > /dev/null 2>&1; then
+        log_success "S3 bucket already exists."
+        return 0
+    else
+        log_warn "S3 bucket '$S3_BUCKET_NAME' does not exist. Attempting to create it..."
+        if aws s3 mb "s3://$S3_BUCKET_NAME"; then
+            log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
+            return 0
+        else
+            log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
+            log_error "Please check your AWS permissions (s3:CreateBucket) and ensure the bucket name is globally unique."
+            return 1
+        fi
+    fi
+}
 
 # --- Cleanup Functions ---
 cleanup_temp_dir() {
@@ -124,6 +145,10 @@ if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
 fi
 
 if ! check_aws_credentials; then
+    exit 1
+fi
+
+if ! ensure_s3_bucket_exists; then
     exit 1
 fi
 

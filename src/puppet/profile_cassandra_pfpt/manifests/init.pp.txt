@@ -167,12 +167,13 @@ class profile_cassandra_pfpt {
   $jamm_target                      = lookup('profile_cassandra_pfpt::jamm_target', { 'default_value' => '/usr/share/cassandra/lib/jamm-0.3.2.jar' })
   
   # --- Backup & Recovery ---
+  $default_s3_bucket = downcase($cluster_name.regsubst('[^a-z0-9-]', '-', 'G'))
   $manage_full_backups              = lookup('profile_cassandra_pfpt::manage_full_backups', { 'default_value' => false })
   $manage_incremental_backups       = lookup('profile_cassandra_pfpt::manage_incremental_backups', { 'default_value' => false })
   $full_backup_schedule             = lookup('profile_cassandra_pfpt::full_backup_schedule', { 'default_value' => 'daily' })
   $incremental_backup_schedule      = lookup('profile_cassandra_pfpt::incremental_backup_schedule', { 'default_value' => '0 */4 * * *' })
   $backup_backend                   = lookup('profile_cassandra_pfpt::backup_backend', { 'default_value' => 's3' })
-  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => 'puppet-cassandra-backups' })
+  $backup_s3_bucket                 = lookup('profile_cassandra_pfpt::backup_s3_bucket', { 'default_value' => $default_s3_bucket })
   $backup_encryption_key            = Sensitive(lookup('profile_cassandra_pfpt::backup_encryption_key', { 'default_value' => 'MustBeChanged-ChangeMe-ChangeMe!!' }))
   $clearsnapshot_keep_days          = lookup('profile_cassandra_pfpt::clearsnapshot_keep_days', { 'default_value' => 3 })
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
