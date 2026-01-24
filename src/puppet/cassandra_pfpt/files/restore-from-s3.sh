@@ -405,22 +405,23 @@ do_full_restore() {
     log_info "Schema-to-directory mapping downloaded."
     
     export -f download_and_extract_table log_message log_info log_error
-    export CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE
+    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE TEMP_RESTORE_DIR RESTORE_BASE_PATH
     export RED GREEN YELLOW BLUE NC
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_info "Processing backup: $backup_ts"
-        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
-            echo "$archive_key"
-        done | xargs -I{} -P"$PARALLELISM" bash -c '
-            archive_key="{}"
-            SCHEMA_MAP_JSON=$(cat)
-            
-            s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
+        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | \
+        xargs -I{} -P"$PARALLELISM" bash -c '
+            archive_key="$1"
+            effective_source_host="$2"
+            current_backup_ts="$3"
+            schema_map_json=$(cat)
+
+            s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
             table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
 
-            table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
+            table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "${YELLOW}WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key${NC}"
                 exit 0
@@ -428,7 +429,7 @@ do_full_restore() {
             
             output_dir="$TEMP_RESTORE_DIR/$ks_dir/$table_uuid_dir"
             download_and_extract_table "$archive_key" "$output_dir" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
-        ' <<< "$SCHEMA_MAP_JSON"
+        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" <<< "$SCHEMA_MAP_JSON"
     done
     log_success "All data from backup chain downloaded and extracted to temporary directory."
 
@@ -476,7 +477,7 @@ do_granular_restore() {
     local temp_download_dir
     local check_path
 
-    if [ "$RESTORE_ACTION" == "download_only" ]; then
+    if [ "$MODE" == "download_only" ]; then
         base_output_dir="$DOWNLOAD_ONLY_PATH"
         temp_download_dir="$DOWNLOAD_ONLY_PATH"
         check_path="$DOWNLOAD_ONLY_PATH"
@@ -507,7 +508,7 @@ do_granular_restore() {
     log_info "Schema-to-directory mapping downloaded."
 
     export -f download_and_extract_table log_message log_info log_error
-    export CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE EFFECTIVE_SOURCE_HOST KEYSPACE_NAME TABLE_NAME
+    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE EFFECTIVE_SOURCE_HOST KEYSPACE_NAME TABLE_NAME base_output_dir temp_download_dir check_path
     export RED GREEN YELLOW BLUE NC
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
@@ -518,14 +519,16 @@ do_granular_restore() {
             fi
             echo "$archive_key"
         done | xargs -I{} -P"$PARALLELISM" bash -c '
-            archive_key="{}"
-            SCHEMA_MAP_JSON=$(cat)
-            
-            s3_path_no_host=$(echo "$archive_key" | sed "s#$EFFECTIVE_SOURCE_HOST/$backup_ts/##")
+            archive_key="$1"
+            effective_source_host="$2"
+            current_backup_ts="$3"
+            schema_map_json=$(cat)
+
+            s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
             table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
 
-            table_uuid_dir=$(echo "$SCHEMA_MAP_JSON" | jq -r ".\"${ks_dir}.${table_name}\"")
+            table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "${YELLOW}WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key${NC}"
                 exit 0
@@ -533,10 +536,10 @@ do_granular_restore() {
             
             output_dir="$base_output_dir/$ks_dir/$table_uuid_dir"
             download_and_extract_table "$archive_key" "$output_dir" "$temp_download_dir" "$check_path"
-        ' <<< "$SCHEMA_MAP_JSON"
+        ' _ "{}" "$EFFECTIVE_SOURCE_HOST" "$backup_ts" <<< "$SCHEMA_MAP_JSON"
     done
     
-    if [ "$RESTORE_ACTION" == "download_only" ]; then
+    if [ "$MODE" == "download_only" ]; then
         log_success "--- Granular Restore (Download Only) Finished Successfully ---"
         log_info "All data has been downloaded and decrypted to: $base_output_dir"
     else
@@ -591,7 +594,7 @@ do_granular_restore() {
             fi
         }
         export -f load_table_data log_message log_info log_error
-        export CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED
+        export RESTORE_LOG_FILE CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED
         export RED GREEN YELLOW BLUE NC
         
         find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | xargs -I{} -P"$PARALLELISM" bash -c 'load_table_data "{}"'
@@ -757,11 +760,9 @@ case $MODE in
         do_full_restore
         ;;
     "download_only")
-        RESTORE_ACTION="download_only"
         do_granular_restore
         ;;
     "download_and_restore")
-        RESTORE_ACTION="download_and_restore"
         do_granular_restore
         ;;
     "schema_only")
