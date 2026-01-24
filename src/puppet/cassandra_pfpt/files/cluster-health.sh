@@ -121,12 +121,12 @@ run_checks() {
 if run_checks; then
     log_message "${GREEN}Cluster health check completed successfully.${NC}"
     if [ "$SILENT" = true ]; then
-        echo "SUCCESS: Cluster is healthy."
+        echo -e "${GREEN}SUCCESS: Cluster is healthy.${NC}"
     fi
     exit 0
 else
     if [ "$SILENT" = true ]; then
-        echo "FAILED: $FAILURE_REASON"
+        echo -e "${RED}FAILED: $FAILURE_REASON${NC}"
     fi
     # The detailed error is already logged by `log_message` in non-silent mode.
     exit 1
