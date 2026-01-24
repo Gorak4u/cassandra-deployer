@@ -6,12 +6,13 @@
 set -euo pipefail
 
 # --- Color Codes ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+RED='\e[0;31m'
+GREEN='\e[0;32m'
+YELLOW='\e[1;33m'
+BLUE='\e[0;34m'
+CYAN='\e[0;36m'
+BOLD='\e[1m'
+NC='\e[0m' # No Color
 
 # --- Configuration & Input ---
 CONFIG_FILE="/etc/backup/config.json"
@@ -312,7 +313,7 @@ download_and_extract_table() {
     local temp_enc_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz.enc"
     local temp_tar_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz"
 
-    if ! nice -n 19 ionice -c 3 aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
+    if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_error "Failed to download $archive_key."
         rm -f "$temp_enc_file" # Clean up partial download
         return 1
@@ -628,7 +629,7 @@ do_schema_only_restore() {
     local local_schema_path="/tmp/schema_restore.cql"
 
     log_info "Downloading schema from: $schema_s3_path"
-    if ! aws s3 cp "$schema_s3_path" "$local_schema_path"; then
+    if ! aws s3 cp --quiet "$schema_s3_path" "$local_schema_path"; then
         log_error "Failed to download schema.cql."
         exit 1
     fi
@@ -663,42 +664,48 @@ do_list_backups() {
         return 0
     fi
     
-    echo ""
-    echo -e "${BOLD}${GREEN}Host: ${EFFECTIVE_SOURCE_HOST}${NC}"
-    echo -e "${YELLOW}----------------------------${NC}"
+    # Use printf to ensure color codes are rendered correctly
+    printf "\n"
+    printf "%b\n" "${BOLD}${GREEN}Host: ${EFFECTIVE_SOURCE_HOST}${NC}"
+    printf "%b\n" "${YELLOW}----------------------------${NC}"
 
-    local backups_by_type=()
+    local backups_to_sort=()
     while IFS= read -r backup_ts; do
+        # Validate format to avoid errors with unexpected s3 output
+        if [[ ! "$backup_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
+            continue
+        fi
+
         manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
         backup_type=$(echo "$manifest" | jq -r '.backup_type // "unknown"')
         
-        type_color=$NC
+        local type_color=$NC
         if [ "$backup_type" == "full" ]; then
-            type_color='\033[0;36m' # Cyan
+            type_color=${CYAN}
         elif [ "$backup_type" == "incremental" ]; then
-            type_color='\033[0;34m' # Blue
+            type_color=${BLUE}
         fi
         
-        backups_by_type+=("  - ${BOLD}$backup_ts${NC} (type: ${type_color}${backup_type}${NC})")
+        # Create a line with the timestamp first for sorting, then the formatted string.
+        # Use tabs as a separator for reliable cutting.
+        local formatted_line="  - ${BOLD}${backup_ts}${NC} (type: ${type_color}${backup_type}${NC})"
+        backups_to_sort+=("$(echo -e "${backup_ts}\t${formatted_line}")")
+
     done <<< "$all_backups"
 
-    # Print sorted list
-    printf "%s\n" "${backups_by_type[@]}" | sort -k2
-    echo ""
-}
+    if [ ${#backups_to_sort[@]} -eq 0 ]; then
+        log_warn "No valid backup sets found to list."
+        return
+    fi
+    
+    # Sort by the timestamp (first column), cut out the formatted part (second column),
+    # and pipe it to printf to render colors correctly.
+    printf "%s\n" "${backups_to_sort[@]}" | sort | cut -d$'\t' -f2- | while IFS= read -r line; do
+        printf "%b\n" "$line"
+    done
 
-do_show_restore_chain() {
-    find_backup_chain
-    log_success "--- Restore Chain Analysis Complete ---"
-    log_info "For a restore to point-in-time '$TARGET_DATE', the following backups would be used:"
-    log_info "Base Full Backup: ${GREEN}$BASE_FULL_BACKUP${NC}"
-    echo ""
-    log_info "Restore Chain (in chronological order):"
-    printf "  - %s\n" "${CHAIN_TO_RESTORE[@]}"
-    echo ""
-    log_info "To proceed with a restore using this chain, re-run the command with the desired restore action (e.g., --full-restore)."
+    printf "\n"
 }
-
 
 # --- Main Execution ---
 
@@ -758,3 +765,5 @@ case $MODE in
 esac
 
 exit 0
+
+    
