@@ -78,8 +78,44 @@ class cassandra_pfpt::node_exporter inherits cassandra_pfpt {
         enable => true,
       }
     }
+    'source': {
+      group { $node_exporter_group:
+        ensure => present,
+        system => true,
+      } ->
+      user { $node_exporter_user:
+        ensure  => present,
+        system  => true,
+        gid     => $node_exporter_group,
+        shell   => '/bin/false',
+        home    => $node_exporter_install_dir,
+      } ->
+      file { "${node_exporter_bin_dir}/node_exporter":
+        ensure  => file,
+        owner   => 'root',
+        group   => 'root',
+        mode    => '0755',
+        source  => 'puppet:///modules/cassandra_pfpt/node_exporter',
+      } ->
+      file { '/etc/systemd/system/node_exporter.service':
+        ensure  => file,
+        owner   => 'root',
+        group   => 'root',
+        mode    => '0644',
+        content => template('cassandra_pfpt/node_exporter.service.erb'),
+        notify  => Exec['node_exporter-systemd-reload'],
+      } ->
+      exec { 'node_exporter-systemd-reload':
+        command     => 'systemctl daemon-reload',
+        refreshonly => true,
+      } ~>
+      service { 'node_exporter':
+        ensure  => running,
+        enable  => true,
+      }
+    }
     default: {
-      fail("Unsupported node_exporter_install_method: '${node_exporter_install_method}'. Must be 'url' or 'package'.")
+      fail("Unsupported node_exporter_install_method: '${node_exporter_install_method}'. Must be 'url', 'package', or 'source'.")
     }
   }
 }

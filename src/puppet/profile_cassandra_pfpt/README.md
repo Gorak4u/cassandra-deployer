@@ -616,7 +616,7 @@ This section documents every available Hiera key for this profile.
 
 ### Monitoring & Agent Integrations
 *   `profile_cassandra_pfpt::manage_node_exporter` (Boolean): Set to `true` to install and enable the Prometheus Node Exporter for system-level metrics. Default: `false`.
-*   `profile_cassandra_pfpt::node_exporter_install_method` (String): How to install Node Exporter. Can be `'url'` (default) or `'package'`.
+*   `profile_cassandra_pfpt::node_exporter_install_method` (String): How to install Node Exporter. Can be `'url'` (default), `'package'`, or `'source'`. If using `'source'`, you must place the `node_exporter` binary in the `cassandra_pfpt/files/` directory of the module.
 *   `profile_cassandra_pfpt::node_exporter_package_name` (String): The package name to install if using the `package` method. Default: `'node_exporter'`.
 *   `profile_cassandra_pfpt::node_exporter_package_ensure` (String): The `ensure` state for the package resource. Default: `'installed'`.
 *   `profile_cassandra_pfpt::node_exporter_version` (String): The version of Node Exporter to install when using the `url` method. Default: `'1.7.0'`.
