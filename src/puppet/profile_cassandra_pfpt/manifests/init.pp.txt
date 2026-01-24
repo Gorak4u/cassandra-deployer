@@ -209,6 +209,9 @@ class profile_cassandra_pfpt {
   $manage_node_exporter             = lookup('profile_cassandra_pfpt::manage_node_exporter', { 'default_value' => false })
   $node_exporter_version            = lookup('profile_cassandra_pfpt::node_exporter_version', { 'default_value' => '1.7.0' })
   $node_exporter_download_url_base  = lookup('profile_cassandra_pfpt::node_exporter_download_url_base', { 'default_value' => undef })
+  $node_exporter_install_method     = lookup('profile_cassandra_pfpt::node_exporter_install_method', { 'default_value' => 'url' })
+  $node_exporter_package_name       = lookup('profile_cassandra_pfpt::node_exporter_package_name', { 'default_value' => 'node_exporter' })
+  $node_exporter_package_ensure     = lookup('profile_cassandra_pfpt::node_exporter_package_ensure', { 'default_value' => 'installed' })
   $node_exporter_user               = lookup('profile_cassandra_pfpt::node_exporter_user', { 'default_value' => 'node_exporter' })
   $node_exporter_group              = lookup('profile_cassandra_pfpt::node_exporter_group', { 'default_value' => 'node_exporter' })
   $node_exporter_install_dir        = lookup('profile_cassandra_pfpt::node_exporter_install_dir', { 'default_value' => '/var/lib/node_exporter' })
@@ -386,6 +389,9 @@ class profile_cassandra_pfpt {
     manage_node_exporter             => $manage_node_exporter,
     node_exporter_version            => $node_exporter_version,
     node_exporter_download_url_base  => $node_exporter_download_url_base,
+    node_exporter_install_method     => $node_exporter_install_method,
+    node_exporter_package_name       => $node_exporter_package_name,
+    node_exporter_package_ensure     => $node_exporter_package_ensure,
     node_exporter_user               => $node_exporter_user,
     node_exporter_group              => $node_exporter_group,
     node_exporter_install_dir        => $node_exporter_install_dir,

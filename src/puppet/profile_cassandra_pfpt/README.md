@@ -163,6 +163,7 @@ Usage: /usr/local/bin/cassandra-admin <command> [arguments...]
 
 --- Backup & Recovery ---
   backup                 Manually trigger a full, node-local backup to S3.
+  backup-status          Check the status of the last completed backup for a node.
   snapshot [<keyspaces>] Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces.
   restore [opts]         Restore data from S3 backups. This is a complex command; run 'restore -- --help' for its usage.
 
@@ -606,7 +607,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::manage_incremental_backups` (Boolean): Enables the scheduled incremental backup script. Default: `false`.
 *   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. **WARNING:** This has an insecure default value to prevent Puppet runs from failing. You **MUST** override this with a strong, unique secret in your production Hiera data. Default: `'MustBeChanged-ChangeMe-ChangeMe!!'`.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
-*   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Default: `'puppet-cassandra-backups'`.
+*   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Defaults to a sanitized version of the cluster name.
 *   `profile_cassandra_pfpt::s3_retention_period` (Integer): The number of days to keep backups in S3 before they are automatically deleted by a lifecycle policy. The policy is applied automatically by the backup script. Set to 0 to disable. Default: `15`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
@@ -615,8 +616,11 @@ This section documents every available Hiera key for this profile.
 
 ### Monitoring & Agent Integrations
 *   `profile_cassandra_pfpt::manage_node_exporter` (Boolean): Set to `true` to install and enable the Prometheus Node Exporter for system-level metrics. Default: `false`.
-*   `profile_cassandra_pfpt::node_exporter_version` (String): The version of Node Exporter to install. Default: `'1.7.0'`.
-*   `profile_cassandra_pfpt::node_exporter_download_url_base` (String): **(Required)** The base URL for downloading the Node Exporter archive (e.g., `https://my-internal-repo.com/prometheus`). There is no default.
+*   `profile_cassandra_pfpt::node_exporter_install_method` (String): How to install Node Exporter. Can be `'url'` (default) or `'package'`.
+*   `profile_cassandra_pfpt::node_exporter_package_name` (String): The package name to install if using the `package` method. Default: `'node_exporter'`.
+*   `profile_cassandra_pfpt::node_exporter_package_ensure` (String): The `ensure` state for the package resource. Default: `'installed'`.
+*   `profile_cassandra_pfpt::node_exporter_version` (String): The version of Node Exporter to install when using the `url` method. Default: `'1.7.0'`.
+*   `profile_cassandra_pfpt::node_exporter_download_url_base` (String): **(Required if using `install_method: url`)** The base URL for downloading the Node Exporter archive. There is no default.
 *   `profile_cassandra_pfpt::manage_jmx_exporter` (Boolean): Set to `true` to enable the Prometheus JMX exporter for Cassandra-specific metrics. Default: `false`.
 *   `profile_cassandra_pfpt::jmx_exporter_port` (Integer): The port for the JMX exporter to listen on. Default: `9404`.
 *   `profile_cassandra_pfpt::manage_coralogix_agent` (Boolean): Set to `true` to install and configure the Coralogix agent. Default: `false`.
