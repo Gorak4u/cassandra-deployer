@@ -69,16 +69,15 @@ usage() {
     log_message "  --list-backups                List all available backup sets for a host."
     log_message "  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date."
     log_message "  --full-restore                Performs a full, destructive restore of the entire node."
-    log_message "  --keyspace <ks> [...]         Targets a specific keyspace or table for a granular restore (requires an action)."
     log_message "  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup."
+    log_message "  --download-only               Downloads data for a specific keyspace/table, but does not load it into Cassandra."
+    log_message "  --download-and-restore        Downloads and restores data for a specific keyspace/table into the live cluster."
     log_message ""
     log_message "Options:"
-    log_message "  --date <timestamp>            Required for --show-restore-chain and restore actions. Target UTC timestamp ('YYYY-MM-DD-HH-MM')."
-    log_message "  --source-host <hostname>      For --list-backups or restore actions. Defaults to the current hostname."
-    log_message "  --keyspace <ks>               For granular restore: the keyspace to restore."
-    log_message "  --table <table>               For granular restore: the table to restore."
-    log_message "  --download-only               Action for granular restore: Download data but do not load it."
-    log_message "  --download-and-restore        Action for granular restore: Download and load data via sstableloader."
+    log_message "  --date <timestamp>            Required for all restore modes. Target UTC timestamp ('YYYY-MM-DD-HH-MM')."
+    log_message "  --keyspace <ks>               Required for --download-only and --download-and-restore modes."
+    log_message "  --table <table>               Optional. Narrows the granular restore to a single table."
+    log_message "  --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname."
     log_message "  --s3-bucket <name>            Override the S3 bucket from config.json."
     log_message "  --yes                         Skips all interactive confirmation prompts. Use with caution."
     exit 1
@@ -119,12 +118,12 @@ else
     LOADER_NODES="$LISTEN_ADDRESS"
 fi
 
-# --- Argument Parsing (to be parsed) ---
+# --- Argument Parsing ---
 TARGET_DATE=""
 KEYSPACE_NAME=""
 TABLE_NAME=""
-MODE="" # Will be set to 'granular', 'full', 'list', 'chain'
-RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
+MODE=""
+RESTORE_ACTION=""
 AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
 SOURCE_HOST_OVERRIDE=""
@@ -141,8 +140,8 @@ while [[ "$#" -gt 0 ]]; do
         --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
         --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
         --full-restore) MODE="full" ;;
-        --download-only) RESTORE_ACTION="download_only" ;;
-        --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
+        --download-only) MODE="download_only" ;;
+        --download-and-restore) MODE="download_and_restore" ;;
         --schema-only) MODE="schema_only" ;;
         --list-backups) MODE="list";;
         --show-restore-chain) MODE="chain";;
@@ -154,35 +153,21 @@ done
 
 # Validate arguments
 if [ -z "$MODE" ]; then
-    log_error "No mode specified. You must choose one of: --list-backups, --show-restore-chain, --full-restore, --keyspace, --schema-only"
+    log_error "No mode specified. You must choose one of: --list-backups, --show-restore-chain, --full-restore, --schema-only, --download-only, --download-and-restore"
     usage
 fi
 
-if [[ "$MODE" == "chain" || "$MODE" == "full" || "$MODE" == "granular" || "$MODE" == "schema_only" ]] && [ -z "$TARGET_DATE" ]; then
+if [[ "$MODE" == "chain" || "$MODE" == "full" || "$MODE" == "download_only" || "$MODE" == "download_and_restore" || "$MODE" == "schema_only" ]] && [ -z "$TARGET_DATE" ]; then
     log_error "--date is required for this mode."
     usage
 fi
 
-if [ -n "$KEYSPACE_NAME" ] && [ -z "$MODE" ]; then
-    MODE="granular"
-fi
-
-if [ "$MODE" = "granular" ]; then
+if [[ "$MODE" == "download_only" || "$MODE" == "download_and_restore" ]]; then
     if [ -z "$KEYSPACE_NAME" ]; then
-        log_error "--keyspace must be specified for a granular restore."
-        usage
-    fi
-    if [ -z "$RESTORE_ACTION" ]; then
-        log_error "You must specify an action (--download-only or --download-and-restore) for a granular restore."
+        log_error "--keyspace must be specified for the --$MODE mode."
         usage
     fi
 fi
-
-if [ "$MODE" = "schema_only" ] && [ "$RESTORE_ACTION" != "" ]; then
-    log_error "--schema-only cannot be combined with --download-only or --download-and-restore."
-    usage
-fi
-
 
 # --- Cleanup & Trap Logic ---
 TMP_KEY_FILE=$(mktemp)
@@ -685,7 +670,7 @@ do_list_backups() {
         fi
         
         local formatted_line="  - ${BOLD}${backup_ts}${NC} (type: ${type_color}${backup_type}${NC})"
-        backups_to_sort+=("$(echo -e "${backup_ts}\t${formatted_line}")")
+        backups_to_sort+=("$(printf "${backup_ts}\t${formatted_line}")")
 
     done <<< "$all_backups"
 
@@ -771,14 +756,19 @@ case $MODE in
     "full")
         do_full_restore
         ;;
-    "granular")
+    "download_only")
+        RESTORE_ACTION="download_only"
+        do_granular_restore
+        ;;
+    "download_and_restore")
+        RESTORE_ACTION="download_and_restore"
         do_granular_restore
         ;;
     "schema_only")
         do_schema_only_restore
         ;;
     *)
-        log_error "INTERNAL ERROR: Invalid mode detected."
+        log_error "INTERNAL ERROR: Invalid mode detected for execution: $MODE"
         usage
         exit 1
         ;;
