@@ -27,29 +27,44 @@ fi
 
 # Exit gracefully if key config files don't exist
 CASSANDRA_YAML="/etc/cassandra/conf/cassandra.yaml"
+JVM_OPTS_FILE="/etc/cassandra/conf/jvm-server.options"
 RACKDC_PROPS="/etc/cassandra/conf/cassandra-rackdc.properties"
 BACKUP_CONFIG="/etc/backup/config.json"
 
-if [ ! -f "$CASSANDRA_YAML" ]; then
+if [ ! -f "$CASSANDRA_YAML" ] || [ ! -f "$JVM_OPTS_FILE" ]; then
     exit 0
+fi
+
+# --- Determine JMX Auth ---
+# Set up nodetool command based on whether JMX authentication is enabled.
+JMX_AUTH_ENABLED=$(grep -q -- '-Dcom.sun.management.jmxremote.authenticate=true' "$JVM_OPTS_FILE" && echo "true" || echo "false")
+NODETOOL_CMD="nodetool"
+if [ "$JMX_AUTH_ENABLED" = "true" ]; then
+    # NOTE: This script uses the default JMX credentials defined in the profile.
+    # If you override `jmx_password_file_content` in Hiera, this script
+    # will need to be updated with the new credentials.
+    JMX_USER="monitorRole"
+    JMX_PASS="QED"
+    NODETOOL_CMD="nodetool -u $JMX_USER -pw $JMX_PASS"
 fi
 
 # --- Gather Facts ---
 
 # Get local IP for filtering nodetool output
-LOCAL_IP=$(hostname -i | awk '{print $1}')
+LOCAL_IP=$(hostname -I | awk '{print $1}')
 if [ -z "$LOCAL_IP" ]; then
     exit 0
 fi
 
 # 1. Status & Health Facts
-echo "cassandra_node_status=$(get_value "nodetool status | grep '$LOCAL_IP' | awk '{print \$1}'")"
-echo "cassandra_schema_version=$(get_value "nodetool describecluster | grep 'Schema versions:' | awk '{print \$NF}' | tr -d '[]' | cut -d',' -f1")"
-echo "cassandra_uptime_seconds=$(get_value "nodetool info | grep 'Uptime (seconds)' | awk '{print \$3}'")"
+echo "cassandra_node_status=$(get_value "$NODETOOL_CMD status | awk -v ip=\"$LOCAL_IP\" '\$2 == ip {print \$1}'")"
+echo "cassandra_schema_version=$(get_value "$NODETOOL_CMD describecluster | grep 'Schema versions:' | awk '{print \$NF}' | tr -d '[]' | cut -d',' -f1")"
+echo "cassandra_uptime_seconds=$(get_value "$NODETOOL_CMD info | grep 'Uptime (seconds)' | awk '{print \$3}'")"
 
 # 2. Configuration & Identity Facts
+# `nodetool version` does not require JMX connection, so use the base command.
 echo "cassandra_version=$(get_value "nodetool version | grep 'ReleaseVersion' | awk '{print \$2}'")"
-echo "cassandra_cluster_name=$(get_value "nodetool describecluster | grep 'Name:' | awk '{print \$2}'")"
+echo "cassandra_cluster_name=$(get_value "$NODETOOL_CMD describecluster | grep 'Name:' | awk '{print \$2}'")"
 
 if [ -f "$RACKDC_PROPS" ]; then
     echo "cassandra_datacenter=$(get_value "grep '^dc=' $RACKDC_PROPS | cut -d'=' -f2")"
