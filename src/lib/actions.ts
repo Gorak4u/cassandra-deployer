@@ -227,9 +227,9 @@ export async function pushToGit(data: {
     if (result.ok) {
       return { success: true, message: `Pushed successfully!` };
     } else {
-      // The error object might contain sensitive info, so return a generic message.
+      const errorMessage = result.errors?.join(' ') || 'Unknown push error.';
       console.error('Git push failed:', result.errors);
-      return { success: false, message: `Git push failed. Check repository URL and PAT.` };
+      return { success: false, message: `Git push failed: ${errorMessage}` };
     }
   } catch (error: any) {
     console.error('An error occurred during git push:', error);
