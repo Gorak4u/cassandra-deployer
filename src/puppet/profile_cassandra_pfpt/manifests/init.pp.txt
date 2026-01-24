@@ -1,4 +1,4 @@
-
+# This file is managed by Puppet.
 # A profile for configuring Cassandra.
 #
 # @summary This profile class configures a complete Cassandra node by wrapping the `cassandra_pfpt` component module and providing all its data via Hiera lookups.
@@ -116,8 +116,8 @@ class profile_cassandra_pfpt {
 
   # --- Repositories & Packages ---
   $manage_repo                      = lookup('profile_cassandra_pfpt::manage_repo', { 'default_value' => true })
-  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl')
-  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey')
+  $repo_baseurl                     = lookup('profile_cassandra_pfpt::repo_baseurl', { 'default_value' => undef })
+  $repo_gpgkey                      = lookup('profile_cassandra_pfpt::repo_gpgkey', { 'default_value' => undef })
   $repo_gpgcheck                    = lookup('profile_cassandra_pfpt::repo_gpgcheck', { 'default_value' => true })
   $repo_priority                    = lookup('profile_cassandra_pfpt::repo_priority', { 'default_value' => 99 })
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
