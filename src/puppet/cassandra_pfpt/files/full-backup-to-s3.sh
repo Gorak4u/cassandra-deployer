@@ -432,7 +432,7 @@ TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
 SCHEMA_DUMP_FILE="$BACKUP_TEMP_DIR/schema.cql"
 log_info "Dumping cluster schema to $SCHEMA_DUMP_FILE..."
 
-local cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
+cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
 if [[ "$SSL_ENABLED" == "true" ]]; then
     cqlsh_command_parts+=("--ssl")
 fi
