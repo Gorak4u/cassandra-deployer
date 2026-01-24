@@ -47,6 +47,7 @@ class cassandra_pfpt (
   Boolean $client_optional,
   Boolean $client_require_client_auth,
   String $client_keystore_path,
+  Sensitive[String] $client_keystore_password,
   String $client_truststore_path,
   Sensitive[String] $client_truststore_password,
   String $tls_protocol,
@@ -165,9 +166,7 @@ class cassandra_pfpt (
   if Integer($cassandra_major_version) >= 4 and Integer($java_version) < 11 {
     fail("Cassandra version ${cassandra_version} requires Java 11 or newer, but Java ${java_version} was specified.")
   }
-  if Integer($cassandra_major_version) <= 3 and Integer($java_version) > 11 {
-    fail("Cassandra version ${cassandra_version} is not compatible with Java versions newer than 11, but Java ${java_version} was specified.")
-  }
+
   # If seed list is empty, default to self-seeding. This is crucial for bootstrapping.
   $seeds = if empty($seeds_list) {
     [$facts['networking']['ip']]
@@ -176,25 +175,26 @@ class cassandra_pfpt (
   }
 
   # Calculate default JVM args based on GC type and Java version
-  $default_jvm_args_hash = if $gc_type == 'G1GC' {
-    # Modern G1GC defaults for Java 8+
+  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '8') >= 0 {
     {
-      'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
+      'G1RSetUpdatingPauseTimePercent' => '-XX:G1RSetUpdatingPauseTimePercent=5',
+      'MaxGCPauseMillis'               => '-XX:MaxGCPauseMillis=500',
       'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=70',
-      'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
-      'PerfDisableSharedMem'         => '-XX:+PerfDisableSharedMem',
+      'ParallelRefProcEnabled'         => '-XX:+ParallelRefProcEnabled',
+      'PerfDisableSharedMem'           => '-XX:+PerfDisableSharedMem',
+      'AlwaysPreTouch'                 => '-XX:+AlwaysPreTouch',
     }
   } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
     # CMS is deprecated and removed in Java 14. This only applies to older Java versions.
     {
-      'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
-      'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
-      'SurvivorRatio'               => '-XX:SurvivorRatio=8',
-      'MaxTenuringThreshold'        => '-XX:MaxTenuringThreshold=1',
+      'UseConcMarkSweepGC'             => '-XX:+UseConcMarkSweepGC',
+      'CMSParallelRemarkEnabled'       => '-XX:+CMSParallelRemarkEnabled',
+      'SurvivorRatio'                  => '-XX:SurvivorRatio=8',
+      'MaxTenuringThreshold'           => '-XX:MaxTenuringThreshold=1',
       'CMSInitiatingOccupancyFraction' => '-XX:CMSInitiatingOccupancyFraction=75',
-      'UseCMSInitiatingOccupancyOnly' => '-XX:+UseCMSInitiatingOccupancyOnly',
-      'CMSClassUnloadingEnabled'    => '-XX:+CMSClassUnloadingEnabled',
-      'AlwaysPreTouch'              => '-XX:+AlwaysPreTouch',
+      'UseCMSInitiatingOccupancyOnly'  => '-XX:+UseCMSInitiatingOccupancyOnly',
+      'CMSClassUnloadingEnabled'       => '-XX:+CMSClassUnloadingEnabled',
+      'AlwaysPreTouch'                 => '-XX:+AlwaysPreTouch',
     }
   } else {
     {}
@@ -203,6 +203,13 @@ class cassandra_pfpt (
   # Merge the default arguments with any overrides from Hiera. Hiera wins.
   $merged_jvm_args_hash = $default_jvm_args_hash + $extra_jvm_args_override
   $extra_jvm_args = $merged_jvm_args_hash.values
+
+  # Centralized SSL flag for cqlsh commands
+  $cqlsh_ssl_opt = $ssl_enabled ? {
+    true  => '--ssl',
+    false => '',
+  }
+
   contain cassandra_pfpt::java
   contain cassandra_pfpt::install
   contain cassandra_pfpt::config

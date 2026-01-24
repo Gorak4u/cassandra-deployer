@@ -90,6 +90,7 @@ class profile_cassandra_pfpt {
   $client_optional                  = lookup('profile_cassandra_pfpt::client_optional', { 'default_value' => false })
   $client_require_client_auth       = lookup('profile_cassandra_pfpt::client_require_client_auth', { 'default_value' => false })
   $client_keystore_path             = lookup('profile_cassandra_pfpt::client_keystore_path', { 'default_value' => '/etc/pki/tls/certs/etc/keystore.jks' })
+  $client_keystore_password         = Sensitive(lookup('profile_cassandra_pfpt::client_keystore_password', { 'default_value' => 'ChangeMe' }))
   $client_truststore_path           = lookup('profile_cassandra_pfpt::client_truststore_path', { 'default_value' => '/etc/pki/ca-trust/extracted/java/cacerts' })
   $client_truststore_password       = Sensitive(lookup('profile_cassandra_pfpt::client_truststore_password', { 'default_value' => 'changeit' }))
   $tls_protocol                     = lookup('profile_cassandra_pfpt::tls_protocol', { 'default_value' => 'TLS' })
@@ -304,6 +305,7 @@ class profile_cassandra_pfpt {
     client_optional                  => $client_optional,
     client_require_client_auth       => $client_require_client_auth,
     client_keystore_path             => $client_keystore_path,
+    client_keystore_password         => $client_keystore_password,
     client_truststore_path           => $client_truststore_path,
     client_truststore_password       => $client_truststore_password,
     tls_protocol                     => $tls_protocol,

@@ -95,6 +95,8 @@ SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
+SSL_TRUSTSTORE_PATH=$(jq -r '.ssl_truststore_path // "null"' "$CONFIG_FILE")
+SSL_TRUSTSTORE_PASSWORD=$(jq -r '.ssl_truststore_password // "null"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 
@@ -424,9 +426,10 @@ do_full_restore() {
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
-            # Correctly parse table name, stripping UUID
-            table_name=$(echo "$table_dir_name" | sed "s/-[0-9a-f]\{32\}$//")
+            # Get just the table name, without the UUID
+            table_dir_name_with_uuid=$(basename "$(dirname "$archive_key")")
+            table_name=${table_dir_name_with_uuid%%-*}
+
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
@@ -538,10 +541,10 @@ do_granular_restore() {
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
-            # Correctly parse table name, stripping UUID
-            table_name=$(echo "$table_dir_name" | sed "s/-[0-9a-f]\{32\}$//")
-            
+            # Get just the table name, without the UUID
+            table_dir_name_with_uuid=$(basename "$(dirname "$archive_key")")
+            table_name=${table_dir_name_with_uuid%%-*}
+
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
                 log_message "${YELLOW}WARNING: Could not find mapping for ${ks_dir}.${table_name}. Skipping archive $archive_key${NC}"
@@ -564,7 +567,7 @@ do_granular_restore() {
             local downloaded_table_name_with_uuid
             downloaded_table_name_with_uuid=$(basename "$source_table_dir")
             local downloaded_table_name
-            downloaded_table_name=$(echo "$downloaded_table_name_with_uuid" | sed "s/-[0-9a-f]\{32\}$//")
+            downloaded_table_name=${downloaded_table_name_with_uuid%%-*}
 
             log_info "Processing table for restore: $KEYSPACE_NAME.$downloaded_table_name"
 
@@ -595,7 +598,7 @@ do_granular_restore() {
                 loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
             fi
             if [ "$SSL_ENABLED" == "true" ]; then
-                loader_cmd+=("--ssl-storage-port" "7001")
+                loader_cmd+=("--ssl-storage-port" "7001" "--ssl-truststore" "$SSL_TRUSTSTORE_PATH" "--ssl-truststore-password" "$SSL_TRUSTSTORE_PASSWORD")
             fi
             loader_cmd+=("$final_table_dir_path")
 
@@ -608,7 +611,7 @@ do_granular_restore() {
             fi
         }
         export -f load_table_data log_message log_info log_error
-        export RESTORE_LOG_FILE CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED
+        export RESTORE_LOG_FILE CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED SSL_TRUSTSTORE_PATH SSL_TRUSTSTORE_PASSWORD
         export RED GREEN YELLOW BLUE NC
         
         find "$base_output_dir/$KEYSPACE_NAME" -maxdepth 1 -mindepth 1 -type d | xargs -I{} -P"$PARALLELISM" bash -c 'load_table_data "{}"'
