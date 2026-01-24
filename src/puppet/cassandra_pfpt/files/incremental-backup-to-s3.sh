@@ -248,7 +248,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             nice -n 19 ionice -c 3 tar -C "$backup_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
-            nice -n 19 ionice -c 3 aws s3 cp - "$s3_path"
+            nice -n 19 ionice -c 3 aws s3 cp --quiet - "$s3_path"
             
             pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
@@ -283,7 +283,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             fi
             
             # Step 3: Upload
-            if nice -n 19 ionice -c 3 aws s3 cp "$local_enc_file" "$s3_path"; then
+            if nice -n 19 ionice -c 3 aws s3 cp --quiet "$local_enc_file" "$s3_path"; then
                 log_success "Successfully uploaded incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
                 
@@ -351,7 +351,7 @@ else
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         log_info "Uploading manifest file..."
         MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
-        if ! aws s3 cp "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
+        if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
             log_error "Failed to upload manifest to S3. The backup is not properly indexed."
         else
             log_success "Manifest uploaded successfully."
@@ -359,7 +359,7 @@ else
 
         log_info "Uploading schema mapping file..."
         SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
-        if ! aws s3 cp "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
+        if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
             log_error "Failed to upload schema mapping file to S3."
         else
             log_success "Schema mapping file uploaded successfully."
