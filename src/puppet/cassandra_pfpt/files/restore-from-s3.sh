@@ -329,7 +329,7 @@ download_and_extract_table() {
 }
 
 do_full_restore() {
-    log_info "--- Starting SIMPLIFIED FULL DESTRUCTIVE Node Restore ---"
+    log_info "--- Starting FULL DESTRUCTIVE Node Restore ---"
     log_warn "This will restore the node by wiping all data and replacing it directly from the backup files."
     log_warn "WARNING: This is a DESTRUCTIVE operation. It will:"
     log_warn "1. STOP the Cassandra service."
@@ -337,7 +337,7 @@ do_full_restore() {
     log_warn "3. DOWNLOAD all backup data to a temporary location."
     log_warn "4. CONFIGURE cassandra.yaml with the node's original tokens."
     log_warn "5. MOVE the restored data into the final Cassandra data directory."
-    log_warn "6. START Cassandra."
+    log_warn "6. START Cassandra and verify it rejoins the cluster."
     
     if [ "$AUTO_APPROVE" = false ]; then
         read -p "Are you absolutely sure you want to PERMANENTLY DELETE ALL DATA on this node? Type 'yes': " confirmation
@@ -472,8 +472,7 @@ do_full_restore() {
     fi
     
     log_success "Cassandra is online and ready."
-    log_info "10. Restore complete."
-    log_info "The temporary directory $TEMP_RESTORE_DIR will now be removed."
+    log_info "10. Restore complete. The temporary directory $TEMP_RESTORE_DIR will now be removed."
     
     log_success "--- Full Restore Process Finished Successfully ---"
 }

@@ -392,9 +392,10 @@ export RED GREEN YELLOW BLUE NC
 export -f log_message log_info log_success log_warn log_error
 
 # --- Parallel backup execution ---
-log_info "Starting parallel backup of tables..."
+log_info "--- Starting Parallel Backup of Tables ---"
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
     xargs -0 -n 1 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
+log_info "--- Finished Parallel Backup of Tables ---"
 
 UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f | wc -l)
 TABLES_BACKED_UP_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
