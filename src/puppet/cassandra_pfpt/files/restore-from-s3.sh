@@ -664,14 +664,12 @@ do_list_backups() {
         return 0
     fi
     
-    # Use printf to ensure color codes are rendered correctly
     printf "\n"
     printf "%b\n" "${BOLD}${GREEN}Host: ${EFFECTIVE_SOURCE_HOST}${NC}"
     printf "%b\n" "${YELLOW}----------------------------${NC}"
 
     local backups_to_sort=()
     while IFS= read -r backup_ts; do
-        # Validate format to avoid errors with unexpected s3 output
         if [[ ! "$backup_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
             continue
         fi
@@ -686,8 +684,6 @@ do_list_backups() {
             type_color=${BLUE}
         fi
         
-        # Create a line with the timestamp first for sorting, then the formatted string.
-        # Use tabs as a separator for reliable cutting.
         local formatted_line="  - ${BOLD}${backup_ts}${NC} (type: ${type_color}${backup_type}${NC})"
         backups_to_sort+=("$(echo -e "${backup_ts}\t${formatted_line}")")
 
@@ -698,14 +694,38 @@ do_list_backups() {
         return
     fi
     
-    # Sort by the timestamp (first column), cut out the formatted part (second column),
-    # and pipe it to printf to render colors correctly.
     printf "%s\n" "${backups_to_sort[@]}" | sort | cut -d$'\t' -f2- | while IFS= read -r line; do
         printf "%b\n" "$line"
     done
 
     printf "\n"
 }
+
+do_show_restore_chain() {
+    log_info "--- Showing Restore Chain for Target Date: $TARGET_DATE ---"
+    
+    find_backup_chain
+
+    if [ ${#CHAIN_TO_RESTORE[@]} -eq 0 ]; then
+        log_warn "No valid restore chain could be built for the specified date."
+        return 1
+    fi
+
+    printf "\n"
+    printf "%b\n" "${BOLD}${GREEN}Restore chain for host '${EFFECTIVE_SOURCE_HOST}' to point-in-time '${TARGET_DATE}':${NC}"
+    printf "%b\n" "${YELLOW}------------------------------------------------------------------${NC}"
+
+    for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
+        if [ "$backup_ts" == "$BASE_FULL_BACKUP" ]; then
+            printf "%b\n" "  - ${BOLD}${backup_ts}${NC} (${CYAN}Full Backup - Base${NC})"
+        else
+            printf "%b\n" "  - ${BOLD}${backup_ts}${NC} (${BLUE}Incremental${NC})"
+        fi
+    done
+    printf "%b\n" "${YELLOW}------------------------------------------------------------------${NC}"
+    printf "\n"
+}
+
 
 # --- Main Execution ---
 
@@ -765,5 +785,3 @@ case $MODE in
 esac
 
 exit 0
-
-    
