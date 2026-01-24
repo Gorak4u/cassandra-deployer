@@ -18,4 +18,14 @@ class cassandra_pfpt::stress (
     content => template('cassandra_pfpt/stress.conf.erb'),
     require => Package['cassandra-tools'],
   }
+
+  # Deploy the default stress schema file
+  file { '/etc/cassandra/conf/stress-schema.yaml':
+    ensure  => file,
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    source  => 'puppet:///modules/cassandra_pfpt/stress-schema.yaml',
+    require => Package['cassandra-tools'],
+  }
 }
