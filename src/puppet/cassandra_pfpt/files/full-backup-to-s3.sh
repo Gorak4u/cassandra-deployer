@@ -266,6 +266,7 @@ fi
 
 if [ -f "$LOCK_FILE" ]; then
     log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
+    local OLD_PID
     OLD_PID=$(cat "$LOCK_FILE")
     if ps -p "$OLD_PID" > /dev/null; then
         log_warn "Backup process with PID $OLD_PID is still running. Exiting."
@@ -351,9 +352,12 @@ process_table_backup() {
     UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
-    local ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
-    local table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
-    local table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
+    local ks_name
+    ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
+    local table_dir_name
+    table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
+    local table_name
+    table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
 
     local is_system_ks=false
     for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
@@ -420,7 +424,7 @@ export -f log_message log_info log_success log_warn log_error
 # --- Parallel backup execution ---
 log_info "--- Starting Parallel Backup of Tables ---"
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
-    xargs -0 -n 1 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
+    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
 log_info "--- Finished Parallel Backup of Tables ---"
 
 TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
