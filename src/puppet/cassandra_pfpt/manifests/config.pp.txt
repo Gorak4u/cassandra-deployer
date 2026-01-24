@@ -113,18 +113,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       content => template('cassandra_pfpt/cassandra_limits.conf.erb'),
     }
   }
-  if $ssl_enabled {
-    # NOTE: SSL certificate management is now handled by the cassandra_pfpt::ssl class.
-    # The truststore file is expected to be placed on the node
-    # by an external process (e.g., another Puppet profile, AMI baking, etc.)
-    # before this class is applied.
-    file { $truststore_path:
-      ensure => 'file',
-      owner  => 'root',
-      group  => 'root',
-      mode   => '0444',
-    }
-  }
   if $manage_jmx_security {
     file { $jmx_password_file_path:
       ensure  => 'file',

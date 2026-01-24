@@ -25,5 +25,14 @@ class cassandra_pfpt::ssl inherits cassandra_pfpt {
       # successfully generated the PEM certificate and key.
       require     => Ssl_certificate["${$target_dir}/etc/keystore"],
     }
+    # NOTE: The truststore file is expected to be placed on the node
+    # by an external process (e.g., another Puppet profile, AMI baking, etc.)
+    # before this class is applied.
+    file { $truststore_path:
+      ensure => 'file',
+      owner  => 'root',
+      group  => 'root',
+      mode   => '0444',
+    }
   }
 }
