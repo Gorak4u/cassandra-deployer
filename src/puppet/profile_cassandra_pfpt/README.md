@@ -123,6 +123,12 @@ profile_cassandra_pfpt::schema_keyspaces:
       class: 'NetworkTopologyStrategy'
       dc1: 3
     durable_writes: true
+  'my-test':
+    ensure: 'present'
+    replication:
+      class: 'NetworkTopologyStrategy'
+      dc1: 3
+    durable_writes: true
 
 profile_cassandra_pfpt::schema_tables:
   'users':
