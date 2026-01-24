@@ -112,8 +112,13 @@ manage_s3_lifecycle() {
     log_info "Checking for S3 lifecycle policy '$policy_id' with retention of $S3_RETENTION_PERIOD days..."
 
     # Check if a policy with our ID already exists
-    local existing_policy_days
-    existing_policy_days=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days')
+    local existing_policy_json
+    existing_policy_json=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null || echo "")
+
+    local existing_policy_days=""
+    if [ -n "$existing_policy_json" ]; then
+        existing_policy_days=$(echo "$existing_policy_json" | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days // ""')
+    fi
 
     if [[ "$existing_policy_days" == "$S3_RETENTION_PERIOD" ]]; then
         log_success "Correct lifecycle policy already in place. Nothing to do."
