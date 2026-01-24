@@ -1,5 +1,9 @@
 # @summary Manages the Prometheus Node Exporter.
 class cassandra_pfpt::node_exporter inherits cassandra_pfpt {
+  if !$node_exporter_download_url_base {
+    fail('When `manage_node_exporter` is true, you must set the `profile_cassandra_pfpt::node_exporter_download_url_base` parameter in Hiera. It specifies the base URL from which to download the Node Exporter archive.')
+  }
+
   $archive_name = "node_exporter-${node_exporter_version}.linux-amd64.tar.gz"
   $download_url = "${node_exporter_download_url_base}/v${node_exporter_version}/${archive_name}"
   $extracted_dir = "/tmp/node_exporter-${node_exporter_version}.linux-amd64"

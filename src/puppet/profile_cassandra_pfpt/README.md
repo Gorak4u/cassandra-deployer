@@ -616,6 +616,7 @@ This section documents every available Hiera key for this profile.
 ### Monitoring & Agent Integrations
 *   `profile_cassandra_pfpt::manage_node_exporter` (Boolean): Set to `true` to install and enable the Prometheus Node Exporter for system-level metrics. Default: `false`.
 *   `profile_cassandra_pfpt::node_exporter_version` (String): The version of Node Exporter to install. Default: `'1.7.0'`.
+*   `profile_cassandra_pfpt::node_exporter_download_url_base` (String): **(Required)** The base URL for downloading the Node Exporter archive (e.g., `https://my-internal-repo.com/prometheus`). There is no default.
 *   `profile_cassandra_pfpt::manage_jmx_exporter` (Boolean): Set to `true` to enable the Prometheus JMX exporter for Cassandra-specific metrics. Default: `false`.
 *   `profile_cassandra_pfpt::jmx_exporter_port` (Integer): The port for the JMX exporter to listen on. Default: `9404`.
 *   `profile_cassandra_pfpt::manage_coralogix_agent` (Boolean): Set to `true` to install and configure the Coralogix agent. Default: `false`.
