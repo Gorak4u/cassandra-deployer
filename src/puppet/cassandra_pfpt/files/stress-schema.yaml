@@ -3,11 +3,14 @@
 # It defines a new table `users_large` within the `my_app` keyspace.
 
 keyspace: my_app
+table: users_large
+
+keyspace_definition: |
+  CREATE KEYSPACE IF NOT EXISTS my_app WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
 
 # The table schema, including a large 'data' blob to increase row size.
-table: users_large
 table_definition: |
-  CREATE TABLE my_app.users_large (
+  CREATE TABLE IF NOT EXISTS my_app.users_large (
     user_id uuid PRIMARY KEY,
     first_name text,
     last_name text,
@@ -19,7 +22,7 @@ table_definition: |
 # Specifies how to generate data for each column.
 columnspec:
   - name: user_id
-    dist: uniform(1..10000000)
+    population: uniform(1..10000000)
   - name: first_name
     size: uniform(5..15)
   - name: last_name
@@ -27,11 +30,16 @@ columnspec:
   - name: email
     size: uniform(15..30)
   - name: created_at
-    dist: uniform(1..10000000)
   - name: data
-    size: uniform(800..900) # This blob generates the bulk of the data size.
+    size: uniform(800..900)
 
-# Defines the query to run.
+# Defines the query to run for writes.
 insert:
   partitions: fixed(1)
   batchtype: UNLOGGED
+
+# Defines named queries that can be called from the command line.
+queries:
+  read_one: 
+    cql: "SELECT * FROM users_large where user_id = ?"
+    fields: samerow
