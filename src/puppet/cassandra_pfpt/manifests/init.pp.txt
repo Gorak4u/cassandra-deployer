@@ -242,11 +242,17 @@ class cassandra_pfpt (
     }
     Class['cassandra_pfpt::install'] -> Class['cassandra_pfpt::stress']
   }
-
-  Class['cassandra_pfpt::java']
-  -> Class['cassandra_pfpt::install']
-  -> Class['cassandra_pfpt::config']
-  ~> Class['cassandra_pfpt::service']
+  if $ssl_enabled {
+    contain cassandra_pfpt::ssl
+    Class['cassandra_pfpt::java']
+    -> Class['cassandra_pfpt::install']
+    -> Class['cassandra_pfpt::ssl']
+    -> Class['cassandra_pfpt::config']
+    ~> Class['cassandra_pfpt::service']
+  } else {
+    Class['cassandra_pfpt::java']
+    -> Class['cassandra_pfpt::install']
+    -> Class['cassandra_pfpt::config']
+    ~> Class['cassandra_pfpt::service']
+  }
 }
-
-    

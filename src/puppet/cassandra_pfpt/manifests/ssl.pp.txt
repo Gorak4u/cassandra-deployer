@@ -1,0 +1,29 @@
+# @summary Manages self-signed SSL certificate and keystore generation.
+# @note This class depends on the custom types `ssl_certificate` and `java_ks`,
+#   which must be provided by external modules in your Puppet environment.
+class cassandra_pfpt::ssl inherits cassandra_pfpt {
+  if $ssl_enabled {
+    exec { 'create the certs dir':
+      command => "mkdir -p ${$target_dir}/etc",
+      path    => '/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin',
+      unless  => "test -d ${$target_dir}/etc",
+    }
+    # Custom type that generates cert/key files for the domain
+    # This likely creates keystore.pem and keystore.key
+    ssl_certificate { "${$target_dir}/etc/keystore":
+      domain  => $https_domain,
+      require => Exec['create the certs dir'],
+    }
+    # Java keystore creation: JKS from PEM + KEY
+    # This uses the generated .pem and .key files to create keystore.jks
+    java_ks { "host:${$keystore_path}":
+      ensure      => latest,
+      certificate => "${$target_dir}/etc/keystore.pem",
+      private_key => "${$target_dir}/etc/keystore.key",
+      password    => $keystore_password,
+      # This resource depends on the custom ssl_certificate type having
+      # successfully generated the PEM certificate and key.
+      require     => Ssl_certificate["${$target_dir}/etc/keystore"],
+    }
+  }
+}

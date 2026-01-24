@@ -114,16 +114,10 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     }
   }
   if $ssl_enabled {
-    # NOTE: SSL certificate management has been removed from this module.
-    # The keystore and truststore files are expected to be placed on the node
+    # NOTE: SSL certificate management is now handled by the cassandra_pfpt::ssl class.
+    # The truststore file is expected to be placed on the node
     # by an external process (e.g., another Puppet profile, AMI baking, etc.)
     # before this class is applied.
-    file { $keystore_path:
-      ensure => 'file',
-      owner  => 'root',
-      group  => 'root',
-      mode   => '0444',
-    }
     file { $truststore_path:
       ensure => 'file',
       owner  => 'root',
