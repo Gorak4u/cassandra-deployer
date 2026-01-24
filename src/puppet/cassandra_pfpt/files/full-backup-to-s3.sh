@@ -443,7 +443,7 @@ fi
 if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
     cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
 fi
-cqlsh_command_parts+=("-e" "DESCRIBE CLUSTER")
+cqlsh_command_parts+=("-e" "DESCRIBE SCHEMA")
 
 if ! "${cqlsh_command_parts[@]}" > "$SCHEMA_DUMP_FILE"; then
     log_warn "Failed to dump schema. The backup will be incomplete for schema-only restores."
