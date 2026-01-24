@@ -40,12 +40,6 @@ listen_interface: '<%= @listen_interface %>'
 <% if @broadcast_address -%>
 broadcast_address: '<%= @broadcast_address %>'
 <% end -%>
-<% if @rpc_interface -%>
-rpc_interface: '<%= @rpc_interface %>'
-<% end -%>
-<% if @broadcast_rpc_address -%>
-broadcast_rpc_address: '<%= @broadcast_rpc_address %>'
-<% end -%>
 <% if @native_transport_port -%>
 native_transport_port: <%= @native_transport_port %>
 <% end -%>
@@ -55,11 +49,18 @@ storage_port: <%= @storage_port %>
 <% if @ssl_storage_port -%>
 ssl_storage_port: <%= @ssl_storage_port %>
 <% end -%>
-
 <% if @start_native_transport -%>
 start_native_transport: <%= @start_native_transport %>
 <% end -%>
 
+<%# Thrift was removed in Cassandra 4.0. These settings are only for C* 3.x and older. -%>
+<% if @cassandra_major_version.to_i < 4 -%>
+<% if @rpc_interface -%>
+rpc_interface: '<%= @rpc_interface %>'
+<% end -%>
+<% if @broadcast_rpc_address -%>
+broadcast_rpc_address: '<%= @broadcast_rpc_address %>'
+<% end -%>
 <% if @start_rpc -%>
 start_rpc: <%= @start_rpc %>
 <% end -%>
@@ -71,6 +72,7 @@ rpc_keepalive: <%= @rpc_keepalive %>
 <% end -%>
 <% if @thrift_framed_transport_size_in_mb -%>
 thrift_framed_transport_size_in_mb: <%= @thrift_framed_transport_size_in_mb %>
+<% end -%>
 <% end -%>
 
 # Cassandra 4.x / 5.x+ specific settings
