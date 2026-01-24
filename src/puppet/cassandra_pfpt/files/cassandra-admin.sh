@@ -45,6 +45,7 @@ usage() {
     echo ""
     echo -e "${BLUE}--- Backup & Recovery ---${NC}"
     echo -e "  ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3."
+    echo -e "  ${GREEN}backup-status${NC}          Check the status of the last completed backup for a node."
     echo -e "  ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces."
     echo -e "  ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains. Run 'restore -- --help' for all options."
     echo ""
@@ -119,6 +120,9 @@ case "$COMMAND" in
         ;;
     backup)
         /usr/local/bin/full-backup-to-s3.sh "$@"
+        ;;
+    backup-status)
+        /usr/local/bin/backup-status.sh "$@"
         ;;
     snapshot)
         /usr/local/bin/take-snapshot.sh "$@"
