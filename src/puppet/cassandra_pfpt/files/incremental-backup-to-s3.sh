@@ -74,6 +74,7 @@ BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M')
 HOSTNAME=$(hostname -s)
 BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
+ERROR_DIR="$BACKUP_TEMP_DIR/errors"
 
 
 # --- AWS Credential Check Function ---
@@ -115,10 +116,16 @@ if [ -f "/var/lib/backup-disabled" ]; then
     exit 0
 fi
 
+# Check for incremental files first, so we don't run all the checks if there's nothing to do.
+INCREMENTAL_DIRS_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print | wc -l)
+if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
+    log_info "No new incremental backup files found. Nothing to do."
+    exit 0
+fi
+
 if ! check_aws_credentials; then
     exit 1
 fi
-
 
 if [ -f "$LOCK_FILE" ]; then
     log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
@@ -157,19 +164,11 @@ log_info "Backup Timestamp (Tag): $BACKUP_TAG"
 log_info "Streaming Mode: $UPLOAD_STREAMING"
 
 
-# Find all incremental backup directories that are not empty
-INCREMENTAL_DIRS_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print | wc -l)
-
-if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
-    log_info "No new incremental backup files found. Nothing to do."
-    exit 0
-fi
-
 # Create manifest and temp dir
 mkdir -p "$BACKUP_TEMP_DIR"
+mkdir -p "$ERROR_DIR"
 MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
 
-UPLOAD_ERRORS=0
 TABLES_BACKED_UP="[]"
 # Define system keyspaces to exclude, allowing system_auth to be backed up
 INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
@@ -230,7 +229,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
                 log_error "Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
                 log_warn "Local incremental files will not be deleted."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
             else
                 log_success "Successfully streamed incremental backup for $ks_name.$table_name"
                 TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
@@ -246,14 +245,14 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
             # Step 1: Archive and compress
             if ! nice -n 19 ionice -c 3 tar -C "$backup_dir" -czf "$local_tar_file" .; then
                 log_error "Failed to archive incremental backup for $ks_name.$table_name. Skipping."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
                 continue
             fi
 
             # Step 2: Encrypt
             if ! nice -n 19 ionice -c 3 openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
                 log_error "Failed to encrypt incremental backup for $ks_name.$table_name. Skipping."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
                 rm -f "$local_tar_file"
                 continue
             fi
@@ -267,7 +266,7 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
                 rm -f "$backup_dir"/*
             else
                 log_error "Failed to upload incremental backup for $ks_name.$table_name. Local files will not be deleted."
-                UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+                touch "$ERROR_DIR/$ks_name.$table_name"
             fi
 
             # Step 4: Cleanup local temp files
@@ -280,12 +279,12 @@ find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while I
     fi
 done
 
-if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_error "$UPLOAD_ERRORS incremental backup(s) failed to upload. The backup is incomplete."
-fi
-
 # Create and Upload Manifest
 log_info "Creating backup manifest at $MANIFEST_FILE..."
+
+TOTAL_TABLES_WITH_INCREMENTALS=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty | wc -l)
+UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l)
+TABLES_BACKED_UP_COUNT=$(echo "$TABLES_BACKED_UP" | jq 'length')
 
 CLUSTER_NAME=$(nodetool describecluster | grep 'Name:' | awk '{print $2}')
 
@@ -344,10 +343,18 @@ else
 fi
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-    log_error "--- Granular Incremental Backup Process Finished with ERRORS ---"
+    log_error "--- Granular Incremental Backup Process Finished with $UPLOAD_ERRORS ERRORS ---"
+    log_error "Summary: $TABLES_BACKED_UP_COUNT / $TOTAL_TABLES_WITH_INCREMENTALS tables with new data backed up successfully."
+    log_error "The following tables failed to back up:"
+    for f in "$ERROR_DIR"/*; do
+        log_error "  - $(basename "$f")"
+    done
     exit 1
 else
     log_success "--- Granular Incremental Backup Process Finished Successfully ---"
+    if [ "$TABLES_BACKED_UP_COUNT" -gt 0 ]; then
+        log_success "Summary: All $TABLES_BACKED_UP_COUNT tables with new data backed up successfully."
+    fi
 fi
 
 exit 0

@@ -397,9 +397,9 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
     xargs -0 -n 1 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
 log_info "--- Finished Parallel Backup of Tables ---"
 
-UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f | wc -l)
-TABLES_BACKED_UP_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
-TABLES_BACKED_UP_SUCCESS_COUNT=$((TABLES_BACKED_UP_COUNT - UPLOAD_ERRORS))
+TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
+UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l)
+TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
 
 
 # 4. Dump cluster schema
@@ -520,9 +520,15 @@ fi
 
 if [ "$UPLOAD_ERRORS" -gt 0 ]; then
     log_error "--- Granular Cassandra Backup Process Finished with $UPLOAD_ERRORS ERRORS ---"
+    log_error "Summary: $TABLES_BACKED_UP_SUCCESS_COUNT / $TOTAL_TABLES_ATTEMPTED tables backed up successfully."
+    log_error "The following tables failed to back up:"
+    for f in "$ERROR_DIR"/*; do
+        log_error "  - $(basename "$f")"
+    done
     exit 1
 else
     log_success "--- Granular Cassandra Backup Process Finished Successfully ---"
+    log_success "Summary: All $TOTAL_TABLES_ATTEMPTED tables backed up successfully."
 fi
 
 exit 0
