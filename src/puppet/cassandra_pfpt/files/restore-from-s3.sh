@@ -419,7 +419,8 @@ do_full_restore() {
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
+            table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
+            table_name=$(echo "$table_dir_name" | rev | cut -d"-" -f2- | rev)
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
@@ -526,7 +527,8 @@ do_granular_restore() {
 
             s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
             ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            table_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
+            table_dir_name=$(echo "$s3_path_no_host" | cut -d"/" -f2)
+            table_name=$(echo "$table_dir_name" | rev | cut -d"-" -f2- | rev)
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
