@@ -99,7 +99,7 @@ profile_cassandra_pfpt::repair_schedule: '*-*-1/5 01:00:00' # Every 5 days
 
 ### Managing Cassandra Schema via Hiera
 
-You can declaratively manage your entire Cassandra schema—users, keyspaces, and tables—via Hiera. For production environments, it is highly recommended to encrypt passwords using **Hiera-eyaml**.
+You can declaratively manage your entire Cassandra schema—users (roles), keyspaces, and tables—via Hiera. For production environments, it is highly recommended to encrypt passwords using **Hiera-eyaml**.
 
 ```yaml
 # In your Hiera data
