@@ -87,7 +87,7 @@ usage() {
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
-CASSANDRA_CONF_DIR=$(jq -r '.config_dir_path' "$CONFIG_FILE")
+CASSANDRA_CONF_DIR=$(jq -r '.cassandra_conf_dir' "$CONFIG_FILE")
 CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
 CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
@@ -99,7 +99,7 @@ BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 
 # Validate essential configuration
-if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ] || [ ! -d "$CASSANDRA_CONF_DIR" ]; then log_error "'config_dir_path' is not set or invalid in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_error "'cassandra_conf_dir' is not set or invalid in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_DATA_DIR" ] || [ "$CASSANDRA_DATA_DIR" == "null" ]; then log_error "'cassandra_data_dir' is not set in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_COMMITLOG_DIR" ] || [ "$CASSANDRA_COMMITLOG_DIR" == "null" ]; then log_error "'commitlog_dir' is not set in $CONFIG_FILE."; exit 1; fi
 if [ -z "$CASSANDRA_CACHES_DIR" ] || [ "$CASSANDRA_CACHES_DIR" == "null" ]; then log_error "'saved_caches_dir' is not set in $CONFIG_FILE."; exit 1; fi
