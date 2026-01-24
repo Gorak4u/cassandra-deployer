@@ -205,6 +205,15 @@ class profile_cassandra_pfpt {
   $jmx_exporter_config_source       = lookup('profile_cassandra_pfpt::jmx_exporter_config_source', { 'default_value' => 'puppet:///modules/cassandra_pfpt/jmx_exporter_config.yaml' })
   $jmx_exporter_config_target       = lookup('profile_cassandra_pfpt::jmx_exporter_config_target', { 'default_value' => '/etc/cassandra/conf/jmx_exporter_config.yaml' })
   $jmx_exporter_port                = lookup('profile_cassandra_pfpt::jmx_exporter_port', { 'default_value' => 9404 })
+  # Node Exporter
+  $manage_node_exporter             = lookup('profile_cassandra_pfpt::manage_node_exporter', { 'default_value' => false })
+  $node_exporter_version            = lookup('profile_cassandra_pfpt::node_exporter_version', { 'default_value' => '1.7.0' })
+  $node_exporter_download_url_base  = lookup('profile_cassandra_pfpt::node_exporter_download_url_base', { 'default_value' => 'https://github.com/prometheus/node_exporter/releases/download' })
+  $node_exporter_user               = lookup('profile_cassandra_pfpt::node_exporter_user', { 'default_value' => 'node_exporter' })
+  $node_exporter_group              = lookup('profile_cassandra_pfpt::node_exporter_group', { 'default_value' => 'node_exporter' })
+  $node_exporter_install_dir        = lookup('profile_cassandra_pfpt::node_exporter_install_dir', { 'default_value' => '/var/lib/node_exporter' })
+  $node_exporter_bin_dir            = lookup('profile_cassandra_pfpt::node_exporter_bin_dir', { 'default_value' => '/usr/local/bin' })
+
 
   # --- Stress Testing ---
   $manage_stress_test               = lookup('profile_cassandra_pfpt::manage_stress_test', { 'default_value' => false })
@@ -374,6 +383,13 @@ class profile_cassandra_pfpt {
     jmx_exporter_config_source       => $jmx_exporter_config_source,
     jmx_exporter_config_target       => $jmx_exporter_config_target,
     jmx_exporter_port                => $jmx_exporter_port,
+    manage_node_exporter             => $manage_node_exporter,
+    node_exporter_version            => $node_exporter_version,
+    node_exporter_download_url_base  => $node_exporter_download_url_base,
+    node_exporter_user               => $node_exporter_user,
+    node_exporter_group              => $node_exporter_group,
+    node_exporter_install_dir        => $node_exporter_install_dir,
+    node_exporter_bin_dir            => $node_exporter_bin_dir,
     # Stress Testing
     manage_stress_test               => $manage_stress_test,
   }

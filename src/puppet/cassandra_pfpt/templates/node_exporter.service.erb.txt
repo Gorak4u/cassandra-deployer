@@ -1,0 +1,16 @@
+# /etc/systemd/system/node_exporter.service
+# Managed by Puppet
+
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=<%= @node_exporter_user %>
+Group=<%= @node_exporter_group %>
+Type=simple
+ExecStart=<%= @node_exporter_bin_dir %>/node_exporter
+
+[Install]
+WantedBy=multi-user.target

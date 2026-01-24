@@ -145,6 +145,13 @@ class cassandra_pfpt (
   Optional[String] $repair_keyspace = undef,
   Sensitive[String] $backup_encryption_key,
   Boolean $manage_stress_test = false,
+  Boolean $manage_node_exporter = false,
+  String $node_exporter_version = '1.7.0',
+  String $node_exporter_download_url_base = 'https://github.com/prometheus/node_exporter/releases/download',
+  String $node_exporter_user = 'node_exporter',
+  String $node_exporter_group = 'node_exporter',
+  String $node_exporter_install_dir = '/var/lib/node_exporter',
+  String $node_exporter_bin_dir = '/usr/local/bin'
 ) {
   # Validate Java and Cassandra version compatibility
   $cassandra_major_version = split($cassandra_version, '[.-]')[0]
@@ -196,6 +203,9 @@ class cassandra_pfpt (
   contain cassandra_pfpt::system_keyspaces
   contain cassandra_pfpt::roles
 
+  if $manage_node_exporter {
+    contain cassandra_pfpt::node_exporter
+  }
   if $manage_jmx_exporter {
     contain cassandra_pfpt::jmx_exporter
   }

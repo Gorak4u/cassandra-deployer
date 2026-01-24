@@ -613,6 +613,15 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_parallelism` (Integer): The number of concurrent tables to process during backup or restore operations. Default: `4`.
 *   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/bin/stress-test.sh` wrapper script. Default: `false`.
 
+### Monitoring & Agent Integrations
+*   `profile_cassandra_pfpt::manage_node_exporter` (Boolean): Set to `true` to install and enable the Prometheus Node Exporter for system-level metrics. Default: `false`.
+*   `profile_cassandra_pfpt::node_exporter_version` (String): The version of Node Exporter to install. Default: `'1.7.0'`.
+*   `profile_cassandra_pfpt::manage_jmx_exporter` (Boolean): Set to `true` to enable the Prometheus JMX exporter for Cassandra-specific metrics. Default: `false`.
+*   `profile_cassandra_pfpt::jmx_exporter_port` (Integer): The port for the JMX exporter to listen on. Default: `9404`.
+*   `profile_cassandra_pfpt::manage_coralogix_agent` (Boolean): Set to `true` to install and configure the Coralogix agent. Default: `false`.
+*   `profile_cassandra_pfpt::coralogix_api_key` (Sensitive[String]): Your Coralogix private key. Required if `manage_coralogix_agent` is true. Default: `''`.
+*   `profile_cassandra_pfpt::coralogix_region` (String): Your Coralogix region (e.g., 'US', 'Europe'). Default: `'US'`.
+
 ---
 
 ## Puppet Agent Management

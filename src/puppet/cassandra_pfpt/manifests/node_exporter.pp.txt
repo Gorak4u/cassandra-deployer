@@ -1,0 +1,64 @@
+# @summary Manages the Prometheus Node Exporter.
+class cassandra_pfpt::node_exporter inherits cassandra_pfpt {
+  $archive_name = "node_exporter-${node_exporter_version}.linux-amd64.tar.gz"
+  $download_url = "${node_exporter_download_url_base}/v${node_exporter_version}/${archive_name}"
+  $extracted_dir = "/tmp/node_exporter-${node_exporter_version}.linux-amd64"
+
+  # Define the execution path for all exec resources in this class
+  Exec {
+    path => ['/usr/bin', '/bin', '/usr/sbin', '/sbin'],
+  }
+
+  group { $node_exporter_group:
+    ensure => present,
+    system => true,
+  } ->
+  user { $node_exporter_user:
+    ensure  => present,
+    system  => true,
+    gid     => $node_exporter_group,
+    shell   => '/bin/false',
+    home    => $node_exporter_install_dir,
+  } ->
+  exec { 'download-node-exporter':
+    command => "curl -fSL -o /tmp/${archive_name} ${download_url}",
+    creates => "/tmp/${archive_name}",
+    unless  => "test -f ${node_exporter_bin_dir}/node_exporter && ${node_exporter_bin_dir}/node_exporter --version 2>&1 | grep -q 'version ${node_exporter_version}'",
+  } ->
+  exec { 'extract-node-exporter':
+    command => "tar -xzf /tmp/${archive_name} -C /tmp/",
+    creates => $extracted_dir,
+    unless  => "test -f ${node_exporter_bin_dir}/node_exporter && ${node_exporter_bin_dir}/node_exporter --version 2>&1 | grep -q 'version ${node_exporter_version}'",
+  } ->
+  file { "${node_exporter_bin_dir}/node_exporter":
+    ensure  => file,
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0755',
+    source  => "${extracted_dir}/node_exporter",
+  } ->
+  file { '/etc/systemd/system/node_exporter.service':
+    ensure  => file,
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    content => template('cassandra_pfpt/node_exporter.service.erb'),
+    notify  => Exec['node_exporter-systemd-reload'],
+  } ->
+  exec { 'node_exporter-systemd-reload':
+    command     => 'systemctl daemon-reload',
+    refreshonly => true,
+  } ~>
+  service { 'node_exporter':
+    ensure  => running,
+    enable  => true,
+  } ->
+  exec { 'cleanup-node-exporter-archive':
+    command => "rm -f /tmp/${archive_name}",
+    onlyif  => "test -f /tmp/${archive_name}",
+  } ->
+  exec { 'cleanup-node-exporter-dir':
+    command => "rm -rf ${extracted_dir}",
+    onlyif  => "test -d ${extracted_dir}",
+  }
+}
