@@ -188,7 +188,15 @@ export async function pushToGit(data: {
 
     for (const file of allFiles) {
       const srcPath = path.join(puppetModulesDir, file);
-      const destPath = path.join(tempRepoDir, file);
+      
+      let destFile = file;
+      if (file.endsWith('.pp.txt')) {
+          destFile = file.replace(/\.pp\.txt$/, '.pp');
+      } else if (file.endsWith('.erb.txt')) {
+          destFile = file.replace(/\.erb\.txt$/, '.erb');
+      }
+
+      const destPath = path.join(tempRepoDir, destFile);
       await fs.mkdir(path.dirname(destPath), { recursive: true });
       await fs.copyFile(srcPath, destPath);
     }
@@ -223,8 +231,7 @@ export async function pushToGit(data: {
       remoteRef: 'refs/heads/main',
       force: true, // Force push to overwrite history, simpler for this use case
       onAuth: () => ({
-        username: 'x-access-token',
-        password: data.pat,
+        username: data.pat,
       }),
     });
 
