@@ -16,7 +16,7 @@ class cassandra_pfpt::ssl inherits cassandra_pfpt {
     }
     # Java keystore creation: JKS from PEM + KEY
     # This uses the generated .pem and .key files to create keystore.jks
-    java_ks { "host:${$keystore_path}":
+    java_ks { "host:${keystore_path}":
       ensure      => latest,
       certificate => "${$target_dir}/etc/keystore.pem",
       private_key => "${$target_dir}/etc/keystore.key",
