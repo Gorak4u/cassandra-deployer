@@ -1,4 +1,5 @@
 # @summary Handles package installation for Cassandra and dependencies.
+# This file is managed by Puppet.
 class cassandra_pfpt::install inherits cassandra_pfpt {
   user { $user:
     ensure     => 'present',
@@ -9,59 +10,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
     system => true,
   }
 
-  if $manage_repo {
-    case $facts['os']['family'] {
-      'RedHat': {
-        $os_release_major = regsubst($facts['os']['release']['full'], '^(\d+).*$', '\1')
-        yumrepo { 'cassandra':
-          descr               => "Apache Cassandra ${$cassandra_version} for EL${$os_release_major}",
-          baseurl             => $repo_baseurl,
-          enabled             => 1,
-          gpgcheck            => $repo_gpgcheck,
-          gpgkey              => $repo_gpgkey,
-          priority            => $repo_priority,
-          skip_if_unavailable => $repo_skip_if_unavailable,
-          sslverify           => $repo_sslverify,
-          require             => Group[$group],
-        }
-        $repo_require = Yumrepo['cassandra']
-      }
-      'Debian': {
-        package { ['apt-transport-https', 'ca-certificates', 'curl', 'gnupg']:
-          ensure => present,
-        } ->
-        exec { 'download-cassandra-repo-key':
-          command => "curl -fsSL ${repo_gpgkey} -o /tmp/cassandra_repo.key",
-          path    => ['/bin', '/usr/bin'],
-          creates => '/tmp/cassandra_repo.key',
-        } ->
-        exec { 'dearmor-cassandra-repo-key':
-            command => 'gpg --dearmor -o /usr/share/keyrings/cassandra-archive-keyring.gpg /tmp/cassandra_repo.key',
-            path    => ['/usr/bin', '/bin'],
-            creates => '/usr/share/keyrings/cassandra-archive-keyring.gpg',
-        } ->
-        file { '/etc/apt/sources.list.d/cassandra.list':
-          ensure  => 'file',
-          owner   => 'root',
-          group   => 'root',
-          mode    => '0644',
-          content => "deb [signed-by=/usr/share/keyrings/cassandra-archive-keyring.gpg] ${repo_baseurl} ${split($cassandra_version, '[.]')[0]}${split($cassandra_version, '[.]')[1]}x main",
-          notify  => Exec['cassandra_apt_update'],
-        } ~>
-        exec { 'cassandra_apt_update':
-          command     => 'apt-get update',
-          path        => ['/usr/bin', '/bin'],
-          refreshonly => true,
-        }
-        $repo_require = Exec['cassandra_apt_update']
-      }
-      default: {
-        fail("Unsupported OS family for repository management: ${facts['os']['family']}")
-      }
-    }
-  } else {
-    $repo_require = undef
-  }
+  contain 'cassandra_pfpt::repo'
 
   package { $package_dependencies:
     ensure  => 'present',
@@ -75,7 +24,7 @@ class cassandra_pfpt::install inherits cassandra_pfpt {
 
   package { 'cassandra':
     ensure  => $cassandra_ensure,
-    require => [ Class['cassandra_pfpt::java'], User[$user], $repo_require ],
+    require => [Class['cassandra_pfpt::java'], User[$user], Class['cassandra_pfpt::repo']],
     before  => Class['cassandra_pfpt::config'],
   }
   package { 'cassandra-tools':

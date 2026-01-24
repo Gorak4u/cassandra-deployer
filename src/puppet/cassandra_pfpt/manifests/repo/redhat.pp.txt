@@ -1,0 +1,15 @@
+# @summary Manages the Cassandra YUM repository for RedHat-based systems.
+# This file is managed by Puppet.
+class cassandra_pfpt::repo::redhat inherits cassandra_pfpt {
+  $os_release_major = regsubst($facts['os']['release']['full'], '^(\d+).*$', '\1')
+  yumrepo { 'cassandra':
+    descr               => "Apache Cassandra ${$cassandra_version} for EL${$os_release_major}",
+    baseurl             => $repo_baseurl,
+    enabled             => 1,
+    gpgcheck            => $repo_gpgcheck,
+    gpgkey              => $repo_gpgkey,
+    priority            => $repo_priority,
+    skip_if_unavailable => $repo_skip_if_unavailable,
+    sslverify           => $repo_sslverify,
+  }
+}

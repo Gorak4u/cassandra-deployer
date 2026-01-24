@@ -1,0 +1,30 @@
+# @summary Manages the Cassandra APT repository for Debian-based systems.
+# This file is managed by Puppet.
+class cassandra_pfpt::repo::debian inherits cassandra_pfpt {
+  package { ['apt-transport-https', 'ca-certificates', 'curl', 'gnupg']:
+    ensure => present,
+  } ->
+  exec { 'download-cassandra-repo-key':
+    command => "curl -fsSL ${repo_gpgkey} -o /tmp/cassandra_repo.key",
+    path    => ['/bin', '/usr/bin'],
+    creates => '/tmp/cassandra_repo.key',
+  } ->
+  exec { 'dearmor-cassandra-repo-key':
+      command => 'gpg --dearmor -o /usr/share/keyrings/cassandra-archive-keyring.gpg /tmp/cassandra_repo.key',
+      path    => ['/usr/bin', '/bin'],
+      creates => '/usr/share/keyrings/cassandra-archive-keyring.gpg',
+  } ->
+  file { '/etc/apt/sources.list.d/cassandra.list':
+    ensure  => 'file',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    content => "deb [signed-by=/usr/share/keyrings/cassandra-archive-keyring.gpg] ${repo_baseurl} ${split($cassandra_version, '[.]')[0]}${split($cassandra_version, '[.]')[1]}x main",
+    notify  => Exec['cassandra_apt_update'],
+  } ~>
+  exec { 'cassandra_apt_update':
+    command     => 'apt-get update',
+    path        => ['/usr/bin', '/bin'],
+    refreshonly => true,
+  }
+}

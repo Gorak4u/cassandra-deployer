@@ -1,0 +1,17 @@
+# @summary Dispatches repository configuration to OS-specific classes.
+# This file is managed by Puppet.
+class cassandra_pfpt::repo inherits cassandra_pfpt {
+  if $manage_repo {
+    case $facts['os']['family'] {
+      'RedHat': {
+        contain 'cassandra_pfpt::repo::redhat'
+      }
+      'Debian': {
+        contain 'cassandra_pfpt::repo::debian'
+      }
+      default: {
+        fail("Unsupported OS family for repository management: ${facts['os']['family']}")
+      }
+    }
+  }
+}
