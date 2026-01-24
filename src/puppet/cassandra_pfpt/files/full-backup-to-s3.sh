@@ -430,8 +430,8 @@ find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -
     xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
 log_info "--- Finished Parallel Backup of Tables ---"
 
-TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l)
-UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l)
+TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
+UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
 TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
 
 
@@ -564,5 +564,3 @@ else
 fi
 
 exit 0
-
-    
