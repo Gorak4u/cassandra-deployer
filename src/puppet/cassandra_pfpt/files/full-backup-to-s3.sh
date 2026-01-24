@@ -470,9 +470,8 @@ else
     NODE_IP="$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=$(nodetool status 2>/dev/null | grep "\b$NODE_IP\b" || echo "Unknown UNKNOWN $LISTEN_ADDRESS UNKNOWN UNKNOWN UNKNOWN")
-NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
-NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
+NODE_DC=$(nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+NODE_RACK=$(nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
 
 # Robust token gathering
 NODE_TOKENS_RAW=$(nodetool ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")

@@ -319,9 +319,8 @@ else
     NODE_IP="$(hostname -i)"
 fi
 
-NODE_STATUS_LINE=$(nodetool status | grep "\b$NODE_IP\b" || echo "Unknown UNKNOWN $LISTEN_ADDRESS UNKNOWN UNKNOWN UNKNOWN")
-NODE_DC=$(echo "$NODE_STATUS_LINE" | awk '{print $5}')
-NODE_RACK=$(echo "$NODE_STATUS_LINE" | awk '{print $6}')
+NODE_DC=$(nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+NODE_RACK=$(nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
 
 jq -n \
   --arg cluster_name "$CLUSTER_NAME" \
