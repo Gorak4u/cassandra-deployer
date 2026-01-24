@@ -1,4 +1,4 @@
-# @summary Manages scheduled backups for Cassandra using a DIY script.
+# @summary Manages scheduled backups for Cassandra using systemd timers.
 class cassandra_pfpt::backup inherits cassandra_pfpt {
   # This class is responsible for scheduling the execution of the backup scripts.
 
@@ -22,38 +22,133 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
     }
   }
 
+  # Common daemon-reload exec for all backup timers/services
+  exec { 'cassandra-backup-systemd-reload':
+    command     => 'systemctl daemon-reload',
+    path        => ['/bin', '/usr/bin'],
+    refreshonly => true,
+  }
+
   if $manage_full_backups {
-    # Translate systemd-style schedule words to cron-style
-    $full_schedule = $full_backup_schedule ? {
-      'daily'   => '@daily',
-      'weekly'  => '@weekly',
-      'monthly' => '@monthly',
-      'yearly'  => '@yearly',
-      default   => $full_backup_schedule, # Assume it's already a valid cron string
-    }
-    file { '/etc/cron.d/cassandra-full-backup':
+    $full_service_content = @("FULL_SERVICE"/L)
+# This file is managed by Puppet. Do not edit manually.
+# /etc/systemd/system/cassandra-full-backup.service
+[Unit]
+Description=Cassandra Full Backup Service
+Wants=network-online.target
+After=network-online.target cassandra.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=<%= @full_backup_script_path %>
+| FULL_SERVICE
+
+    $full_timer_content = @("FULL_TIMER"/L)
+# This file is managed by Puppet. Do not edit manually.
+# /etc/systemd/system/cassandra-full-backup.timer
+[Unit]
+Description=Timer to schedule Cassandra full backups
+
+[Timer]
+OnCalendar=<%= @full_backup_schedule %>
+Persistent=true
+Unit=cassandra-full-backup.service
+
+[Install]
+WantedBy=timers.target
+| FULL_TIMER
+
+    # Systemd service unit for full backup
+    file { '/etc/systemd/system/cassandra-full-backup.service':
       ensure  => 'file',
       owner   => 'root',
       group   => 'root',
       mode    => '0644',
-      content => "${full_schedule} root ${full_backup_script_path}\n",
+      content => inline_template($full_service_content),
+      notify  => Exec['cassandra-backup-systemd-reload'],
+      require => File[$full_backup_script_path],
+    }
+
+    # Systemd timer unit for full backup
+    file { '/etc/systemd/system/cassandra-full-backup.timer':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => inline_template($full_timer_content),
+      notify  => Service['cassandra-full-backup.timer'],
+    }
+
+    service { 'cassandra-full-backup.timer':
+      ensure  => 'running',
+      enable  => true,
       require => [
-        File['/etc/backup/config.json'],
-        File[$full_backup_script_path],
+        File['/etc/systemd/system/cassandra-full-backup.service'],
+        File['/etc/systemd/system/cassandra-full-backup.timer'],
       ],
     }
   }
 
   if $manage_incremental_backups {
-    file { '/etc/cron.d/cassandra-incremental-backup':
+    $inc_service_content = @("INC_SERVICE"/L)
+# This file is managed by Puppet. Do not edit manually.
+# /etc/systemd/system/cassandra-incremental-backup.service
+[Unit]
+Description=Cassandra Incremental Backup Service
+Wants=network-online.target
+After=network-online.target cassandra.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=<%= @incremental_backup_script_path %>
+| INC_SERVICE
+
+    $inc_timer_content = @("INC_TIMER"/L)
+# This file is managed by Puppet. Do not edit manually.
+# /etc/systemd/system/cassandra-incremental-backup.timer
+[Unit]
+Description=Timer to schedule Cassandra incremental backups
+
+[Timer]
+OnCalendar=<%= @incremental_backup_schedule %>
+Persistent=true
+Unit=cassandra-incremental-backup.service
+
+[Install]
+WantedBy=timers.target
+| INC_TIMER
+
+    # Systemd service unit for incremental backup
+    file { '/etc/systemd/system/cassandra-incremental-backup.service':
       ensure  => 'file',
       owner   => 'root',
       group   => 'root',
       mode    => '0644',
-      content => "${incremental_backup_schedule} root ${incremental_backup_script_path}\n",
+      content => inline_template($inc_service_content),
+      notify  => Exec['cassandra-backup-systemd-reload'],
+      require => File[$incremental_backup_script_path],
+    }
+
+    # Systemd timer unit for incremental backup
+    file { '/etc/systemd/system/cassandra-incremental-backup.timer':
+      ensure  => 'file',
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      content => inline_template($inc_timer_content),
+      notify  => Service['cassandra-incremental-backup.timer'],
+    }
+
+    service { 'cassandra-incremental-backup.timer':
+      ensure  => 'running',
+      enable  => true,
       require => [
-        File['/etc/backup/config.json'],
-        File[$incremental_backup_script_path],
+        File['/etc/systemd/system/cassandra-incremental-backup.service'],
+        File['/etc/systemd/system/cassandra-incremental-backup.timer'],
       ],
     }
   }

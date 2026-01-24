@@ -84,9 +84,9 @@ profile_cassandra_pfpt::jvm_additional_opts:
 # --- Backup Configuration ---
 profile_cassandra_pfpt::backup_encryption_key: 'Your-Super-Secret-32-Character-Key' # IMPORTANT: Use Hiera-eyaml for this in production
 profile_cassandra_pfpt::manage_full_backups: true
-profile_cassandra_pfpt::full_backup_schedule: 'daily' # systemd timer spec
+profile_cassandra_pfpt::full_backup_schedule: '*-*-* 02:00:00' # systemd timer spec
 profile_cassandra_pfpt::manage_incremental_backups: true
-profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # cron spec
+profile_cassandra_pfpt::incremental_backup_schedule: '*-*-* 0/4:00:00' # systemd timer spec
 profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 profile_cassandra_pfpt::clearsnapshot_keep_days: 7
 profile_cassandra_pfpt::s3_retention_period: 30 # Keep backups in S3 for 30 days
@@ -291,12 +291,12 @@ sudo /usr/local/bin/cassandra-admin cleanup
 
 ### Automated Backups
 
-This profile provides a fully automated, S3-based backup solution using `cron`.
+This profile provides a fully automated, S3-based backup solution using `systemd` timers.
 
 #### How It Works
 1.  **Granular Backups:** Backups are no longer single, large archives. Instead, each table (for full backups) or set of incremental changes is archived and uploaded as a small, separate file to S3.
-2.  **Scheduling:** Puppet creates `cron` job files in `/etc/cron.d/` on each node.
-3.  **Execution:** `cron` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`).
+2.  **Scheduling:** Puppet creates `systemd` service and timer units on each node (e.g., `cassandra-full-backup.timer`).
+3.  **Execution:** `systemd` automatically triggers the backup scripts (`full-backup-to-s3.sh`, `incremental-backup-to-s3.sh`) based on the `OnCalendar` schedule.
 4.  **Process:** The scripts generate a `backup_manifest.json` with critical metadata for each backup run (identified by a `YYYY-MM-DD-HH-MM` timestamp), encrypt the archives, and upload them to a structured path in S3.
 5.  **Local Snapshot Cleanup:** The full backup script automatically deletes local snapshots older than `clearsnapshot_keep_days`.
 6.  **S3 Lifecycle Management:** The full backup script also ensures an S3 lifecycle policy is in place on the bucket to automatically delete old backups after the `s3_retention_period`.
@@ -525,10 +525,10 @@ This module uses the native capabilities of `systemd` to ensure the Cassandra se
 
 ### Monitoring Backups and Alerting
 
-A backup that fails silently is not a backup. The automated backup jobs run via `cron`. You must monitor their status.
+A backup that fails silently is not a backup. The automated backup jobs run via `systemd` timers. You must monitor their status.
 
 *   **Manual Checks:**
-    *   Check the cron log file (typically `/var/log/cron` or `/var/log/syslog` depending on your OS) for entries related to `cassandra-full-backup` and `cassandra-incremental-backup`.
+    *   Check the journal for the timer units: `journalctl -u cassandra-full-backup.service` and `journalctl -u cassandra-incremental-backup.service`.
     *   Check the dedicated backup logs: `/var/log/cassandra/full_backup.log` and `/var/log/cassandra/incremental_backup.log`.
 
 *   **Automated Alerting (Recommended):**
@@ -630,6 +630,8 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::repair_keyspace` (String): If set, the automated repair job will only repair this specific keyspace. If unset, it repairs all non-system keyspaces. Default: `undef`.
 *   `profile_cassandra_pfpt::manage_full_backups` (Boolean): Enables the scheduled full backup script. Default: `false`.
 *   `profile_cassandra_pfpt::manage_incremental_backups` (Boolean): Enables the scheduled incremental backup script. Default: `false`.
+*   `profile_cassandra_pfpt::full_backup_schedule` (String): The `systemd` OnCalendar schedule for the automated full backup job. Default: `'*-*-* 02:00:00'` (Daily at 2am).
+*   `profile_cassandra_pfpt::incremental_backup_schedule` (String): The `systemd` OnCalendar schedule for the automated incremental backup job. Default: `'*-*-* 0/4:00:00'` (Every 4 hours).
 *   `profile_cassandra_pfpt::backup_encryption_key` (Sensitive[String]): The secret key used to encrypt all backup archives. **WARNING:** This has an insecure default value to prevent Puppet runs from failing. You **MUST** override this with a strong, unique secret in your production Hiera data. Default: `'MustBeChanged-ChangeMe-ChangeMe!!'`.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Defaults to a sanitized version of the cluster name.
