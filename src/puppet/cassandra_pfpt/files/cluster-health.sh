@@ -88,7 +88,9 @@ run_checks() {
             echo "The following nodes are not Up/Normal:"
             echo "$NON_UN_NODES"
         fi
-        FAILURE_REASON="One or more nodes are not Up/Normal"
+        local first_bad_node_info
+        first_bad_node_info=$(echo "$NON_UN_NODES" | head -n 1 | awk '{print $2 " is " $1}')
+        FAILURE_REASON="One or more nodes are not Up/Normal (e.g., $first_bad_node_info)"
         return 1
     else
         log_message "${GREEN}Nodetool status: OK - All nodes are Up/Normal.${NC}"
