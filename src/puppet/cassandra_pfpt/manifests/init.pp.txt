@@ -176,15 +176,16 @@ class cassandra_pfpt (
   }
 
   # Calculate default JVM args based on GC type and Java version
-  $default_jvm_args_hash = if $gc_type == 'G1GC' and versioncmp($java_version, '14') < 0 {
+  $default_jvm_args_hash = if $gc_type == 'G1GC' {
+    # Modern G1GC defaults for Java 8+
     {
-      'G1HeapRegionSize'             => '-XX:G1HeapRegionSize=16M',
       'MaxGCPauseMillis'             => '-XX:MaxGCPauseMillis=500',
-      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=75',
+      'InitiatingHeapOccupancyPercent' => '-XX:InitiatingHeapOccupancyPercent=70',
       'ParallelRefProcEnabled'       => '-XX:+ParallelRefProcEnabled',
-      'AggressiveOpts'               => '-XX:+AggressiveOpts',
+      'PerfDisableSharedMem'         => '-XX:+PerfDisableSharedMem',
     }
   } elsif $gc_type == 'CMS' and versioncmp($java_version, '14') < 0 {
+    # CMS is deprecated and removed in Java 14. This only applies to older Java versions.
     {
       'UseConcMarkSweepGC'          => '-XX:+UseConcMarkSweepGC',
       'CMSParallelRemarkEnabled'    => '-XX:+CMSParallelRemarkEnabled',
