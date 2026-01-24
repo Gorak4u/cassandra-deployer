@@ -62,7 +62,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     group  => 'root',
     mode   => '0755',
   }
-  [ 'cassandra-upgrade-precheck.sh', 'cluster-health.sh',
+  [ 'cluster-health.sh',
     'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
     'full-backup-to-s3.sh', 'incremental-backup-to-s3.sh', 'prepare-replacement.sh', 'version-check.sh',

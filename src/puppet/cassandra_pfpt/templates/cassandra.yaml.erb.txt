@@ -58,15 +58,14 @@ ssl_storage_port: <%= @ssl_storage_port %>
 <% if @start_native_transport -%>
 start_native_transport: <%= @start_native_transport %>
 <% end -%>
-<% if @cassandra_version.start_with?('3.') %>
-start_rpc: true
-rpc_port: 9160
-rpc_keepalive: true
-thrift_framed_transport_size_in_mb: 15
-<% else %>
-# Cassandra 4.x / 5.x specific settings
-enable_transient_replication: false
-<% end %>
+
+# The Thrift RPC service was removed in Cassandra 4.0 and is not available in later versions.
+# start_rpc: false
+
+# Cassandra 4.x / 5.x+ specific settings
+<% if @enable_transient_replication -%>
+enable_transient_replication: <%= @enable_transient_replication %>
+<% end -%>
 
 <% if @dynamic_snitch -%>
 dynamic_snitch: <%= @dynamic_snitch %>
@@ -148,9 +147,6 @@ compaction_throughput_mb_per_sec: <%= @compaction_throughput_mb_per_sec %>
 <% end -%>
 <% if @concurrent_compactors -%>
 concurrent_compactors: <%= @concurrent_compactors %>
-<% end -%>
-<% if @enable_transient_replication -%>
-enable_transient_replication: <%= @enable_transient_replication %>
 <% end -%>
 <% if defined?(@enable_materialized_views) -%>
 enable_materialized_views: <%= @enable_materialized_views ? 'true' : 'false' %>
