@@ -44,10 +44,9 @@ usage() {
     echo -e "  ${GREEN}upgrade-sstables${NC} [opts] Run 'nodetool upgradesstables' with safety checks. Use 'upgrade-sstables -- --help' for options."
     echo ""
     echo -e "${BLUE}--- Backup & Recovery ---${NC}"
-    echo -e "  ${GREEN}list-backups${NC} [-s <host>] List available backups in S3. Optionally filter by host."
     echo -e "  ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3."
     echo -e "  ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces."
-    echo -e "  ${GREEN}restore${NC} [opts]          Restore data from S3 backups. This is a complex command; run 'restore -- --help' for its usage."
+    echo -e "  ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains. Run 'restore -- --help' for all options."
     echo ""
     echo -e "${BLUE}--- Advanced & Destructive Operations (Use with caution!) ---${NC}"
     echo -e "  ${GREEN}assassinate${NC} <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring."
@@ -117,9 +116,6 @@ case "$COMMAND" in
         ;;
     upgrade-sstables)
         /usr/local/bin/upgrade-sstables.sh "$@"
-        ;;
-    list-backups)
-        /usr/local/bin/list-backups.sh "$@"
         ;;
     backup)
         /usr/local/bin/full-backup-to-s3.sh "$@"

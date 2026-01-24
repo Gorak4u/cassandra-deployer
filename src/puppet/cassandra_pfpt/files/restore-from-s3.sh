@@ -10,6 +10,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # --- Configuration & Input ---
@@ -61,26 +62,24 @@ TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
 # --- Usage ---
 usage() {
-    log_message "${YELLOW}Usage: $0 --date <timestamp> [options]${NC}"
-    log_message ""
-    log_message "Required:"
-    log_message "  --date <timestamp>                   Target UTC timestamp for recovery in 'YYYY-MM-DD-HH-MM' format."
+    log_message "${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}"
     log_message ""
     log_message "Modes (choose one):"
-    log_message "  --full-restore                       Performs a full, destructive restore of the entire node."
-    log_message "  --keyspace <ks> [--table <table>]    Targets a specific keyspace or table for a granular restore (requires an action)."
-    log_message "  --schema-only                        Downloads only the schema definition (schema.cql) from the latest full backup."
+    log_message "  --list-backups                List all available backup sets for a host."
+    log_message "  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date."
+    log_message "  --full-restore                Performs a full, destructive restore of the entire node."
+    log_message "  --keyspace <ks> [...]         Targets a specific keyspace or table for a granular restore (requires an action)."
+    log_message "  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup."
     log_message ""
-    log_message "Actions for Granular Restore (required if --keyspace is used):"
-    log_message "  --download-only                      Download and decrypt data to a derived path inside /var/lib/cassandra."
-    log_message "  --download-and-restore             Download data and load it into the cluster via sstableloader."
-    log_message ""
-    log_message "Restore Source Options (optional):"
-    log_message "  --s3-bucket <name>                   Override the S3 bucket from config.json."
-    log_message "  --source-host <hostname>             Restore from a backup of a different host. Defaults to the current hostname."
-    log_message ""
-    log_message "Automation:"
-    log_message "  --yes                                Skips all interactive confirmation prompts. Use with caution."
+    log_message "Options:"
+    log_message "  --date <timestamp>            Required for --show-restore-chain and restore actions. Target UTC timestamp ('YYYY-MM-DD-HH-MM')."
+    log_message "  --source-host <hostname>      For --list-backups or restore actions. Defaults to the current hostname."
+    log_message "  --keyspace <ks>               For granular restore: the keyspace to restore."
+    log_message "  --table <table>               For granular restore: the table to restore."
+    log_message "  --download-only               Action for granular restore: Download data but do not load it."
+    log_message "  --download-and-restore        Action for granular restore: Download and load data via sstableloader."
+    log_message "  --s3-bucket <name>            Override the S3 bucket from config.json."
+    log_message "  --yes                         Skips all interactive confirmation prompts. Use with caution."
     exit 1
 }
 
@@ -123,7 +122,7 @@ fi
 TARGET_DATE=""
 KEYSPACE_NAME=""
 TABLE_NAME=""
-MODE="" # Will be set to 'granular' or 'full'
+MODE="" # Will be set to 'granular', 'full', 'list', 'chain'
 RESTORE_ACTION="" # For granular: 'download_only' or 'download_and_restore'
 AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
@@ -144,6 +143,8 @@ while [[ "$#" -gt 0 ]]; do
         --download-only) RESTORE_ACTION="download_only" ;;
         --download-and-restore) RESTORE_ACTION="download_and_restore" ;;
         --schema-only) MODE="schema_only" ;;
+        --list-backups) MODE="list";;
+        --show-restore-chain) MODE="chain";;
         --yes) AUTO_APPROVE=true ;;
         *) log_error "Unknown parameter passed: $1"; usage ;;
     esac
@@ -151,8 +152,13 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Validate arguments
-if [ -z "$TARGET_DATE" ]; then
-    log_error "--date is a required argument."
+if [ -z "$MODE" ]; then
+    log_error "No mode specified. You must choose one of: --list-backups, --show-restore-chain, --full-restore, --keyspace, --schema-only"
+    usage
+fi
+
+if [[ "$MODE" == "chain" || "$MODE" == "full" || "$MODE" == "granular" || "$MODE" == "schema_only" ]] && [ -z "$TARGET_DATE" ]; then
+    log_error "--date is required for this mode."
     usage
 fi
 
@@ -646,6 +652,54 @@ do_schema_only_restore() {
     log_info "3. Once the schema is applied, you can proceed with the data restore."
 }
 
+do_list_backups() {
+    log_info "--- Listing Available Backups for Host: $EFFECTIVE_SOURCE_HOST ---"
+    
+    local all_backups
+    all_backups=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | awk '{print $2}' | sed 's/\///' || echo "")
+
+    if [ -z "$all_backups" ]; then
+        log_warn "No backups found for host '$EFFECTIVE_SOURCE_HOST' in bucket '$EFFECTIVE_S3_BUCKET'."
+        return 0
+    fi
+    
+    echo ""
+    echo -e "${BOLD}${GREEN}Host: ${EFFECTIVE_SOURCE_HOST}${NC}"
+    echo -e "${YELLOW}----------------------------${NC}"
+
+    local backups_by_type=()
+    while IFS= read -r backup_ts; do
+        manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null || echo "{}")
+        backup_type=$(echo "$manifest" | jq -r '.backup_type // "unknown"')
+        
+        type_color=$NC
+        if [ "$backup_type" == "full" ]; then
+            type_color='\033[0;36m' # Cyan
+        elif [ "$backup_type" == "incremental" ]; then
+            type_color='\033[0;34m' # Blue
+        fi
+        
+        backups_by_type+=("  - ${BOLD}$backup_ts${NC} (type: ${type_color}${backup_type}${NC})")
+    done <<< "$all_backups"
+
+    # Print sorted list
+    printf "%s\n" "${backups_by_type[@]}" | sort -k2
+    echo ""
+}
+
+do_show_restore_chain() {
+    find_backup_chain
+    log_success "--- Restore Chain Analysis Complete ---"
+    log_info "For a restore to point-in-time '$TARGET_DATE', the following backups would be used:"
+    log_info "Base Full Backup: ${GREEN}$BASE_FULL_BACKUP${NC}"
+    echo ""
+    log_info "Restore Chain (in chronological order):"
+    printf "  - %s\n" "${CHAIN_TO_RESTORE[@]}"
+    echo ""
+    log_info "To proceed with a restore using this chain, re-run the command with the desired restore action (e.g., --full-restore)."
+}
+
+
 # --- Main Execution ---
 
 log_info "--- Starting Point-in-Time Restore Manager ---"
@@ -657,6 +711,18 @@ if [ "$BACKUP_BACKEND" != "s3" ]; then
     log_error "This restore script only supports the 's3' backup backend."
     exit 1
 fi
+
+case $MODE in
+    "list")
+        do_list_backups
+        exit 0
+        ;;
+    "chain")
+        do_show_restore_chain
+        exit 0
+        ;;
+esac
+
 
 find_backup_chain
 
@@ -685,7 +751,7 @@ case $MODE in
         do_schema_only_restore
         ;;
     *)
-        log_error "INTERNAL ERROR: Invalid mode detected or no mode specified."
+        log_error "INTERNAL ERROR: Invalid mode detected."
         usage
         exit 1
         ;;
