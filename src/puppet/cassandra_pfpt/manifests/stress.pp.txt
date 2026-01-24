@@ -4,10 +4,8 @@ class cassandra_pfpt::stress (
   Sensitive[String] $password,
   Boolean $ssl_enabled,
 ) {
-  # Ensure the cassandra-tools package is installed
-  package { 'cassandra-tools':
-    ensure => present,
-  }
+  # The cassandra-tools package is managed by the cassandra_pfpt::install class.
+  # We just need to ensure our resources depend on it.
 
   # Create a secure configuration file for the stress test wrapper script
   file { '/etc/cassandra/conf/stress.conf':
