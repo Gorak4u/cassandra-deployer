@@ -71,6 +71,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh',
     'stress-test.sh', 'stop-node.sh', 'reboot-node.sh', 'cassandra-manual.sh', 'cassandra-upgrade-precheck.sh', 'cassandra_facts.sh',
+    'cass-ops',
    ].each |$script| {
     file { "${$manage_bin_dir}/${$script}":
       ensure  => 'file',
@@ -80,16 +81,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       mode    => '0755',
       require => File[$manage_bin_dir],
     }
-  }
-
-  # cass-ops is handled separately to remove the .txt extension
-  file { "${manage_bin_dir}/cass-ops":
-    ensure  => 'file',
-    source  => 'puppet:///modules/cassandra_pfpt/cass-ops.txt',
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0755',
-    require => File[$manage_bin_dir],
   }
 
   # Deploy documentation

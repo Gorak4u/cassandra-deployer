@@ -12,70 +12,69 @@ NC='\033[0m' # No Color
 
 # --- Help Function ---
 usage() {
-    # Using a here document with `column` for clean, aligned output.
-    (
-    echo -e "${BOLD}Unified operations script for Cassandra.${NC}"
-    echo ""
-    echo -e "${YELLOW}Usage:${NC}"
-    echo -e "  cass-ops <command> [arguments...]"
-    echo ""
-    echo -e "${YELLOW}Available Commands:${NC}"
-    echo ""
-    # Format: "command\tDescription"
-    # The `column` command will auto-align the columns.
-    echo -e "${GREEN}Documentation${NC}"
-    echo -e "  manual\tDisplay the full operations manual in the terminal."
-    echo -e "  backup-guide\tDisplay the full backup and recovery guide."
-    echo -e "  puppet-guide\tDisplay the Puppet architecture guide."
+    cat << EOF
+${BOLD}Cassandra Operations Master Script${NC}
 
-    echo -e "${GREEN}Node & Cluster Status${NC}"
-    echo -e "  health\tRun a comprehensive health check on the local node."
-    echo -e "  cluster-health\tQuickly check cluster connectivity and nodetool status."
-    echo -e "  disk-health\tCheck disk usage against warning/critical thresholds."
-    echo -e "  version\tAudit and print versions of key software (OS, Java, Cassandra)."
-    echo -e "  upgrade-check\tRun pre-flight checks before a major version upgrade."
+A unified wrapper for managing common Cassandra operational tasks on this node.
 
-    echo -e "${GREEN}Node Lifecycle & Maintenance${NC}"
-    echo -e "  stop\tSafely drain and stop the Cassandra service."
-    echo -e "  restart\tPerform a safe, rolling restart of the Cassandra service."
-    echo -e "  reboot\tSafely drain Cassandra and reboot the machine."
-    echo -e "  drain\tDrain the node, flushing memtables and stopping client traffic."
-    echo -e "  decommission\tPermanently remove this node from the cluster after streaming its data."
-    echo -e "  replace\tConfigure this NEW, STOPPED node to replace a dead node."
-    echo -e "  rebuild\tRebuild the data on this node by streaming from another datacenter."
+${YELLOW}Usage: $0 <command> [arguments...]${NC}
 
-    echo -e "${GREEN}Data Management & Repair${NC}"
-    echo -e "  repair\tRun a safe, granular repair on the node's token ranges. Can target a specific keyspace."
-    echo -e "  cleanup\tRun 'nodetool cleanup' with safety checks."
-    echo -e "  compact\tRun 'nodetool compact' with safety checks."
-    echo -e "  garbage-collect\tRun 'nodetool garbagecollect' with safety checks."
-    echo -e "  upgrade-sstables\tRun 'nodetool upgradesstables' with safety checks."
+${BLUE}COMMANDS:${NC}
 
-    echo -e "${GREEN}Backup & Recovery${NC}"
-    echo -e "  backup\tManually trigger a full, node-local backup to S3."
-    echo -e "  incremental-backup\tManually trigger an incremental backup to S3."
-    echo -e "  backup-status\tCheck the status of the last completed backup for a node."
-    echo -e "  snapshot\tTake an ad-hoc snapshot with a generated tag."
-    echo -e "  restore\tRestore data from S3, list backups, or show restore chains."
+  ${BOLD}STATUS & HEALTH CHECKS${NC}
+    ${GREEN}health${NC}                 Run a comprehensive health check on the local node.
+    ${GREEN}cluster-health${NC}          Quickly check cluster connectivity and nodetool status.
+    ${GREEN}disk-health${NC}             Check disk usage against warning/critical thresholds.
+    ${GREEN}version${NC}                 Audit and print versions of key software (OS, Java, Cassandra).
+    ${GREEN}upgrade-check${NC}          Run pre-flight checks before a major version upgrade.
 
-    echo -e "${GREEN}Advanced & Destructive Operations${NC}"
-    echo -e "  assassinate\tForcibly remove a dead node from the cluster's gossip ring."
+  ${BOLD}NODE LIFECYCLE & MAINTENANCE${NC}
+    ${GREEN}stop${NC}                   Safely drain and stop the Cassandra service.
+    ${GREEN}restart${NC}                Perform a safe, rolling restart of the Cassandra service.
+    ${GREEN}reboot${NC}                 Safely drain Cassandra and reboot the machine.
+    ${GREEN}drain${NC}                  Drain the node, flushing memtables and stopping client traffic.
+    ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data.
+    ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node.
+    ${GREEN}rebuild${NC} <source_dc>     Rebuild the data on this node by streaming from another datacenter.
 
-    echo -e "${GREEN}Performance Testing${NC}"
-    echo -e "  stress\tRun 'cassandra-stress' via a robust wrapper."
+  ${BOLD}DATA MANAGEMENT & REPAIR${NC}
+    ${GREEN}repair${NC} [<keyspace>]     Run a safe, granular repair on the node's token ranges. Can target a specific keyspace.
+    ${GREEN}cleanup${NC} [opts]          Run 'nodetool cleanup' with safety checks.
+    ${GREEN}compact${NC} [opts]          Run 'nodetool compact' with safety checks.
+    ${GREEN}garbage-collect${NC} [opts]  Run 'nodetool garbagecollect' with safety checks.
+    ${GREEN}upgrade-sstables${NC} [opts] Run 'nodetool upgradesstables' with safety checks.
 
-    ) | column -s -t | less -R
+  ${BOLD}BACKUP & RECOVERY${NC}
+    ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3.
+    ${GREEN}incremental-backup${NC}      Manually trigger an incremental backup to S3.
+    ${GREEN}backup-status${NC}          Check the status of the last completed backup for a node.
+    ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag.
+    ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains.
 
-    exit 0
+  ${BOLD}DOCUMENTATION${NC}
+    ${GREEN}manual${NC}                 Display the full operations manual in the terminal.
+    ${GREEN}backup-guide${NC}           Display the full backup and recovery guide.
+    ${GREEN}puppet-guide${NC}           Display the Puppet architecture guide.
+
+  ${BOLD}ADVANCED & DESTRUCTIVE (USE WITH CAUTION!)${NC}
+    ${GREEN}assassinate${NC} <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring.
+
+  ${BOLD}PERFORMANCE TESTING${NC}
+    ${GREEN}stress${NC} [opts]            Run 'cassandra-stress' via a robust wrapper.
+
+  ${BOLD}HELP${NC}
+    ${GREEN}-h, --help${NC}              Show this help message.
+
+EOF
+    exit 1
 }
-
 
 if [ "$#" -eq 0 ]; then
     usage
 fi
 
 COMMAND="$1"
-shift # Remove the command from the argument list, the rest are for the subcommand
+shift # Remove the command from the argument list
 
 # The main dispatcher
 case "$COMMAND" in
@@ -155,20 +154,17 @@ case "$COMMAND" in
         /usr/local/bin/cassandra-manual.sh "$@"
         ;;
     backup-guide)
-        PAGER="less -R" man /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md
+        less -R /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md
         ;;
     puppet-guide)
-        PAGER="less -R" man /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md
+        less -R /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md
         ;;
-    help|-h|--help)
+    help|--help|-h)
         usage
         ;;
     *)
-        echo -e "${RED}Error: Unknown command '$COMMAND'${NC}" >&2
-        echo "" >&2
-        # A lightweight usage message for errors
-        echo -e "${YELLOW}Usage:${NC} cass-ops <command>" >&2
-        echo -e "Run 'cass-ops --help' for a list of available commands." >&2
-        exit 1
+        echo -e "${RED}Error: Unknown command '$COMMAND'${NC}"
+        echo ""
+        usage
         ;;
 esac
