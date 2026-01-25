@@ -42,18 +42,18 @@ rules:
   type: COUNTER
 
 # Client Request Latency (Read/Write)
-- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>(\w+)"
+- pattern: 'org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>(\w+)'
   name: "cassandra_client_request_latency_seconds"
   labels:
     "request_type": "$1"
     "quantile": "0.$2"
   valueFactor: 0.000001 # Convert microseconds to seconds for 50th, 95th, 99th, etc.
-- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>Count"
+- pattern: 'org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=Latency><>Count'
   name: "cassandra_client_request_latency_count"
   labels:
     "request_type": "$1"
   type: COUNTER
-- pattern: "org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=TotalLatency><>Count"
+- pattern: 'org.apache.cassandra.metrics<type=ClientRequest, scope=(\w+), name=TotalLatency><>Count'
   name: "cassandra_client_request_total_latency_seconds"
   labels:
     "request_type": "$1"
@@ -61,13 +61,13 @@ rules:
   valueFactor: 0.000001
 
 # JVM Memory
-- pattern: "java.lang<type=Memory><HeapMemoryUsage>(\w+)"
+- pattern: 'java.lang<type=Memory><HeapMemoryUsage>(\w+)'
   name: "cassandra_jvm_memory_heap_usage"
   labels:
     "area": "Heap"
     "state": "$1"
   type: GAUGE
-- pattern: "java.lang<type=Memory><NonHeapMemoryUsage>(\w+)"
+- pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>(\w+)'
   name: "cassandra_jvm_memory_nonheap_usage"
   labels:
     "area": "NonHeap"
@@ -75,7 +75,7 @@ rules:
   type: GAUGE
 
 # Garbage Collection
-- pattern: "java.lang<type=GarbageCollector, name=(.*)><>(\w+)"
+- pattern: 'java.lang<type=GarbageCollector, name=(.*)><>(\w+)'
   name: "cassandra_jvm_gc"
   labels:
     "collector": "$1"
@@ -83,7 +83,7 @@ rules:
   type: COUNTER
 
 # Cache metrics
-- pattern: "org.apache.cassandra.metrics<type=Cache, scope=(\w+), name=(\w+)><>(\w+)"
+- pattern: 'org.apache.cassandra.metrics<type=Cache, scope=(\w+), name=(\w+)><>(\w+)'
   name: "cassandra_cache"
   labels:
     "cache_type": "$1"
