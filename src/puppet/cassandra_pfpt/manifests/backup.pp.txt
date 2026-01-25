@@ -28,7 +28,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
 
     cron { 'cassandra-full-backup':
       ensure   => 'present',
-      command  => "${full_backup_script_path} >> ${full_backup_log_file} 2>&1",
+      command  => "${manage_bin_dir}/cass-ops backup >> ${full_backup_log_file} 2>&1",
       user     => 'root',
       minute   => $full_schedule_parts[0],
       hour     => $full_schedule_parts[1],
@@ -36,7 +36,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
       month    => $full_schedule_parts[3],
       weekday  => $full_schedule_parts[4],
       require  => [
-        File[$full_backup_script_path],
+        File["${manage_bin_dir}/cass-ops"],
         File['/etc/backup/config.json']
       ],
     }
@@ -50,7 +50,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
 
     cron { 'cassandra-incremental-backup':
       ensure   => 'present',
-      command  => "${incremental_backup_script_path} >> ${incremental_backup_log_file} 2>&1",
+      command  => "${manage_bin_dir}/cass-ops incremental-backup >> ${incremental_backup_log_file} 2>&1",
       user     => 'root',
       minute   => $inc_schedule_parts[0],
       hour     => $inc_schedule_parts[1],
@@ -58,7 +58,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
       month    => $inc_schedule_parts[3],
       weekday  => $inc_schedule_parts[4],
       require  => [
-        File[$incremental_backup_script_path],
+        File["${manage_bin_dir}/cass-ops"],
         File['/etc/backup/config.json']
       ],
     }

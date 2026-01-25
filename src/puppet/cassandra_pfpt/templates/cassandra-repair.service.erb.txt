@@ -12,7 +12,7 @@ Type=oneshot
 User=root
 Group=root
 <% if @repair_keyspace and @repair_keyspace != '' -%>
-ExecStart=<%= @manage_bin_dir %>/range-repair.sh <%= @repair_keyspace %>
+ExecStart=<%= @manage_bin_dir %>/cass-ops repair <%= @repair_keyspace %>
 <% else -%>
-ExecStart=<%= @manage_bin_dir %>/range-repair.sh
+ExecStart=<%= @manage_bin_dir %>/cass-ops repair
 <% end -%>
