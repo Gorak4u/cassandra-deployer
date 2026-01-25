@@ -1,186 +1,292 @@
 #!/usr/bin/env python3
 # This file is managed by Puppet.
+# A production-grade, unified operations script for Apache Cassandra.
 
-import argparse
 import sys
+import argparse
 import subprocess
+import os
+from typing import Dict, Any, List
 
-# --- Colorama Handling ---
-# This section ensures that the script can run even if colorama is not installed,
-# by providing dummy objects that do nothing.
 try:
-    import colorama
-    colorama.init()
-    Color = colorama.Fore
-    Style = colorama.Style
+    from colorama import Fore, Style, init
+    init(autoreset=True)
+    COLOR_ENABLED = True
 except ImportError:
+    # Create dummy Fore and Style objects if colorama is not installed
     class DummyColor:
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> str:
             return ""
-    class DummyStyle:
-        def __getattr__(self, name):
-            return ""
-    Color = DummyColor()
-    Style = DummyStyle()
+    Fore = DummyColor()
+    Style = DummyColor()
+    COLOR_ENABLED = False
 
 
-def print_color(text, color):
-    """Prints text in a given color to stderr to not interfere with script output."""
-    print(f"{color}{text}{Style.RESET_ALL}", file=sys.stderr)
+# --- Script Configuration ---
+# This dictionary maps the CLI command to the underlying script and its help text.
+SUBCOMMANDS: Dict[str, Dict[str, Any]] = {
+    # Status & Health Checks
+    'health': {
+        'script': '/usr/local/bin/node_health_check.sh',
+        'help': 'Run a comprehensive health check on the local node.',
+        'group': 'Status & Health Checks'
+    },
+    'cluster-health': {
+        'script': '/usr/local/bin/cluster-health.sh',
+        'help': 'Quickly check cluster connectivity and nodetool status.',
+        'group': 'Status & Health Checks'
+    },
+    'disk-health': {
+        'script': '/usr/local/bin/disk-health-check.sh',
+        'help': 'Check disk usage against warning/critical thresholds.',
+        'group': 'Status & Health Checks'
+    },
+    'version': {
+        'script': '/usr/local/bin/version-check.sh',
+        'help': 'Audit and print versions of key software (OS, Java, Cassandra).',
+        'group': 'Status & Health Checks'
+    },
+    'upgrade-check': {
+        'script': '/usr/local/bin/cassandra-upgrade-precheck.sh',
+        'help': 'Run pre-flight checks before a major version upgrade.',
+        'group': 'Status & Health Checks'
+    },
+    # Node Lifecycle & Maintenance
+    'stop': {
+        'script': '/usr/local/bin/stop-node.sh',
+        'help': 'Safely drain and stop the Cassandra service.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'restart': {
+        'script': '/usr/local/bin/rolling_restart.sh',
+        'help': 'Perform a safe, rolling restart of the Cassandra service.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'reboot': {
+        'script': '/usr/local/bin/reboot-node.sh',
+        'help': 'Safely drain Cassandra and reboot the machine.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'drain': {
+        'script': '/usr/local/bin/drain-node.sh',
+        'help': 'Drain the node, flushing memtables and stopping client traffic.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'decommission': {
+        'script': '/usr/local/bin/decommission-node.sh',
+        'help': 'Permanently remove this node from the cluster after streaming its data.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'replace': {
+        'script': '/usr/local/bin/prepare-replacement.sh',
+        'help': 'Configure this NEW, STOPPED node to replace a dead node.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    'rebuild': {
+        'script': '/usr/local/bin/rebuild-node.sh',
+        'help': 'Rebuild the data on this node by streaming from another datacenter.',
+        'group': 'Node Lifecycle & Maintenance'
+    },
+    # Data Management & Repair
+    'repair': {
+        'script': '/usr/local/bin/range-repair.sh',
+        'help': 'Run a safe, granular repair on the node\'s token ranges.',
+        'group': 'Data Management & Repair'
+    },
+    'cleanup': {
+        'script': '/usr/local/bin/cleanup-node.sh',
+        'help': 'Run \'nodetool cleanup\' with safety checks.',
+        'group': 'Data Management & Repair'
+    },
+    'compact': {
+        'script': '/usr/local/bin/compaction-manager.sh',
+        'help': 'Run \'nodetool compact\' with safety checks.',
+        'group': 'Data Management & Repair'
+    },
+    'garbage-collect': {
+        'script': '/usr/local/bin/garbage-collect.sh',
+        'help': 'Run \'nodetool garbagecollect\' with safety checks.',
+        'group': 'Data Management & Repair'
+    },
+    'upgrade-sstables': {
+        'script': '/usr/local/bin/upgrade-sstables.sh',
+        'help': 'Run \'nodetool upgradesstables\' with safety checks.',
+        'group': 'Data Management & Repair'
+    },
+    # Backup & Recovery
+    'backup': {
+        'script': '/usr/local/bin/full-backup-to-s3.sh',
+        'help': 'Manually trigger a full, node-local backup to S3.',
+        'group': 'Backup & Recovery'
+    },
+    'incremental-backup': {
+        'script': '/usr/local/bin/incremental-backup-to-s3.sh',
+        'help': 'Manually trigger an incremental backup to S3.',
+        'group': 'Backup & Recovery'
+    },
+    'backup-status': {
+        'script': '/usr/local/bin/backup-status.sh',
+        'help': 'Check the status of the last completed backup for a node.',
+        'group': 'Backup & Recovery'
+    },
+    'snapshot': {
+        'script': '/usr/local/bin/take-snapshot.sh',
+        'help': 'Take an ad-hoc snapshot with a generated tag.',
+        'group': 'Backup & Recovery'
+    },
+    'restore': {
+        'script': '/usr/local/bin/restore-from-s3.sh',
+        'help': 'Restore data from S3 backups. Run \'cass-ops restore --help\' for usage.',
+        'group': 'Backup & Recovery'
+    },
+    # Advanced & Destructive Operations
+    'assassinate': {
+        'script': '/usr/local/bin/assassinate-node.sh',
+        'help': 'Forcibly remove a dead node from the cluster\'s gossip ring.',
+        'group': 'Advanced & Destructive Operations'
+    },
+    # Performance Testing
+    'stress': {
+        'script': '/usr/local/bin/stress-test.sh',
+        'help': 'Run \'cassandra-stress\' via a robust wrapper. Run \'cass-ops stress --help\' for usage.',
+        'group': 'Performance Testing'
+    },
+    # Documentation
+    'manual': {
+        'script': '/usr/local/bin/cassandra-manual.sh',
+        'help': 'Display the interactive operations manual in the terminal.',
+        'group': 'Documentation'
+    },
+    'backup-guide': {
+        'script': '/usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md',
+        'is_doc': True,
+        'help': 'Display the comprehensive backup and recovery guide.',
+        'group': 'Documentation'
+    },
+}
 
+# --- Helper Functions for Printing ---
 
-def get_script_path(command):
-    """Maps a command to its underlying shell script."""
-    script_map = {
-        "health": "node_health_check.sh",
-        "cluster-health": "cluster-health.sh",
-        "disk-health": "disk-health-check.sh",
-        "version": "version-check.sh",
-        "stop": "stop-node.sh",
-        "restart": "rolling_restart.sh",
-        "reboot": "reboot-node.sh",
-        "drain": "drain-node.sh",
-        "decommission": "decommission-node.sh",
-        "replace": "prepare-replacement.sh",
-        "rebuild": "rebuild-node.sh",
-        "repair": "range-repair.sh",
-        "cleanup": "cleanup-node.sh",
-        "compact": "compaction-manager.sh",
-        "garbage-collect": "garbage-collect.sh",
-        "upgrade-sstables": "upgrade-sstables.sh",
-        "backup": "full-backup-to-s3.sh",
-        "incremental-backup": "incremental-backup-to-s3.sh",
-        "backup-status": "backup-status.sh",
-        "snapshot": "take-snapshot.sh",
-        "restore": "restore-from-s3.sh",
-        "assassinate": "assassinate-node.sh",
-        "stress": "stress-test.sh",
-        "manual": "cassandra-manual.sh",
-        "upgrade-check": "cassandra-upgrade-precheck.sh",
-    }
-    script_name = script_map.get(command)
-    if script_name:
-        return f"/usr/local/bin/{script_name}"
-    return None
+def print_info(message):
+    print(f"{Fore.BLUE}{Style.BRIGHT}[INFO]{Style.RESET_ALL} {message}")
 
+def print_error(message):
+    print(f"{Fore.RED}{Style.BRIGHT}[ERROR]{Style.RESET_ALL} {message}", file=sys.stderr)
+
+def create_custom_formatter(prog):
+    """Creates a custom argparse formatter to group commands."""
+    class GroupedHelpFormatter(argparse.HelpFormatter):
+        def _format_action(self, action):
+            # Default formatting for everything except the subparser
+            if not isinstance(action, argparse._SubParsersAction):
+                return super()._format_action(action)
+            
+            # Group subcommands
+            groups: Dict[str, List[str]] = {}
+            for sub_action in self._iter_indented_subactions(action):
+                cmd = sub_action.dest
+                group_name = SUBCOMMANDS.get(cmd, {}).get('group', 'Miscellaneous')
+                if group_name not in groups:
+                    groups[group_name] = []
+                help_text = self._get_help_string(sub_action)
+                groups[group_name].append(f"  {cmd:<20} {help_text}")
+
+            # Format the groups
+            output = []
+            sorted_groups = sorted(groups.keys(), key=lambda g: (
+                'Status' not in g, 
+                'Lifecycle' not in g,
+                'Data' not in g,
+                'Backup' not in g,
+                g
+            ))
+            for group_name in sorted_groups:
+                output.append(f"\n  {Fore.GREEN}{group_name}:{Style.RESET_ALL}")
+                output.extend(groups[group_name])
+            
+            return "\n".join(output)
+
+    return GroupedHelpFormatter
 
 def main():
-    """Main function to parse arguments and dispatch to the correct script."""
-
-    # --- Manually build the help text for perfect formatting ---
-    command_width = 22  # Padded width for the command column
-    help_groups = {
-        "Status & Health Commands": {
-            'health': "Run a comprehensive health check on the local node.",
-            'cluster-health': "Quickly check cluster connectivity and nodetool status.",
-            'disk-health': "Check disk usage against warning/critical thresholds.",
-            'version': "Audit and print versions of key software."
-        },
-        "Node Lifecycle & Maintenance": {
-            'stop': "Safely drain and stop the Cassandra service.",
-            'restart': "Perform a safe, rolling restart of the Cassandra service.",
-            'reboot': "Safely drain Cassandra and reboot the machine.",
-            'drain': "Drain the node, flushing memtables and stopping client traffic.",
-            'decommission': "Permanently remove this node from the cluster.",
-            'replace': "Configure this NEW, STOPPED node to replace a dead node.",
-            'rebuild': "Rebuild the data on this node by streaming from another DC."
-        },
-        "Data Management & Repair": {
-            'repair': "Run a safe, granular repair on the node's token ranges.",
-            'cleanup': "Run 'nodetool cleanup' with safety checks.",
-            'compact': "Run 'nodetool compact' with safety checks.",
-            'garbage-collect': "Run 'nodetool garbagecollect' with safety checks.",
-            'upgrade-sstables': "Run 'nodetool upgradesstables' with safety checks.",
-            'snapshot': "Take an ad-hoc snapshot with a generated tag."
-        },
-        "Backup & Recovery": {
-            'backup': "Manually trigger a full, node-local backup to S3.",
-            'incremental-backup': "Manually trigger an incremental backup to S3.",
-            'backup-status': "Check the status of the last completed backup for a node.",
-            'restore': "Restore data from S3 backups. Use '-- --help' for complex options."
-        },
-        "Advanced & Destructive Operations": {
-            'assassinate': "Forcibly remove a dead node from the cluster ring.",
-            'stress': "Run 'cassandra-stress' via a robust wrapper.",
-            'upgrade-check': "Run pre-flight checks before a major version upgrade."
-        },
-        "Documentation": {
-            'manual': "Display the full operations manual in the terminal."
-        }
-    }
-    
-    description = f"{Style.BRIGHT}Unified operations script for Cassandra.{Style.RESET_ALL}\nProvides safe, robust wrappers for common operational tasks.\n\n"
-    all_commands = []
-    for title, commands in help_groups.items():
-        description += f"{Style.BRIGHT}{title}:{Style.RESET_ALL}\n"
-        for cmd, help_text in commands.items():
-            all_commands.append(cmd)
-            # Use fixed-width padding to ensure alignment
-            description += f"  {cmd:<{command_width}}{help_text}\n"
-        description += "\n"
+    """Main entry point for the script."""
 
     parser = argparse.ArgumentParser(
-        description=description,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        usage="cass-ops [-h] <command> [args...]"
+        description=f"{Style.BRIGHT}Unified operations script for Apache Cassandra.{Style.RESET_ALL}\nThis script acts as a dispatcher to the underlying operational shell scripts.",
+        epilog="Run '<command> --help' for specific command options.",
+        formatter_class=create_custom_formatter,
+        add_help=False # We handle help manually to show groups
     )
-    
+    # Custom help action
     parser.add_argument(
-        'command',
-        choices=all_commands,
-        metavar='<command>',
-        help=argparse.SUPPRESS # Suppress from the main help as it's in the description
+        '-h', '--help',
+        action='help',
+        default=argparse.SUPPRESS,
+        help='Show this help message and exit'
     )
     
-    parser.add_argument(
-        'args',
-        nargs=argparse.REMAINDER,
-        metavar='[args...]',
-        help='Arguments to pass to the underlying script.'
-    )
-    
-    # If no command is given, print the formatted help text and exit.
+    subparsers = parser.add_subparsers(dest='command', title='Available Commands')
+
+    for cmd, details in SUBCOMMANDS.items():
+        subparsers.add_parser(
+            cmd,
+            help=details['help'],
+            add_help=False # Pass '--help' to the subcommand script itself
+        )
+
+    # If no command is given, print help and exit.
     if len(sys.argv) == 1:
-        parser.print_help()
+        parser.print_help(sys.stdout)
         sys.exit(0)
-        
-    args = parser.parse_args()
-
-    script_path = get_script_path(args.command)
     
-    if not script_path:
-        print_color(f"Error: Command '{args.command}' is not implemented.", Color.RED)
+    # The first parse just identifies the command without consuming other args
+    args, remaining_args = parser.parse_known_args()
+
+    if not args.command:
+        parser.print_help(sys.stderr)
         sys.exit(1)
 
+    cmd_details = SUBCOMMANDS.get(args.command)
+    if not cmd_details:
+        print_error(f"Unknown command '{args.command}'")
+        sys.exit(1)
+
+    # Special handling for documentation commands
+    if cmd_details.get('is_doc'):
+        doc_path = cmd_details['script']
+        if not os.path.exists(doc_path):
+            print_error(f"Documentation file not found at {doc_path}")
+            sys.exit(1)
+        try:
+            # Use `less -R` to correctly render color codes in the manual
+            subprocess.run(['less', '-R', doc_path], check=True)
+        except FileNotFoundError:
+            print_error("`less` command not found. Cannot display documentation.")
+            sys.exit(1)
+        except subprocess.CalledProcessError:
+            # This can happen if user quits `less` with `q` then an error code is returned. Ignore.
+            pass
+        sys.exit(0)
+
+    # Execute the underlying script
+    script_path = cmd_details['script']
+    if not os.path.exists(script_path) or not os.access(script_path, os.X_OK):
+        print_error(f"Script for command '{args.command}' not found or not executable at {script_path}")
+        sys.exit(1)
+
+    command_to_run = [script_path] + remaining_args
+    
     try:
-        command_to_run = [script_path] + args.args
-        print_color(f"Executing: {' '.join(command_to_run)}", Color.YELLOW)
-        print("-" * 60, file=sys.stderr)
-        
-        # Use Popen to stream output in real-time. This is better for long-running processes.
-        process = subprocess.Popen(command_to_run, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        
-        for line in iter(process.stdout.readline, ''):
-            print(line, end='')
-        
-        process.stdout.close()
-        return_code = process.wait()
-
-        print("-" * 60, file=sys.stderr)
-        if return_code == 0:
-            print_color(f"SUCCESS: Command '{args.command}' completed successfully.", Color.GREEN)
-        else:
-            print_color(f"ERROR: Command '{args.command}' failed with exit code {return_code}.", Color.RED)
-        
-        sys.exit(return_code)
-
-    except FileNotFoundError:
-        print_color(f"Error: The script for command '{args.command}' was not found at '{script_path}'.", Color.RED)
-        sys.exit(127)
+        # Use execv to replace the current process with the new one.
+        # This makes signal handling (like Ctrl+C) work correctly.
+        os.execv(command_to_run[0], command_to_run)
     except Exception as e:
-        print_color(f"An unexpected error occurred: {e}", Color.RED)
+        print_error(f"Failed to execute command '{args.command}': {e}")
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print_error("This script must be run as root or with sudo.")
+        sys.exit(1)
     main()

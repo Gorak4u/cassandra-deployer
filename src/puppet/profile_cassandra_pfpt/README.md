@@ -19,13 +19,7 @@
 6.  [Automated Maintenance Guide](#automated-maintenance-guide)
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
-7.  [Disaster Recovery Guide: A Deep Dive into Point-in-Time Recovery](#disaster-recovery-guide-a-deep-dive-into-point-in-time-recovery)
-    1.  [Understanding the Backup Strategy](#understanding-the-backup-strategy)
-    2.  [The Restore Process: Building the Chain](#the-restore-process-building-the-chain)
-    3.  [Restore Scenario 1: Granular Restore (Live Cluster)](#restore-scenario-1-granular-restore-live-cluster)
-    4.  [Restore Scenario 2: Full Node Restore (Replacing a Single Failed Node)](#restore-scenario-2-full-node-restore-replacing-a-single-failed-node)
-    5.  [Restore Scenario 3: Full Cluster Restore (Cold Start DR)](#restore-scenario-3-full-cluster-restore-cold-start-dr)
-    6.  [Restore Scenario 4: Recovering from Accidental Schema Changes](#restore-scenario-4-recovering-from-accidental-schema-changes)
+7.  [Backup & Recovery Guide](#backup--recovery-guide)
 8.  [Production Readiness Guide](#production-readiness-guide)
     1.  [Automated Service Monitoring and Restart](#automated-service-monitoring-and-restart)
     2.  [Monitoring Backups and Alerting](#monitoring-backups-and-alerting)
@@ -150,64 +144,14 @@ profile_cassandra_pfpt::schema_tables:
 
 This profile installs a unified administrative wrapper script, `cass-ops`, at `/usr/local/bin`. This is your primary entry point for all manual and automated operational tasks. It simplifies management by providing a single, memorable command with clear, grouped sub-commands.
 
-To see all available commands, simply run it with `-h` or with no arguments:
+To see all available commands, simply run it with no arguments:
 
 ```bash
-$ sudo /usr/local/bin/cass-ops -h
-
-usage: cass-ops [-h] <command> ...
-
-Unified operations script for Cassandra.
-
-This script acts as a dispatcher to the underlying operational shell scripts,
-providing a single, unified entry point for all Cassandra management tasks.
-
-optional arguments:
-  -h, --help  show this help message and exit
-
-Available Commands:
-  The following commands are available:
-
-    Status & Health Checks:
-      health              Run a comprehensive health check on the local node.
-      cluster-health      Quickly check cluster connectivity and nodetool status.
-      disk-health         Check disk usage against warning/critical thresholds.
-      version             Audit and print versions of key software (OS, Java, Cassandra).
-      upgrade-check       Run pre-flight checks before a major version upgrade.
-
-    Node Lifecycle & Maintenance:
-      stop                Safely drain and stop the Cassandra service.
-      restart             Perform a safe, rolling restart of the Cassandra service.
-      reboot              Safely drain Cassandra and reboot the machine.
-      drain               Drain the node, flushing memtables and stopping client traffic.
-      decommission        Permanently remove this node from the cluster after streaming its data.
-      replace             Configure this NEW, STOPPED node to replace a dead node.
-      rebuild             Rebuild the data on this node by streaming from another datacenter.
-
-    Data Management & Repair:
-      repair              Run a safe, granular repair on the node's token ranges. Can target a specific keyspace.
-      cleanup             Run 'nodetool cleanup' with safety checks.
-      compact             Run 'nodetool compact' with safety checks.
-      garbage-collect     Run 'nodetool garbagecollect' with safety checks.
-      upgrade-sstables    Run 'nodetool upgradesstables' with safety checks.
-
-    Backup & Recovery:
-      backup              Manually trigger a full, node-local backup to S3.
-      incremental-backup  Manually trigger an incremental backup to S3.
-      backup-status       Check the status of the last completed backup for a node.
-      snapshot            Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces.
-      restore             Restore data from S3 backups. Run 'cass-ops restore --help' for usage.
-
-    Advanced & Destructive Operations:
-      assassinate         Forcibly remove a dead node from the cluster's gossip ring.
-
-    Performance Testing:
-      stress              Run 'cassandra-stress' via a robust wrapper. Run 'cass-ops stress --help' for usage.
-
-    Documentation:
-      manual              Display the full operations manual in the terminal.
+$ sudo /usr/local/bin/cass-ops
 ```
-> **Note:** The legacy `cassandra-admin.sh` script is also available for manual use if needed, but `cass-ops` is the primary and recommended tool.
+This will display the full, formatted help text with all commands grouped by category.
+
+> **Note on legacy scripts:** The original `cassandra-admin.sh` script is also available for manual use if needed, but `cass-ops` is the primary and recommended tool for all operations.
 
 ---
 
@@ -334,193 +278,16 @@ A safe, low-impact, automated repair process is critical for data consistency.
 
 ---
 
-## Disaster Recovery Guide: A Deep Dive into Point-in-Time Recovery
+## Backup & Recovery Guide
 
-This guide provides an in-depth, step-by-step walkthrough for recovering your Cassandra cluster from S3 backups using the powerful `cass-ops restore` command.
+The backup and recovery process for this Cassandra deployment is documented in a complete, standalone guide. This document covers the architecture, backup creation, all `cass-ops restore` commands, and step-by-step walkthroughs for various disaster recovery scenarios.
 
-### Understanding the Backup Strategy
+**This is the single source of truth for all recovery operations.**
 
-Before restoring, it's critical to understand how backups are structured:
-
-*   **Backup Sets:** Each backup run (full or incremental) creates a "backup set" in S3, identified by a timestamp tag (e.g., `2026-01-20-18-00`).
-*   **Granular Archives:** Inside a backup set, data for each table is stored in its own encrypted archive (`.tar.gz.enc`).
-*   **Manifest File:** Every backup set contains a `backup_manifest.json`. This file is the key to recovery, containing metadata about the backup type (full/incremental), the node's identity (IP, DC, rack, tokens), and which tables were included.
-*   **Schema Dump:** Full backups also include a `schema.cql` file, which is a complete snapshot of the database schema (`CREATE KEYSPACE`, `CREATE TABLE` statements). This is essential for full cluster recovery.
-*   **Schema-to-Directory Mapping:** A `schema_mapping.json` file is included to map human-readable table names to their internal UUID-based directory names, which is critical for handling schema changes over time.
-
-### The Restore Process: Building the Chain
-
-The `cass-ops restore` script performs Point-in-Time Recovery (PITR). When you provide a target timestamp with `--date`:
-
-1.  **Find the Base:** It searches S3 for the most recent **full** backup that occurred *at or before* your target time. This is the foundation of the restore.
-2.  **Find the Deltas:** It then finds all **incremental** backups that occurred *between* the full backup and your target time.
-3.  **Build the Chain:** It assembles this list of backups into a "restore chain" (full backup + subsequent incrementals).
-4.  **Confirm and Execute:** It presents this chain to you for confirmation before proceeding with the restore, ensuring you know exactly what will be applied.
-
----
-
-### Restore Scenario 1: Granular Restore (Live Cluster)
-
-> **Use Case:** Restoring a specific table or keyspace that was accidentally dropped or corrupted, without taking the cluster offline.
-
-This is a non-destructive operation that streams data into a **live, running cluster**.
-
-#### Steps:
-
-1.  SSH into any Cassandra node in the cluster.
-2.  Choose the appropriate restore action:
-    *   `--download-and-restore`: The most common action. It downloads the data and immediately loads it using `sstableloader`.
-    *   `--download-only`: Downloads and decrypts the data to `/var/lib/cassandra/restore_download/` for manual inspection. The data is **not** loaded into the cluster.
-
-#### Example Commands:
-
+To view this guide, run the following command on any Cassandra node:
 ```bash
-# Example 1: Restore a single table ('users') to its state as of 6:00 PM on Jan 20, 2026.
-# The script will find the correct backup chain and load the data.
-sudo /usr/local/bin/cass-ops restore \
-  --date "2026-01-20-18-00" \
-  --keyspace my_app \
-  --table users \
-  --download-and-restore
-
-# Example 2: Restore an entire keyspace ('auditing').
-sudo /usr/local/bin/cass-ops restore \
-  --date "2026-01-20-18-00" \
-  --keyspace auditing \
-  --download-and-restore
-
-# Example 3: Download data for a table for inspection without loading it.
-sudo /usr/local/bin/cass-ops restore \
-  --date "2026-01-20-18-00" \
-  --keyspace my_app \
-  --table users \
-  --download-only
+sudo cass-ops backup-guide
 ```
-> **Important:** The script intelligently handles table UUID mismatches. If the live table has a different UUID than the backed-up data, the script will automatically rename the downloaded directory to match the live one before loading.
-
----
-
-### Restore Scenario 2: Full Node Restore (Replacing a Single Failed Node)
-
-> **Use Case:** A single node has failed permanently (e.g., hardware failure) and you need to replace it with a new machine, restoring its data and identity.
-
-This is a **destructive** operation performed on a **new, stopped node**.
-
-#### Prerequisites:
-
-*   You have provisioned a new machine.
-*   You have applied the Puppet profile to it.
-*   The `cassandra` service is **stopped** on this new node.
-
-#### Steps:
-
-1.  SSH into the **new, stopped** node.
-2.  Execute the restore script in `--full-restore` mode. Crucially, you must use `--source-host` to specify the hostname of the *original, dead node* you are replacing.
-    ```bash
-    # Restore this new node using the backup data from 'cassandra-node-03.example.com'
-    # to the point in time of the latest available backup.
-    sudo /usr/local/bin/cass-ops restore \
-      --date "2026-01-22-10-00" \
-      --source-host cassandra-node-03.example.com \
-      --full-restore \
-      --yes
-    ```
-3.  The script will:
-    *   Wipe any existing Cassandra data directories.
-    *   Download the manifest from the dead node's backup to retrieve its unique ring tokens.
-    *   Configure `cassandra.yaml` with these tokens, ensuring the new node assumes the correct identity in the ring.
-    *   Download and extract the full data set from the specified backup chain.
-    *   Start the Cassandra service and verify it rejoins the cluster as `UN` (Up/Normal).
-
----
-
-### Restore Scenario 3: Full Cluster Restore (Cold Start DR)
-
-> **Use Case:** A catastrophic failure has destroyed the entire cluster. You need to rebuild the entire cluster from scratch on new hardware using S3 backups.
-
-This is the most advanced scenario and involves a coordinated, two-phase process across all new nodes.
-
-#### Prerequisites:
-
-*   You have provisioned an entirely new set of machines for the cluster.
-*   Puppet has run on all new nodes, but the `cassandra` service is **stopped on all of them**.
-*   You know the hostnames of the *original* nodes that were backed up to S3.
-
-#### Phase 1: Restore the Schema (Run on ONE Node Only)
-
-The first step is to create the keyspaces and table structures in the new, empty cluster.
-
-1.  Choose **one node** in the new cluster to be the "schema master".
-2.  SSH into this node.
-3.  Start the Cassandra service on this node **only**: `sudo systemctl start cassandra`. Wait for it to come up.
-4.  Run the restore script in `--schema-only` mode. You need to specify the `--source-host` of one of your original backed-up nodes.
-    ```bash
-    # Download the schema from the latest full backup of an original node.
-    sudo /usr/local/bin/cass-ops restore \
-      --date "2026-01-22-10-00" \
-      --source-host original-node-01.example.com \
-      --schema-only
-    ```
-5.  The script will download `schema.cql` to `/tmp/schema_restore.cql`.
-6.  Apply this schema to the new cluster using `cqlsh`:
-    ```bash
-    # Use the password you've configured in Hiera for the new cluster.
-    cqlsh -u cassandra -p 'YourNewClusterPassword' --ssl -f /tmp/schema_restore.cql
-    ```
-7.  Verify the keyspaces and tables now exist: `cqlsh -e "DESCRIBE KEYSPACES;"`.
-8.  **Crucially, stop the Cassandra service** on this "schema master" node: `sudo systemctl stop cassandra`. The entire new cluster should now be offline again, but with the correct schema created.
-
-#### Phase 2: Restore Data (Rolling Restore, Node by Node)
-
-Now, you will perform a full node restore on each new machine, one at a time.
-
-1.  **For the first node:**
-    *   SSH into the new node (e.g., `new-node-01`).
-    *   Run the full restore, pointing it to the backup of its corresponding original node.
-        ```bash
-        sudo /usr/local/bin/cass-ops restore \
-          --date "2026-01-22-10-00" \
-          --source-host original-node-01.example.com \
-          --full-restore \
-          --yes
-        ```
-    *   The script will restore the data and start Cassandra. Wait for it to fully initialize and report `UN` in `nodetool status`. This node will become the first seed of the restored cluster.
-
-2.  **For all subsequent nodes (one by one):**
-    *   SSH into the next new node (e.g., `new-node-02`).
-    *   Run the same command, but change the `--source-host` to its corresponding original node.
-        ```bash
-        sudo /usr/local/bin/cass-ops restore \
-          --date "2026-01-22-10-00" \
-          --source-host original-node-02.example.com \
-          --full-restore \
-          --yes
-        ```
-    *   The script will restore the data and start Cassandra. It will automatically detect the running seed node and join the cluster.
-    *   Wait for this node to report `UN` status before proceeding to the next one.
-
-3.  Repeat this process until all nodes in the new cluster have been restored and are online. Your cluster is now fully recovered.
-
----
-
-### Restore Scenario 4: Recovering from Accidental Schema Changes
-
-> **Use Case:** An operator accidentally ran a destructive `ALTER TABLE` or `DROP TABLE` command, but the data on disk is still intact.
-
-The `schema.cql` file included in every full backup is your safety net.
-
-1.  **Identify the last known-good backup** before the schema change occurred.
-2.  **Download the schema file** from that backup set using the `--schema-only` mode:
-    ```bash
-    sudo /usr/local/bin/cass-ops restore \
-      --date "2026-01-20-18-00" \
-      --source-host cassandra-node-01.example.com \
-      --schema-only
-    ```
-3.  This downloads the full schema to `/tmp/schema_restore.cql`.
-4.  **Do not apply the whole file.** Instead, open it in a text editor (`less /tmp/schema_restore.cql`).
-5.  Find the correct `CREATE TABLE` statement for the table that was altered or dropped.
-6.  Copy that single statement and execute it in `cqlsh` to restore the table's structure.
 
 ---
 
@@ -532,50 +299,24 @@ Having functional backups is the first step. Ensuring they are reliable and secu
 
 This module uses the native capabilities of `systemd` to ensure the Cassandra service remains running. If the Cassandra process crashes or is terminated unexpectedly, `systemd` will automatically attempt to restart it.
 
-*   **How it Works:** Puppet creates a `systemd` override file that configures `Restart=always` and `RestartSec=10`. This means `systemd` will always try to bring the service back up, waiting 10 seconds between attempts to prevent rapid-fire restart loops.
-*   **Configuration:** You can customize this behavior in Hiera. For example, to disable it, set `profile_cassandra_pfpt::service_restart: 'no'`. See the Hiera reference for more details.
-*   **Monitoring:** While this provides automatic recovery, it's still critical to have external alerting (e.g., via Prometheus) to notify you *when* a restart has occurred, as it often points to an underlying issue that needs investigation.
+*   **How it Works:** Puppet creates a `systemd` override file that configures `Restart=always` and `RestartSec=10`.
+*   **Monitoring:** While this provides automatic recovery, it's still critical to have external alerting (e.g., via Prometheus) to notify you *when* a restart has occurred.
 
 ### Monitoring Backups and Alerting
 
-A backup that fails silently is not a backup. The automated backup jobs run via `cron`. You must monitor their status.
-
-*   **Manual Checks:**
-    *   Check the cron log file (typically `/var/log/cron` or `/var/log/syslog` depending on your OS) for entries related to `cassandra-full-backup` and `cassandra-incremental-backup`.
-    *   Check the dedicated backup logs: `/var/log/cassandra/full_backup.log` and `/var/log/cassandra/incremental_backup.log`.
-
-*   **Automated Alerting (Recommended):**
-    *   Integrate your monitoring system (e.g., Prometheus with `node_exporter`'s textfile collector, Datadog) to parse the output of the backup log files.
-    *   **Create alerts that trigger if a backup log has not been updated in 24 hours or if it contains "ERROR".**
+A backup that fails silently is not a backup.
+*   **Manual Checks:** Check the dedicated backup logs: `/var/log/cassandra/full_backup.log` and `/var/log/cassandra/incremental_backup.log`.
+*   **Automated Alerting (Recommended):** Create alerts in your monitoring system that trigger if a backup log has not been updated in 24 hours or if it contains "ERROR".
 
 ### Testing Your Disaster Recovery Plan (Fire Drills)
 
-The only way to trust your backups is to test them regularly.
-
-1.  **Schedule Quarterly Drills:** At least once per quarter, perform a full DR test.
-2.  **Provision an Isolated Environment:** Spin up a new, temporary VPC with a small, isolated Cassandra cluster (e.g., 3 nodes).
-3.  **Execute the DR Playbook:** Follow the "Full Cluster Restore (Cold Start DR)" scenario documented above to restore your production backup into this test environment.
-4.  **Validate Data:** Once restored, run queries to verify that the data is consistent and accessible.
-5.  **Document and Decommission:** Note any issues found during the drill and then tear down the test environment.
+The only way to trust your backups is to **test them regularly**. At least once per quarter, provision an isolated test environment and perform a full "Cold Start DR" by following the comprehensive backup and recovery guide.
 
 ### Important Security and Cost Considerations
 
-*   **Encryption Key Management:**
-    *   The `backup_encryption_key` is the most critical secret. It should be managed in Hiera-eyaml.
-    *   **Key Rotation:** To rotate the key, update the encrypted value in Hiera. Puppet will deploy the change. From that point on, **new backups** will use the new key.
-    *   **IMPORTANT:** You must securely store **all old keys** that were used for previous backups. If you need to restore from a backup made a month ago, you will need the key that was active at that time.
-
-*   **S3 Cost Management:**
-    *   S3 costs can grow significantly over time.
-    *   The backup script now automatically manages a lifecycle policy to expire objects after `s3_retention_period` days.
-    *   For more advanced strategies, consider using **S3 Lifecycle Policies** on your backup bucket directly. A typical policy would be:
-        *   Transition backups older than 30 days to a cheaper storage class (e.g., S3 Infrequent Access).
-        *   Transition backups older than 90 days to archival storage (e.g., S3 Glacier Deep Archive).
-        *   Permanently delete backups older than your retention policy (e.g., 1 year).
-
-*   **Cross-Region Disaster Recovery:**
-    *   To protect against a full AWS region failure, enable **S3 Cross-Region Replication** on your backup bucket to automatically copy backups to a secondary DR region.
-    *   Be aware of the data transfer costs associated with both replication and a potential cross-region restore.
+*   **Encryption Key Management:** The `backup_encryption_key` is your most critical secret. It should be managed in Hiera-eyaml. **You must securely store all old keys** that were used for previous backups, as you will need them to restore from those older backups.
+*   **S3 Cost Management:** The backup script automatically manages a lifecycle policy to expire objects after `s3_retention_period` days. For more advanced strategies (e.g., moving to Glacier), configure them directly on the S3 bucket.
+*   **Cross-Region Disaster Recovery:** To protect against a full AWS region failure, enable S3 Cross-Region Replication on your backup bucket.
 
 ---
 

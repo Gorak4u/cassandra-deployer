@@ -80,6 +80,22 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       require => File[$manage_bin_dir],
     }
   }
+
+  # Deploy documentation
+  file { '/usr/share/doc/cassandra_pfpt':
+    ensure => 'directory',
+    owner  => 'root',
+    group  => 'root',
+    mode   => '0755',
+  }
+  file { '/usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md':
+    ensure  => 'file',
+    source  => 'puppet:///modules/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    require => File['/usr/share/doc/cassandra_pfpt'],
+  }
   
   # Deploy the external facts script
   file { ['/etc/puppetlabs', '/etc/puppetlabs/facter', '/etc/puppetlabs/facter/facts.d']:
