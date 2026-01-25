@@ -62,6 +62,7 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     group  => 'root',
     mode   => '0755',
   }
+  # Deploy all operational scripts
   [ 'cluster-health.sh',
     'cleanup-node.sh', 'take-snapshot.sh', 'drain-node.sh', 'rebuild-node.sh',
     'garbage-collect.sh', 'assassinate-node.sh', 'upgrade-sstables.sh',
@@ -69,8 +70,8 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     'cassandra_range_repair.py', 'range-repair.sh',
     'restore-from-s3.sh', 'node_health_check.sh', 'rolling_restart.sh',
     'disk-health-check.sh', 'decommission-node.sh', 'compaction-manager.sh',
-    'cassandra-admin.sh', 'stress-test.sh', 'stop-node.sh', 'reboot-node.sh', 'cassandra-manual.sh', 'cassandra-upgrade-precheck.sh', 'cassandra_facts.sh',
-    'cass-ops' ].each |$script| {
+    'stress-test.sh', 'stop-node.sh', 'reboot-node.sh', 'cassandra-manual.sh', 'cassandra-upgrade-precheck.sh', 'cassandra_facts.sh',
+   ].each |$script| {
     file { "${$manage_bin_dir}/${$script}":
       ensure  => 'file',
       source  => "puppet:///modules/cassandra_pfpt/${$script}",
@@ -79,6 +80,16 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       mode    => '0755',
       require => File[$manage_bin_dir],
     }
+  }
+
+  # cass-ops is handled separately to remove the .txt extension
+  file { "${manage_bin_dir}/cass-ops":
+    ensure  => 'file',
+    source  => 'puppet:///modules/cassandra_pfpt/cass-ops.txt',
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0755',
+    require => File[$manage_bin_dir],
   }
 
   # Deploy documentation

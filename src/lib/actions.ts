@@ -32,7 +32,7 @@ const getLang = (fileName: string) => {
     if (fileName.endsWith('.pp') || fileName.endsWith('.pp.txt')) return 'puppet';
     if (fileName.endsWith('.erb') || fileName.endsWith('.epp') || fileName.endsWith('.erb.txt')) return 'ruby';
     if (fileName.endsWith('.yaml')) return 'yaml';
-    if (fileName.endsWith('.sh')) return 'bash';
+    if (fileName.endsWith('.sh') || fileName.endsWith('cass-ops.txt')) return 'bash';
     if (fileName.endsWith('.py')) return 'python';
     if (fileName.endsWith('.jar')) return 'binary';
     if (fileName.endsWith('.md')) return 'markdown';
@@ -54,7 +54,8 @@ export async function getPuppetFileTree(): Promise<{tree: Record<string, FileTre
     const relativePath = parts.slice(1).join('/');
     const displayName = relativePath
       .replace(/\.pp\.txt$/, '.pp')
-      .replace(/\.erb\.txt$/, '.erb');
+      .replace(/\.erb\.txt$/, '.erb')
+      .replace(/cass-ops\.txt$/, 'cass-ops');
 
     return {
       repo,
@@ -75,10 +76,10 @@ export async function getPuppetFileTree(): Promise<{tree: Record<string, FileTre
     let currentLevel = tree[file.repo];
 
     pathParts.forEach((part, index) => {
-        let node = currentLevel.find(n => n.name === part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb'));
+        let node = currentLevel.find(n => n.name === part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb').replace(/cass-ops\.txt$/, 'cass-ops'));
 
         if (!node) {
-            const nodeName = part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb');
+            const nodeName = part.replace(/\.pp\.txt$/, '.pp').replace(/\.erb\.txt$/, '.erb').replace(/cass-ops\.txt$/, 'cass-ops');
             node = { name: nodeName, path: file.path.split(path.sep).slice(0, index + 2).join(path.sep) };
             currentLevel.push(node);
         }
@@ -140,6 +141,8 @@ export async function getZippedModules(): Promise<string> {
                 zipPath = file.replace(/\.pp\.txt$/, '.pp');
             } else if (file.endsWith('.erb.txt')) {
                 zipPath = file.replace(/\.erb\.txt$/, '.erb');
+            } else if (file.endsWith('cass-ops.txt')) {
+                zipPath = file.replace(/\.txt$/, '');
             }
             
             archive.append(fileContent, { name: zipPath });
@@ -194,6 +197,8 @@ export async function pushToGit(data: {
           destFile = file.replace(/\.pp\.txt$/, '.pp');
       } else if (file.endsWith('.erb.txt')) {
           destFile = file.replace(/\.erb\.txt$/, '.erb');
+      } else if (file.endsWith('cass-ops.txt')) {
+        destFile = file.replace(/\.txt$/, '');
       }
 
       const destPath = path.join(tempRepoDir, destFile);
