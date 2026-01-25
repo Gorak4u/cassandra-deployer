@@ -1,6 +1,6 @@
 # `profile_cassandra_pfpt`: A Complete Cassandra Operations Profile
 
-> This module provides a complete profile for deploying and managing an Apache Cassandra node. It acts as a wrapper around the `cassandra_pfpt` component module, providing all of its configuration data via Hiera lookups. This allows for a clean separation of logic from data.
+> This module provides a complete profile for deploying and managing an Apache Cassandra node. It acts as a wrapper around the `cassandra_pfpt` component module, providing all its configuration data via Hiera lookups. This allows for a clean separation of logic from data.
 >
 > Beyond initial deployment, this profile equips each node with a powerful suite of automation and command-line tools to simplify and safeguard common operational tasks. The primary tool is `cass-ops`, a modern Python-based CLI.
 
@@ -20,13 +20,14 @@
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
 7.  [Backup & Recovery Guide](#backup--recovery-guide)
-8.  [Production Readiness Guide](#production-readiness-guide)
+8.  [Puppet Architecture Guide](#puppet-architecture-guide)
+9.  [Production Readiness Guide](#production-readiness-guide)
     1.  [Automated Service Monitoring and Restart](#automated-service-monitoring-and-restart)
     2.  [Monitoring Backups and Alerting](#monitoring-backups-and-alerting)
     3.  [Testing Your Disaster Recovery Plan (Fire Drills)](#testing-your-disaster-recovery-plan-fire-drills)
     4.  [Important Security and Cost Considerations](#important-security-and-cost-considerations)
-9.  [Hiera Parameter Reference](#hiera-parameter-reference)
-10. [Puppet Agent Management](#puppet-agent-management)
+10. [Hiera Parameter Reference](#hiera-parameter-reference)
+11. [Puppet Agent Management](#puppet-agent-management)
 
 ---
 
@@ -287,6 +288,17 @@ The backup and recovery process for this Cassandra deployment is documented in a
 To view this guide, run the following command on any Cassandra node:
 ```bash
 sudo cass-ops backup-guide
+```
+
+---
+
+## Puppet Architecture Guide
+
+A complete guide to the Puppet automation architecture (the Roles and Profiles pattern, Hiera data flow, etc.) is available as a standalone document.
+
+To view this guide, run the following command on any Cassandra node:
+```bash
+sudo cass-ops puppet-guide
 ```
 
 ---

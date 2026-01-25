@@ -88,13 +88,16 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     group  => 'root',
     mode   => '0755',
   }
-  file { '/usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md':
-    ensure  => 'file',
-    source  => 'puppet:///modules/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md',
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0644',
-    require => File['/usr/share/doc/cassandra_pfpt'],
+  [ 'BACKUP_AND_RECOVERY_GUIDE.md',
+    'PUPPET_ARCHITECTURE_GUIDE.md' ].each |$doc| {
+    file { "/usr/share/doc/cassandra_pfpt/${doc}":
+      ensure  => 'file',
+      source  => "puppet:///modules/cassandra_pfpt/${doc}",
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0644',
+      require => File['/usr/share/doc/cassandra_pfpt'],
+    }
   }
   
   # Deploy the external facts script

@@ -66,7 +66,7 @@ echo -e ""
 echo -e "# --- Backup Configuration ---"
 echo -e "profile_cassandra_pfpt::backup_encryption_key: 'Your-Super-Secret-32-Character-Key' # IMPORTANT: Use Hiera-eyaml for this in production"
 echo -e "profile_cassandra_pfpt::manage_full_backups: true"
-echo -e "profile_cassandra_pfpt::full_backup_schedule: 'daily' # systemd timer spec"
+echo -e "profile_cassandra_pfpt::full_backup_schedule: '0 2 * * *' # cron spec"
 echo -e "profile_cassandra_pfpt::manage_incremental_backups: true"
 echo -e "profile_cassandra_pfpt::incremental_backup_schedule: '0 */4 * * *' # cron spec"
 echo -e "profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'"
@@ -115,7 +115,7 @@ echo -e ""
 echo -e "To see all available commands, simply run it with no arguments:"
 echo -e ""
 echo -e "${CYAN}\`\`\`bash"
-echo -e "\$ sudo /usr/local/bin/cass-ops"
+echo -e "$ sudo /usr/local/bin/cass-ops"
 echo -e "\`\`\`${NC}"
 echo -e "This will display the full, formatted help text with all commands grouped by category."
 echo -e ""
@@ -264,6 +264,21 @@ echo -e ""
 echo -e "${CYAN}    sudo cass-ops backup-guide${NC}"
 echo -e ""
 echo -e "This will open the complete guide in a scrollable view directly in your terminal."
+
+) | less -R
+}
+
+show_puppet_guide() {
+(
+echo -e "${BOLD}${BLUE}## Puppet Architecture Guide${NC}"
+echo -e ""
+echo -e "A complete guide to the Puppet automation architecture (Roles & Profiles, Hiera data flow, etc.)"
+echo -e "is available as a standalone document."
+echo -e ""
+echo -e "To view this guide, please run the following command:"
+echo -e ""
+echo -e "${CYAN}    sudo cass-ops puppet-guide${NC}"
+echo -e ""
 
 ) | less -R
 }
@@ -423,6 +438,7 @@ while true; do
     echo " 7) Backup & Recovery Guide (Full)"
     echo " 8) Production Readiness Guide"
     echo " 9) Hiera Parameter Reference"
+    echo " 10) Puppet Architecture Guide (Full)"
     echo ""
     echo " q) Quit"
     echo ""
@@ -438,6 +454,7 @@ while true; do
         7) /usr/local/bin/cass-ops backup-guide ;;
         8) show_production_readiness ;;
         9) show_hiera_reference ;;
+        10) /usr/local/bin/cass-ops puppet-guide ;;
         q|Q) break ;;
         *) echo -e "${RED}Invalid option. Please try again.${NC}"; sleep 1 ;;
     esac
