@@ -1,0 +1,19 @@
+# @summary Manages the Puppet agent's cron job.
+class cassandra_pfpt::puppet_agent inherits cassandra_pfpt {
+
+  $puppet_cron_parts = split($puppet_cron_schedule_string, ' ')
+  if size($puppet_cron_parts) != 5 {
+    fail("The 'puppet_cron_schedule' parameter must be a valid 5-part cron string, but got '${puppet_cron_schedule_string}'.")
+  }
+
+  cron { 'puppet-agent':
+    ensure  => 'present',
+    command => 'test ! -f /var/lib/puppet-disabled && puppet agent -t > /dev/null 2>&1',
+    user    => 'root',
+    minute  => $puppet_cron_parts[0],
+    hour    => $puppet_cron_parts[1],
+    monthday=> $puppet_cron_parts[2],
+    month   => $puppet_cron_parts[3],
+    weekday => $puppet_cron_parts[4],
+  }
+}
