@@ -4,155 +4,114 @@
 import sys
 import subprocess
 import argparse
-import os
-from typing import List
 
-# Ensure we're running a modern Python version
-if sys.version_info < (3, 7):
-    sys.exit("Error: cass-ops requires Python 3.7 or newer.")
+# Make colorama optional for robustness
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    COLOR_ENABLED = True
+except ImportError:
+    COLOR_ENABLED = False
 
-# Define the base path where all operational scripts are located
-SCRIPT_BASE_PATH = "/usr/local/bin"
+SCRIPT_MAP = {
+    'health': 'node_health_check.sh',
+    'cluster-health': 'cluster-health.sh',
+    'disk-health': 'disk-health-check.sh',
+    'version': 'version-check.sh',
+    'stop': 'stop-node.sh',
+    'restart': 'rolling_restart.sh',
+    'reboot': 'reboot-node.sh',
+    'drain': 'drain-node.sh',
+    'decommission': 'decommission-node.sh',
+    'replace': 'prepare-replacement.sh',
+    'rebuild': 'rebuild-node.sh',
+    'repair': 'range-repair.sh',
+    'cleanup': 'cleanup-node.sh',
+    'compact': 'compaction-manager.sh',
+    'garbage-collect': 'garbage-collect.sh',
+    'upgrade-sstables': 'upgrade-sstables.sh',
+    'backup': 'full-backup-to-s3.sh',
+    'incremental-backup': 'incremental-backup-to-s3.sh',
+    'backup-status': 'backup-status.sh',
+    'snapshot': 'take-snapshot.sh',
+    'restore': 'restore-from-s3.sh',
+    'assassinate': 'assassinate-node.sh',
+    'stress': 'stress-test.sh',
+    'manual': 'cassandra-manual.sh',
+    'upgrade-check': 'cassandra-upgrade-precheck.sh',
+}
+
+SCRIPT_DIR = '/usr/local/bin'
+
+def log_message(message, level="INFO"):
+    """Logs a message with a timestamp and level."""
+    color_map = {
+        "INFO": "",
+        "SUCCESS": "",
+        "WARN": "",
+        "ERROR": "",
+    }
+    if COLOR_ENABLED:
+        color_map = {
+            "INFO": colorama.Fore.BLUE,
+            "SUCCESS": colorama.Fore.GREEN,
+            "WARN": colorama.Fore.YELLOW,
+            "ERROR": colorama.Fore.RED,
+        }
+    
+    timestamp = subprocess.check_output(['date', "+%Y-%m-%d %H:%M:%S"], text=True).strip()
+    print(f"{color_map.get(level, '')}[{timestamp}] [{level}] {message}")
+
 
 def main():
-    """Main function to parse arguments and dispatch commands."""
     parser = argparse.ArgumentParser(
-        description="A unified wrapper for managing common Cassandra operational tasks on this node.",
-        prog="cass-ops"
+        description="Unified operations script for Cassandra.",
+        epilog="This script acts as a dispatcher to the underlying operational shell scripts."
+    )
+    parser.add_argument(
+        'command', 
+        choices=SCRIPT_MAP.keys(), 
+        help="The operational command to execute."
+    )
+    parser.add_argument(
+        'args', 
+        nargs=argparse.REMAINDER, 
+        help="Arguments to pass to the underlying script."
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands", required=True)
-
-    # --- Documentation ---
-    subparsers.add_parser("manual", help="Display the full operations manual in the terminal.")
-
-    # --- Node & Cluster Status ---
-    subparsers.add_parser("health", help="Run a comprehensive health check on the local node.")
-    subparsers.add_parser("cluster-health", help="Quickly check cluster connectivity and nodetool status.")
-    disk_health_parser = subparsers.add_parser("disk-health", help="Check disk usage. Ex: disk-health -p /path -w 80 -c 90")
-    disk_health_parser.add_argument('-p', '--path', help="Path to check disk usage for.")
-    disk_health_parser.add_argument('-w', '--warning', help="Warning threshold (percent used).")
-    disk_health_parser.add_argument('-c', '--critical', help="Critical threshold (percent used).")
-    subparsers.add_parser("version", help="Audit and print versions of key software (OS, Java, Cassandra).")
-
-    # --- Node Lifecycle & Maintenance ---
-    subparsers.add_parser("stop", help="Safely drain and stop the Cassandra service.")
-    subparsers.add_parser("restart", help="Perform a safe, rolling restart of the Cassandra service.")
-    subparsers.add_parser("reboot", help="Safely drain Cassandra and reboot the machine.")
-    subparsers.add_parser("drain", help="Drain the node, flushing memtables and stopping client traffic.")
-    subparsers.add_parser("decommission", help="Permanently remove this node from the cluster after streaming its data.")
-    replace_parser = subparsers.add_parser("replace", help="Configure this NEW, STOPPED node to replace a dead node.")
-    replace_parser.add_argument("dead_node_ip", help="IP address of the dead node to replace.")
-    rebuild_parser = subparsers.add_parser("rebuild", help="Rebuild the data on this node by streaming from another datacenter.")
-    rebuild_parser.add_argument("source_dc", help="The source datacenter to rebuild from.")
-    subparsers.add_parser("upgrade-check", help="Run pre-flight checks before a major version upgrade.")
-
-    # --- Data Management & Repair ---
-    repair_parser = subparsers.add_parser("repair", help="Run a safe, granular repair. Can target a keyspace.")
-    repair_parser.add_argument("keyspace", nargs="?", help="Optional: The keyspace to repair.")
-    subparsers.add_parser("cleanup", help="Run 'nodetool cleanup' with safety checks. Pass options after '--'. Ex: cleanup -- -k ks -t tbl")
-    subparsers.add_parser("compact", help="Run 'nodetool compact' with safety checks. Pass options after '--'. Ex: compact -- -k ks -t tbl")
-    subparsers.add_parser("garbage-collect", help="Run 'nodetool garbagecollect' with safety checks. Pass options after '--'. Ex: garbage-collect -- -k ks -t tbl")
-    subparsers.add_parser("upgrade-sstables", help="Run 'nodetool upgradesstables' with safety checks. Pass options after '--'.")
-
-    # --- Backup & Recovery ---
-    subparsers.add_parser("backup", help="Manually trigger a full, node-local backup to S3.")
-    subparsers.add_parser("incremental-backup", help="Triggers an incremental backup. Intended for scheduled jobs.")
-    backup_status_parser = subparsers.add_parser("backup-status", help="Check the status of the last completed backup.")
-    backup_status_parser.add_argument("--source-host", help="Optional: Check status for a different host.")
-    snapshot_parser = subparsers.add_parser("snapshot", help="Take an ad-hoc snapshot. Optionally specify keyspaces.")
-    snapshot_parser.add_argument("keyspaces", nargs="?", help="Optional: Comma-separated list of keyspaces.")
-    subparsers.add_parser("restore", help="Restore data from S3. Pass options after '--'. Ex: restore -- --help")
-
-    # --- Advanced & Destructive Operations ---
-    assassinate_parser = subparsers.add_parser("assassinate", help="Forcibly remove a dead node from the cluster's gossip ring.")
-    assassinate_parser.add_argument("dead_node_ip", help="IP address of the dead node to remove.")
-
-    # --- Performance Testing ---
-    subparsers.add_parser("stress", help="Run 'cassandra-stress' via a wrapper. Pass options after '--'. Ex: stress -- --help")
-
-    # Split sys.argv to handle passthrough arguments for commands like 'compact'
-    try:
-        separator_index = sys.argv.index('--')
-        cass_ops_args = sys.argv[1:separator_index]
-        passthrough_args = sys.argv[separator_index+1:]
-    except ValueError:
-        cass_ops_args = sys.argv[1:]
-        passthrough_args = []
-
-    args = parser.parse_args(cass_ops_args)
-
-    # --- Command to Script Mapping ---
-    command_map = {
-        "manual": "cassandra-manual.sh",
-        "health": "node_health_check.sh",
-        "cluster-health": "cluster-health.sh",
-        "disk-health": "disk-health-check.sh",
-        "version": "version-check.sh",
-        "stop": "stop-node.sh",
-        "restart": "rolling_restart.sh",
-        "reboot": "reboot-node.sh",
-        "drain": "drain-node.sh",
-        "decommission": "decommission-node.sh",
-        "replace": "prepare-replacement.sh",
-        "rebuild": "rebuild-node.sh",
-        "upgrade-check": "cassandra-upgrade-precheck.sh",
-        "repair": "range-repair.sh",
-        "cleanup": "cleanup-node.sh",
-        "compact": "compaction-manager.sh",
-        "garbage-collect": "garbage-collect.sh",
-        "upgrade-sstables": "upgrade-sstables.sh",
-        "backup": "full-backup-to-s3.sh",
-        "incremental-backup": "incremental-backup-to-s3.sh",
-        "backup-status": "backup-status.sh",
-        "snapshot": "take-snapshot.sh",
-        "restore": "restore-from-s3.sh",
-        "assassinate": "assassinate-node.sh",
-        "stress": "stress-test.sh",
-    }
+    args = parser.parse_args()
     
-    script_name = command_map.get(args.command)
+    command = args.command
+    script_name = SCRIPT_MAP.get(command)
+    
     if not script_name:
-        parser.print_help()
+        log_message(f"Unknown command: {command}", level="ERROR")
         sys.exit(1)
-
-    # --- Build and Execute Command ---
-    command_to_run = [os.path.join(SCRIPT_BASE_PATH, script_name)]
-
-    # Handle commands with specific arguments from argparse
-    if args.command == "replace":
-        command_to_run.append(args.dead_node_ip)
-    elif args.command == "rebuild":
-        command_to_run.append(args.source_dc)
-    elif args.command == "assassinate":
-        command_to_run.append(args.dead_node_ip)
-    elif args.command == "repair" and args.keyspace:
-        command_to_run.append(args.keyspace)
-    elif args.command == "snapshot" and args.keyspaces:
-        command_to_run.append(args.keyspaces)
-    elif args.command == "disk-health":
-        if args.path: command_to_run.extend(['-p', args.path])
-        if args.warning: command_to_run.extend(['-w', args.warning])
-        if args.critical: command_to_run.extend(['-c', args.critical])
-    elif args.command == "backup-status" and args.source_host:
-        command_to_run.extend(['--source-host', args.source_host])
-
-    # Add any passthrough arguments
-    if passthrough_args:
-        # Some scripts need '--' to separate their own args from the wrapper's
-        if args.command in ["cleanup", "compact", "garbage-collect", "upgrade-sstables", "restore", "stress"]:
-            command_to_run.append('--')
-        command_to_run.extend(passthrough_args)
-
-    # Using os.execv replaces the current python process with the new command.
-    # This is crucial for allowing the shell scripts to handle interactive
-    # prompts (like 'are you sure?') and signals correctly.
+        
+    script_path = f"{SCRIPT_DIR}/{script_name}"
+    
     try:
-        os.execv(command_to_run[0], command_to_run)
-    except Exception as e:
-        print(f"FATAL: Failed to execute command: {e}", file=sys.stderr)
+        # Construct the full command to execute
+        full_command = [script_path] + args.args
+        log_message(f"Executing command: {' '.join(full_command)}", level="INFO")
+        
+        # Execute the script
+        result = subprocess.run(full_command, check=True, text=True)
+        
+        log_message(f"Command '{command}' completed successfully.", level="SUCCESS")
+        sys.exit(0)
+        
+    except FileNotFoundError:
+        log_message(f"Script not found at {script_path}", level="ERROR")
         sys.exit(1)
-
+    except subprocess.CalledProcessError as e:
+        log_message(f"Command '{command}' failed with exit code {e.returncode}.", level="ERROR")
+        sys.exit(e.returncode)
+    except Exception as e:
+        log_message(f"An unexpected error occurred: {e}", level="ERROR")
+        sys.exit(1)
 
 if __name__ == "__main__":
+    if sys.version_info < (3, 6):
+        sys.exit("This script requires Python 3.6 or newer.")
     main()

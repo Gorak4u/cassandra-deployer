@@ -125,8 +125,8 @@ class profile_cassandra_pfpt {
   $repo_skip_if_unavailable         = lookup('profile_cassandra_pfpt::repo_skip_if_unavailable', { 'default_value' => true })
   $repo_sslverify                   = lookup('profile_cassandra_pfpt::repo_sslverify', { 'default_value' => true })
   $default_dependencies = $facts['os']['family'] ? {
-    'RedHat' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli', 'policycoreutils-python-utils', 'util-linux'],
-    'Debian' => ['libsasl2-modules', 'libjemalloc2', 'python3', 'numactl', 'jq', 'awscli', 'util-linux'],
+    'RedHat' => ['cyrus-sasl-plain', 'jemalloc', 'python3', 'numactl', 'jq', 'awscli', 'policycoreutils-python-utils', 'util-linux', 'python3-colorama'],
+    'Debian' => ['libsasl2-modules', 'libjemalloc2', 'python3', 'numactl', 'jq', 'awscli', 'util-linux', 'python3-colorama'],
     default  => [],
   }
   $package_dependencies             = lookup('profile_cassandra_pfpt::package_dependencies', { 'default_value' => $default_dependencies })
