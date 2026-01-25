@@ -145,13 +145,50 @@ profile_cassandra_pfpt::schema_tables:
 
 This profile installs a unified administrative wrapper script, `cass-ops`, at `/usr/local/bin`. This is your primary entry point for all manual and automated operational tasks. It simplifies management by providing a single, memorable command with clear, grouped sub-commands.
 
-To see all available commands, simply run it with no arguments:
+To see all available commands, simply run `cass-ops` with no arguments or with `-h`.
 
-```bash
-$ sudo /usr/local/bin/cass-ops
 ```
-This will display the full, formatted help text with all commands grouped by category.
+$ sudo /usr/local/bin/cass-ops -h
 
+usage: cass-ops [-h] <command> ...
+
+Unified operations script for Cassandra.
+
+Available Commands:
+  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
+
+  health              Run a comprehensive health check on the local node.
+  cluster-health      Quickly check cluster connectivity and nodetool status.
+  disk-health         Check disk usage against warning/critical thresholds.
+  version             Audit and print versions of key software (OS, Java, Cassandra).
+  stop                Safely drain and stop the Cassandra service.
+  restart             Perform a safe, rolling restart of the Cassandra service.
+  reboot              Safely drain Cassandra and reboot the machine.
+  drain               Drain the node, flushing memtables and stopping client traffic.
+  decommission        Permanently remove this node from the cluster after streaming its data.
+  replace             Configure this NEW, STOPPED node to replace a dead node.
+  rebuild             Rebuild the data on this node by streaming from another datacenter.
+  repair              Run a safe, granular repair on the node's token ranges. Can target a specific keyspace.
+  cleanup             Run 'nodetool cleanup' with safety checks.
+  compact             Run 'nodetool compact' with safety checks.
+  garbage-collect     Run 'nodetool garbagecollect' with safety checks.
+  upgrade-sstables    Run 'nodetool upgradesstables' with safety checks.
+  backup              Manually trigger a full, node-local backup to S3.
+  incremental-backup  Manually trigger an incremental backup to S3.
+  backup-status       Check the status of the last completed backup for a node.
+  snapshot            Take an ad-hoc snapshot with a generated tag.
+  restore             Restore data from S3, list backups, or show restore chains.
+  assassinate         Forcibly remove a dead node from the cluster's gossip ring.
+  stress              Run 'cassandra-stress' via a robust wrapper.
+  manual              Display the full operations manual in the terminal.
+  upgrade-check       Run pre-flight checks before a major version upgrade.
+  backup-guide        Display the full backup and recovery guide.
+  puppet-guide        Display the Puppet architecture guide.
+
+optional arguments:
+  -h, --help            show this help message and exit
+
+```
 > **Note on legacy scripts:** The original `cassandra-admin.sh` script is also available for manual use if needed, but `cass-ops` is the primary and recommended tool for all operations.
 
 ---
@@ -216,17 +253,17 @@ To manually trigger compaction while safely monitoring disk space:
 
 ```bash
 # Compact a specific table
-sudo /usr/local/bin/cass-ops compact -k my_keyspace -t my_table
+sudo /usr/local/bin/cass-ops compact -- -k my_keyspace -t my_table
 
 # Compact an entire keyspace
-sudo /usr/local/bin/cass-ops compact -k my_keyspace
+sudo /usr/local/bin/cass-ops compact -- -k my_keyspace
 ```
 
 #### Garbage Collection
 To manually remove droppable tombstones with pre-flight safety checks:
 
 ```bash
-sudo /usr/local/bin/cass-ops garbage-collect -k my_keyspace -t users
+sudo /usr/local/bin/cass-ops garbage-collect -- -k my_keyspace -t users
 ```
 
 #### SSTable Upgrades
@@ -425,12 +462,17 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::coralogix_jmx_metrics` (Array[String]): An array of JMX MBeans to collect as metrics. Default: A list of key latency and load metrics.
 *   `profile_cassandra_pfpt::coralogix_jmx_endpoint` (String): The JMX endpoint for the agent to connect to. Default: `'service:jmx:rmi:///jndi/rmi://localhost:7199/jmxrmi'`.
 
+### Puppet Agent Management
+*   `profile_cassandra_pfpt::manage_puppet_agent_cron` (Boolean): Enables or disables the management of the Puppet agent cron job. Default: `false`.
+*   `profile_cassandra_pfpt::puppet_cron_schedule` (String): The 5-field cron schedule for the Puppet agent run. Default: A staggered schedule running twice per hour.
+
 ---
 
 ## Puppet Agent Management
 
-The base `cassandra_pfpt` component module includes logic to manage the Puppet agent itself by ensuring a scheduled run is in place via cron.
+This profile can manage the Puppet agent's cron job to ensure regular configuration runs. By default, this is **disabled**.
 
-*   **Scheduled Runs:** By default, the Puppet agent will run twice per hour at a staggered minute.
+*   **Enabling:** To enable, set `profile_cassandra_pfpt::manage_puppet_agent_cron: true` in your Hiera data.
+*   **Scheduled Runs:** When enabled, the Puppet agent will run twice per hour at a staggered minute by default.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.

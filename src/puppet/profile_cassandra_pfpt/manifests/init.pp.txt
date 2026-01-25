@@ -225,6 +225,10 @@ class profile_cassandra_pfpt {
   # --- Stress Testing ---
   $manage_stress_test               = lookup('profile_cassandra_pfpt::manage_stress_test', { 'default_value' => false })
 
+  # --- Puppet Agent Management ---
+  $manage_puppet_agent_cron         = lookup('profile_cassandra_pfpt::manage_puppet_agent_cron', { 'default_value' => false })
+  $puppet_cron_schedule_string      = lookup('profile_cassandra_pfpt::puppet_cron_schedule', { 'default_value' => "${fqdn_rand(30)},${fqdn_rand(30) + 30} * * * *" })
+
 
   # ============================================================================
   # Class Declaration
@@ -412,5 +416,23 @@ class profile_cassandra_pfpt {
     node_exporter_bin_dir            => $node_exporter_bin_dir,
     # Stress Testing
     manage_stress_test               => $manage_stress_test,
+  }
+
+  # ============================================================================
+  # Puppet Agent Cron Management
+  # ============================================================================
+  if $manage_puppet_agent_cron {
+    $puppet_cron_parts = split($puppet_cron_schedule_string, ' ')
+
+    cron { 'puppet-agent':
+      ensure  => 'present',
+      command => 'test ! -f /var/lib/puppet-disabled && puppet agent -t > /dev/null 2>&1',
+      user    => 'root',
+      minute  => $puppet_cron_parts[0],
+      hour    => $puppet_cron_parts[1],
+      monthday=> $puppet_cron_parts[2],
+      month   => $puppet_cron_parts[3],
+      weekday => $puppet_cron_parts[4],
+    }
   }
 }
