@@ -410,6 +410,10 @@ echo -e "*   \`profile_cassandra_pfpt::s3_retention_period\` (Integer): The numb
 echo -e "*   \`profile_cassandra_pfpt::clearsnapshot_keep_days\` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: \`3\`."
 echo -e "*   \`profile_cassandra_pfpt::upload_streaming\` (Boolean): Whether to use a direct streaming pipeline for backups (\`true\`) or a more robust method using temporary files (\`false\`). Streaming is faster but can hide errors. Default: \`false\`."
 echo -e "*   \`profile_cassandra_pfpt::backup_parallelism\` (Integer): The number of concurrent tables to process during backup or restore operations. Default: \`4\`."
+echo -e "*   \`profile_cassandra_pfpt::backup_exclude_keyspaces\` (Array[String]): A list of keyspace names to exclude from backups. Default: \`[]\`."
+echo -e "*   \`profile_cassandra_pfpt::backup_exclude_tables\` (Array[String]): A list of specific tables to exclude, in \`'keyspace.table'\` format. Default: \`[]\`."
+echo -e "*   \`profile_cassandra_pfpt::backup_include_only_keyspaces\` (Array[String]): If set, **only** these keyspaces will be backed up. All other tables will be ignored. Default: \`[]\`."
+echo -e "*   \`profile_cassandra_pfpt::backup_include_only_tables\` (Array[String]): If set, **only** these specific tables will be backed up. This is the most granular option and takes precedence. Default: \`[]\`."
 echo -e "*   \`profile_cassandra_pfpt::manage_stress_test\` (Boolean): Set to \`true\` to install the \`cassandra-stress\` tools and the \`/usr/local/bin/stress-test.sh\` wrapper script. Default: \`false\`."
 ) | less -R
 }
