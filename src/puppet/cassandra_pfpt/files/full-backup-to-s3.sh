@@ -20,17 +20,24 @@ NC='\033[0m' # No Color
 CONFIG_FILE="/etc/backup/config.json"
 # Define a default log file path in case config loading fails, ensuring early errors are logged.
 LOG_FILE="/var/log/cassandra/full_backup.log"
-LOCAL_BACKUP_BASE_DIR="/var/lib/cassandra/local_backups" # Persistent local backups
 
 log_message() {
   # This version of log_message does not add colors, as the caller functions will.
   echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-log_info() { log_message "${BLUE}$1${NC}"; }
-log_success() { log_message "${GREEN}$1${NC}"; }
-log_warn() { log_message "${YELLOW}$1${NC}"; }
-log_error() { log_message "${RED}$1${NC}"; }
+log_info() {
+    log_message "${BLUE}$1${NC}"
+}
+log_success() {
+    log_message "${GREEN}$1${NC}"
+}
+log_warn() {
+    log_message "${YELLOW}$1${NC}"
+}
+log_error() {
+    log_message "${RED}$1${NC}"
+}
 
 # --- Argument Parsing ---
 MODE="default"
@@ -71,15 +78,22 @@ fi
 
 # --- Pre-flight Checks ---
 for tool in jq aws openssl nodetool cqlsh xargs su find; do
-    if ! command -v $tool &>/dev/null; then log_error "Required tool '$tool' is not installed or in PATH."; exit 1; fi
+    if ! command -v $tool &>/dev/null; then
+        log_error "Required tool '$tool' is not installed or in PATH."
+        exit 1
+    fi
 done
-if [ ! -f "$CONFIG_FILE" ]; then log_error "Backup configuration file not found at $CONFIG_FILE"; exit 1; fi
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  log_error "Backup configuration file not found at $CONFIG_FILE"
+  exit 1
+fi
 
 # --- Source All Configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
-LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE") # Overwrite default
+LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
 UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
@@ -102,11 +116,109 @@ fi
 # --- Static Configuration ---
 BACKUP_TAG=${BACKUP_TAG_OVERRIDE:-$(date +'%Y-%m-%d-%H-%M')}
 HOSTNAME=$(hostname -s)
+LOCAL_BACKUP_BASE_DIR="/var/lib/cassandra/local_backups"
 LOCAL_BACKUP_DIR="$LOCAL_BACKUP_BASE_DIR/$BACKUP_TAG"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
 
-# --- Functions ---
+# --- AWS Credential Check Function ---
+check_aws_credentials() {
+  if [ "$BACKUP_BACKEND" != "s3" ] || [ -f "/var/lib/upload-disabled" ]; then
+    return 0
+  fi
+  
+  log_info "Verifying AWS credentials..."
+  if ! aws sts get-caller-identity > /dev/null 2>&1; then
+    log_error "AWS credentials not found or invalid."
+    log_error "Please configure credentials for this node, e.g., via an IAM role."
+    log_error "Aborting backup before taking a snapshot to prevent wasted effort."
+    return 1
+  fi
+  log_success "AWS credentials are valid."
+  return 0
+}
+
+# --- S3 Bucket Management Functions ---
+manage_s3_lifecycle() {
+    if [ "$BACKUP_BACKEND" != "s3" ] || [[ ! "$S3_RETENTION_PERIOD" =~ ^[1-9][0-9]*$ ]]; then
+        log_info "S3 lifecycle management is skipped. Backend is not 's3' or retention period is not a positive number."
+        return 0
+    fi
+
+    local policy_id="auto-expire-backups"
+    log_info "Checking for S3 lifecycle policy '$policy_id' with retention of $S3_RETENTION_PERIOD days..."
+
+    local existing_policy_json
+    existing_policy_json=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null || echo "")
+
+    local existing_policy_days=""
+    if echo "$existing_policy_json" | jq -e . > /dev/null 2>&1; then
+        existing_policy_days=$(echo "$existing_policy_json" | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days // ""')
+    fi
+
+    if [[ "$existing_policy_days" == "$S3_RETENTION_PERIOD" ]]; then
+        log_success "Correct lifecycle policy already in place. Nothing to do."
+        return 0
+    elif [[ -n "$existing_policy_days" ]]; then
+        log_warn "A lifecycle policy with ID '$policy_id' exists but has a different retention ($existing_policy_days days). It will be updated."
+    else
+        log_info "No lifecycle policy named '$policy_id' found. A new one will be created."
+    fi
+
+    local lifecycle_json
+    lifecycle_json=$(jq -n \
+        --arg ID "$policy_id" \
+        --argjson DAYS "$S3_RETENTION_PERIOD" \
+        '{
+            "Rules": [
+                {
+                    "ID": $ID,
+                    "Filter": {
+                        "Prefix": ""
+                    },
+                    "Status": "Enabled",
+                    "Expiration": {
+                        "Days": $DAYS
+                    }
+                }
+            ]
+        }')
+
+    log_info "Applying lifecycle policy to bucket '$S3_BUCKET_NAME'..."
+    if ! aws s3api put-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" --lifecycle-configuration "$lifecycle_json"; then
+        log_error "Failed to apply S3 lifecycle policy. Backups will still proceed, but will not be automatically deleted."
+        return 0
+    fi
+
+    log_success "S3 lifecycle policy applied successfully."
+}
+
+ensure_s3_bucket_and_lifecycle() {
+    if [ "$BACKUP_BACKEND" != "s3" ]; then
+        return 0
+    fi
+    log_info "Checking if S3 bucket 's3://$S3_BUCKET_NAME' exists..."
+    if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" > /dev/null 2>&1; then
+        log_success "S3 bucket already exists."
+        manage_s3_lifecycle
+        return 0
+    else
+        log_warn "S3 bucket '$S3_BUCKET_NAME' does not exist. Attempting to create it..."
+        if aws s3 mb "s3://$S3_BUCKET_NAME"; then
+            log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
+            manage_s3_lifecycle
+            return 0
+        else
+            log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
+            log_error "Please check your AWS permissions (s3:CreateBucket) and ensure the bucket name is globally unique."
+            return 1
+        fi
+    fi
+}
+
+# --- Utility Functions ---
+
+run_nodetool() { su -s /bin/bash "$CASSANDRA_USER" -c "nodetool $@"; }
 
 cleanup_old_snapshots() {
     if [ -f "/var/lib/cleanup-disabled" ]; then
@@ -161,9 +273,6 @@ cleanup_old_snapshots() {
     done
     log_info "--- Snapshot Cleanup Finished ---"
 }
-
-
-run_nodetool() { su -s /bin/bash "$CASSANDRA_USER" -c "nodetool $@"; }
 
 process_table_backup() {
     local snapshot_dir="$1"
@@ -335,9 +444,19 @@ do_cleanup() {
 
 # --- Main Logic ---
 if [ "$(id -u)" -ne 0 ]; then log_error "This script must be run as root."; exit 1; fi
+
 if [ -f "/var/lib/backup-disabled" ] && [ "$MODE" != "cleanup_only" ] && [ "$MODE" != "upload_only" ]; then
     log_info "Backup creation is disabled via /var/lib/backup-disabled. Aborting."; exit 0;
 fi
+
+if ! check_aws_credentials; then
+    exit 1
+fi
+
+if ! ensure_s3_bucket_and_lifecycle; then
+    exit 1
+fi
+
 if [ -f "$LOCK_FILE" ]; then
     OLD_PID=$(cat "$LOCK_FILE"); if ps -p "$OLD_PID" >/dev/null; then log_warn "Backup process with PID $OLD_PID is still running. Exiting."; exit 1; fi
     log_warn "Stale lock file found for dead PID $OLD_PID. Removing."; rm -f "$LOCK_FILE"
@@ -372,3 +491,5 @@ case "$MODE" in
 esac
 log_info "--- Full Backup Process Finished ---"
 exit 0
+
+    
