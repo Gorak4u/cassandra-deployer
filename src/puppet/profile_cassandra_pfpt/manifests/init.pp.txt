@@ -175,6 +175,10 @@ class profile_cassandra_pfpt {
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
   $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
+  $backup_exclude_keyspaces         = lookup('profile_cassandra_pfpt::backup_exclude_keyspaces', { 'default_value' => [] })
+  $backup_exclude_tables            = lookup('profile_cassandra_pfpt::backup_exclude_tables', { 'default_value' => [] })
+  $backup_include_only_keyspaces    = lookup('profile_cassandra_pfpt::backup_include_only_keyspaces', { 'default_value' => [] })
+  $backup_include_only_tables       = lookup('profile_cassandra_pfpt::backup_include_only_tables', { 'default_value' => [] })
 
   # --- Automated Repair ---
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
@@ -381,6 +385,10 @@ class profile_cassandra_pfpt {
     incremental_backup_script_path   => $incremental_backup_script_path,
     full_backup_log_file             => $full_backup_log_file,
     incremental_backup_log_file      => $incremental_backup_log_file,
+    backup_exclude_keyspaces         => $backup_exclude_keyspaces,
+    backup_exclude_tables            => $backup_exclude_tables,
+    backup_include_only_keyspaces    => $backup_include_only_keyspaces,
+    backup_include_only_tables       => $backup_include_only_tables,
     # Automated Repair
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
