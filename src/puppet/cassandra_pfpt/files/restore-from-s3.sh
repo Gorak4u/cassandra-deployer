@@ -20,27 +20,53 @@ CONFIG_FILE="/etc/backup/config.json"
 # Define a default log file path in case config loading fails, ensuring early errors are logged.
 RESTORE_LOG_FILE="/var/log/cassandra/restore.log"
 
+# Global variables, some will be populated later
+HOSTNAME=$(hostname -s)
+TEMP_RESTORE_DIR="" 
+TARGET_DATE=""
+KEYSPACE_NAME=""
+TABLE_NAME=""
+MODE=""
+AUTO_APPROVE=false
+S3_BUCKET_OVERRIDE=""
+SOURCE_HOST_OVERRIDE=""
+EFFECTIVE_S3_BUCKET=""
+EFFECTIVE_SOURCE_HOST=""
+BASE_FULL_BACKUP=""
+CHAIN_TO_RESTORE=()
+TMP_KEY_FILE=""
+TMP_SCHEMA_MAP_FILE=""
+# These will be loaded from config.json
+S3_BUCKET_NAME=""
+CASSANDRA_DATA_DIR=""
+CASSANDRA_CONF_DIR=""
+CASSANDRA_COMMITLOG_DIR=""
+CASSANDRA_CACHES_DIR=""
+LISTEN_ADDRESS=""
+SEEDS=""
+CASSANDRA_USER=""
+CASSANDRA_PASSWORD=""
+SSL_ENABLED=""
+SSL_TRUSTSTORE_PATH=""
+SSL_TRUSTSTORE_PASSWORD=""
+BACKUP_BACKEND=""
+PARALLELISM=""
+LOADER_NODES=""
+RESTORE_BASE_PATH=""
+DOWNLOAD_ONLY_PATH=""
+
+
+# --- Logging Functions ---
 log_message() {
     # This version of log_message does not add colors, as the caller functions will.
     echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$RESTORE_LOG_FILE"
 }
-
-log_info() {
-    log_message "${BLUE}$1${NC}"
-}
-log_success() {
-    log_message "${GREEN}$1${NC}"
-}
-log_warn() {
-    log_message "${YELLOW}$1${NC}"
-}
-log_error() {
-    log_message "${RED}$1${NC}"
-}
-
+log_info() { log_message "${BLUE}$1${NC}"; }
+log_success() { log_message "${GREEN}$1${NC}"; }
+log_warn() { log_message "${YELLOW}$1${NC}"; }
+log_error() { log_message "${RED}$1${NC}"; }
 
 # --- Pre-flight Checks ---
-# Run these checks as early as possible so any failure is logged.
 if [ "$(id -u)" -ne 0 ]; then
     log_error "This script must be run as root."
     exit 1
@@ -57,39 +83,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     log_error "Backup configuration file not found at $CONFIG_FILE"
     exit 1
 fi
-
-# --- Variables defined after initial checks ---
-HOSTNAME=$(hostname -s)
-TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
-
-# --- Usage ---
-usage() {
-    # This function prints help text to stderr and exits.
-    # It does not use log_message to avoid polluting the log file.
-    cat >&2 <<EOF
-${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}
-
-If run with no arguments, this script will enter an interactive wizard mode.
-
-Modes (choose one):
-  --list-backups                List all available backup sets for a host.
-  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date.
-  --full-restore                Performs a full, destructive restore of the entire node.
-  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup.
-  --download-only               Downloads data for a specific keyspace/table, but does not load it into Cassandra.
-  --download-and-restore        Downloads and restores data for a specific keyspace/table into the live cluster.
-
-Options:
-  --date <timestamp>            Required for all restore modes. Target UTC timestamp ('YYYY-MM-DD-HH-MM').
-  --keyspace <ks>               Required for --download-only and --download-and-restore modes.
-  --table <table>               Optional. Narrows the granular restore to a single table.
-  --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname.
-  --s3-bucket <name>            Override the S3 bucket from config.json.
-  --yes                         Skips all interactive confirmation prompts. Use with caution.
-EOF
-    exit 1
-}
-
 
 # --- Source configuration from JSON ---
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
@@ -127,8 +120,38 @@ else
     LOADER_NODES="$LISTEN_ADDRESS"
 fi
 
-# --- New Interactive Mode Functions ---
 
+# --- ALL FUNCTION DEFINITIONS ---
+
+# --- Usage ---
+usage() {
+    # This function prints help text to stderr and exits.
+    # It does not use log_message to avoid polluting the log file.
+    cat >&2 <<EOF
+${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}
+
+If run with no arguments, this script will enter an interactive wizard mode.
+
+Modes (choose one):
+  --list-backups                List all available backup sets for a host.
+  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date.
+  --full-restore                Performs a full, destructive restore of the entire node.
+  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup.
+  --download-only               Downloads data for a specific keyspace/table, but does not load it into Cassandra.
+  --download-and-restore        Downloads and restores data for a specific keyspace/table into the live cluster.
+
+Options:
+  --date <timestamp>            Required for all restore modes. Target UTC timestamp ('YYYY-MM-DD-HH-MM').
+  --keyspace <ks>               Required for --download-only and --download-and-restore modes.
+  --table <table>               Optional. Narrows the granular restore to a single table.
+  --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname.
+  --s3-bucket <name>            Override the S3 bucket from config.json.
+  --yes                         Skips all interactive confirmation prompts. Use with caution.
+EOF
+    exit 1
+}
+
+# --- Interactive Mode Functions ---
 _select_from_list() {
     local prompt="$1"
     shift
@@ -167,6 +190,8 @@ run_interactive_mode() {
         EFFECTIVE_S3_BUCKET="$bucket_input"
     fi
     log_info "Using S3 bucket: $EFFECTIVE_S3_BUCKET"
+    # Update global override so it's used by other functions if called from here
+    S3_BUCKET_OVERRIDE=$EFFECTIVE_S3_BUCKET
 
     # Step 2: List hosts and get Source Host
     log_info "Fetching available hosts from S3..."
@@ -186,6 +211,8 @@ run_interactive_mode() {
         EFFECTIVE_SOURCE_HOST="$host_input"
     fi
     log_info "Using source host: $EFFECTIVE_SOURCE_HOST"
+    # Update global override
+    SOURCE_HOST_OVERRIDE=$EFFECTIVE_SOURCE_HOST
 
     # Step 3: Select Restore Mode
     local restore_modes=("Full Node Restore (Destructive)" "Granular Restore (Keyspace/Table)" "Schema-Only Restore" "List Backups" "Show Restore Chain")
@@ -294,91 +321,19 @@ run_interactive_mode() {
     fi
 }
 
-# --- Argument Parsing ---
-TARGET_DATE=""
-KEYSPACE_NAME=""
-TABLE_NAME=""
-MODE=""
-RESTORE_ACTION=""
-AUTO_APPROVE=false
-S3_BUCKET_OVERRIDE=""
-SOURCE_HOST_OVERRIDE=""
-
-# Define effective variables early for use in interactive mode
-EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
-EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
-
-# === NEW: Entrypoint for Interactive Mode ===
-if [ "$#" -eq 0 ]; then
-    run_interactive_mode
-    exit 0
-fi
-
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --date) TARGET_DATE="$2"; shift ;;
-        --keyspace) KEYSPACE_NAME="$2"; shift ;;
-        --table) TABLE_NAME="$2"; shift ;;
-        --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
-        --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
-        --full-restore) MODE="full" ;;
-        --download-only) MODE="download_only" ;;
-        --download-and-restore) MODE="download_and_restore" ;;
-        --schema-only) MODE="schema_only" ;;
-        --list-backups) MODE="list";;
-        --show-restore-chain) MODE="chain";;
-        --yes) AUTO_APPROVE=true ;;
-        *) log_error "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-done
-
-# Redefine effective variables after parsing args
-EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
-EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
-
-# Validate arguments
-if [ -z "$MODE" ]; then
-    log_error "No mode specified. You must choose one of: --list-backups, --show-restore-chain, --full-restore, --schema-only, --download-only, --download-and-restore"
-    usage
-fi
-
-if [[ "$MODE" == "chain" || "$MODE" == "full" || "$MODE" == "download_only" || "$MODE" == "download_and_restore" || "$MODE" == "schema_only" ]] && [ -z "$TARGET_DATE" ]; then
-    log_error "--date is required for this mode."
-    usage
-fi
-
-if [[ "$MODE" == "download_only" || "$MODE" == "download_and_restore" ]]; then
-    if [ -z "$KEYSPACE_NAME" ]; then
-        log_error "--keyspace must be specified for the --$MODE mode."
-        usage
-    fi
-fi
-
-# --- Cleanup & Trap Logic ---
-TMP_KEY_FILE=$(mktemp)
-TMP_SCHEMA_MAP_FILE="/tmp/schema_map_json_$$"
-chmod 600 "$TMP_KEY_FILE"
-
+# --- Core Logic Functions ---
 cleanup() {
     log_info "Running cleanup..."
-    rm -f "$TMP_KEY_FILE" "$TMP_SCHEMA_MAP_FILE"
+    # rm -f requires the variables to be defined, but trap can run before they are.
+    # Check if they are non-empty before trying to remove.
+    if [ -n "$TMP_KEY_FILE" ]; then rm -f "$TMP_KEY_FILE"; fi
+    if [ -n "$TMP_SCHEMA_MAP_FILE" ]; then rm -f "$TMP_SCHEMA_MAP_FILE"; fi
+    
     if [[ -n "$TEMP_RESTORE_DIR" && -d "$TEMP_RESTORE_DIR" ]]; then
         log_info "Removing temporary restore directory: $TEMP_RESTORE_DIR"
         rm -rf "$TEMP_RESTORE_DIR"
     fi
 }
-trap cleanup EXIT
-
-# Extract key from config and write to temp file
-ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
-if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
-    log_error "encryption_key is empty or not found in $CONFIG_FILE"
-    exit 1
-fi
-echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
-
-# --- Core Logic Functions ---
 
 find_backup_chain() {
     log_info "Searching for backup chain to restore to point-in-time: $TARGET_DATE"
@@ -925,9 +880,80 @@ do_show_restore_chain() {
 }
 
 
-# --- Main Execution ---
+# --- SCRIPT MAIN EXECUTION ---
+
+# Define effective variables early for use in interactive mode
+EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+
+# === Entrypoint for Interactive Mode ===
+if [ "$#" -eq 0 ]; then
+    run_interactive_mode
+    exit 0
+fi
+
+# --- Argument Parsing for command-line mode ---
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --date) TARGET_DATE="$2"; shift ;;
+        --keyspace) KEYSPACE_NAME="$2"; shift ;;
+        --table) TABLE_NAME="$2"; shift ;;
+        --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
+        --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
+        --full-restore) MODE="full" ;;
+        --download-only) MODE="download_only" ;;
+        --download-and-restore) MODE="download_and_restore" ;;
+        --schema-only) MODE="schema_only" ;;
+        --list-backups) MODE="list";;
+        --show-restore-chain) MODE="chain";;
+        --yes) AUTO_APPROVE=true ;;
+        *) log_error "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
+# Redefine effective variables after parsing args
+EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+
+# Validate arguments
+if [ -z "$MODE" ]; then
+    log_error "No mode specified. You must choose one of: --list-backups, --show-restore-chain, --full-restore, --schema-only, --download-only, --download-and-restore"
+    usage
+fi
+
+if [[ "$MODE" == "chain" || "$MODE" == "full" || "$MODE" == "download_only" || "$MODE" == "download_and_restore" || "$MODE" == "schema_only" ]] && [ -z "$TARGET_DATE" ]; then
+    log_error "--date is required for this mode."
+    usage
+fi
+
+if [[ "$MODE" == "download_only" || "$MODE" == "download_and_restore" ]]; then
+    if [ -z "$KEYSPACE_NAME" ]; then
+        log_error "--keyspace must be specified for the --$MODE mode."
+        usage
+    fi
+fi
+
+# --- Cleanup & Trap Logic ---
+TMP_KEY_FILE=$(mktemp)
+TMP_SCHEMA_MAP_FILE="/tmp/schema_map_json_$$"
+chmod 600 "$TMP_KEY_FILE"
+
+trap cleanup EXIT
+
+# Extract key from config and write to temp file
+ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
+if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
+    log_error "encryption_key is empty or not found in $CONFIG_FILE"
+    exit 1
+fi
+echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+
+
+# --- MAIN EXECUTION ROUTER ---
 
 log_info "--- Starting Point-in-Time Restore Manager ---"
+log_info "Mode: $MODE"
 log_info "Target S3 Bucket: $EFFECTIVE_S3_BUCKET"
 log_info "Source Hostname for Restore: $EFFECTIVE_SOURCE_HOST"
 log_info "Parallelism: $PARALLELISM"
@@ -955,7 +981,7 @@ log_info "Backup chain to be restored (chronological order):"
 printf " - %s\n" "${CHAIN_TO_RESTORE[@]}"
 log_info "Base full backup for this chain is: $BASE_FULL_BACKUP"
 
-if [ "$AUTO_APPROVE" = false ]; then
+if [ "$AUTO_APPROVE" = false ] && [ "$MODE" != "chain" ]; then
     read -p "Does the restore chain above look correct? Type 'yes' to proceed: " manifest_confirmation
     if [[ "$manifest_confirmation" != "yes" ]]; then
         log_info "Restore aborted by user based on chain review."
@@ -986,4 +1012,3 @@ case $MODE in
 esac
 
 exit 0
-
