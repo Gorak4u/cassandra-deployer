@@ -33,7 +33,7 @@
 
 ## Description
 
-This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` shell script, installed in `/usr/local/bin`.
+This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` wrapper script, installed in `/usr/local/bin`.
 
 ## Setup
 
@@ -147,7 +147,7 @@ This profile installs a unified administrative wrapper script, `cass-ops`, at `/
 
 To see all available commands, simply run `cass-ops` with no arguments or with `-h`.
 
-```
+```bash
 $ sudo /usr/local/bin/cass-ops -h
 
 usage: cass-ops [-h] <command> ...
@@ -443,9 +443,33 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
 *   `profile_cassandra_pfpt::backup_parallelism` (Integer): The number of concurrent tables to process during backup or restore operations. Default: `4`.
 *   `profile_cassandra_pfpt::backup_exclude_keyspaces` (Array[String]): A list of keyspace names to exclude from backups. Default: `[]`.
+    ```yaml
+    # Example:
+    profile_cassandra_pfpt::backup_exclude_keyspaces:
+      - 'metrics_keyspace'
+      - 'temp_data'
+    ```
 *   `profile_cassandra_pfpt::backup_exclude_tables` (Array[String]): A list of specific tables to exclude, in `'keyspace.table'` format. Default: `[]`.
+    ```yaml
+    # Example:
+    profile_cassandra_pfpt::backup_exclude_tables:
+      - 'my_app.audit_logs'
+      - 'my_app.session_data'
+    ```
 *   `profile_cassandra_pfpt::backup_include_only_keyspaces` (Array[String]): If set, **only** keyspaces in this list will be backed up. Default: `[]`.
+    ```yaml
+    # Example:
+    profile_cassandra_pfpt::backup_include_only_keyspaces:
+      - 'billing'
+      - 'user_data'
+    ```
 *   `profile_cassandra_pfpt::backup_include_only_tables` (Array[String]): If set, **only** tables in this list (in `'keyspace.table'` format) will be backed up. Takes precedence over `backup_include_only_keyspaces`. Default: `[]`.
+    ```yaml
+    # Example:
+    profile_cassandra_pfpt::backup_include_only_tables:
+      - 'user_data.profiles'
+      - 'user_data.settings'
+    ```
 *   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/bin/stress-test.sh` wrapper script. Default: `false`.
 
 ### Monitoring & Agent Integrations
