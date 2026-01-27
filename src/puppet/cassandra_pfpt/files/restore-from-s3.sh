@@ -64,23 +64,27 @@ TEMP_RESTORE_DIR="" # Global variable to track the temporary directory
 
 # --- Usage ---
 usage() {
-    log_message "${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}"
-    log_message ""
-    log_message "Modes (choose one):"
-    log_message "  --list-backups                List all available backup sets for a host."
-    log_message "  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date."
-    log_message "  --full-restore                Performs a full, destructive restore of the entire node."
-    log_message "  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup."
-    log_message "  --download-only               Downloads data for a specific keyspace/table, but does not load it into Cassandra."
-    log_message "  --download-and-restore        Downloads and restores data for a specific keyspace/table into the live cluster."
-    log_message ""
-    log_message "Options:"
-    log_message "  --date <timestamp>            Required for all restore modes. Target UTC timestamp ('YYYY-MM-DD-HH-MM')."
-    log_message "  --keyspace <ks>               Required for --download-only and --download-and-restore modes."
-    log_message "  --table <table>               Optional. Narrows the granular restore to a single table."
-    log_message "  --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname."
-    log_message "  --s3-bucket <name>            Override the S3 bucket from config.json."
-    log_message "  --yes                         Skips all interactive confirmation prompts. Use with caution."
+    # This function prints help text to stderr and exits.
+    # It does not use log_message to avoid polluting the log file.
+    cat >&2 <<EOF
+${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}
+
+Modes (choose one):
+  --list-backups                List all available backup sets for a host.
+  --show-restore-chain          Show the specific backup files that would be used for a restore to a given date.
+  --full-restore                Performs a full, destructive restore of the entire node.
+  --schema-only                 Downloads only the schema definition (schema.cql) from the latest full backup.
+  --download-only               Downloads data for a specific keyspace/table, but does not load it into Cassandra.
+  --download-and-restore        Downloads and restores data for a specific keyspace/table into the live cluster.
+
+Options:
+  --date <timestamp>            Required for all restore modes. Target UTC timestamp ('YYYY-MM-DD-HH-MM').
+  --keyspace <ks>               Required for --download-only and --download-and-restore modes.
+  --table <table>               Optional. Narrows the granular restore to a single table.
+  --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname.
+  --s3-bucket <name>            Override the S3 bucket from config.json.
+  --yes                         Skips all interactive confirmation prompts. Use with caution.
+EOF
     exit 1
 }
 
@@ -422,11 +426,14 @@ do_full_restore() {
             _main() {
                 local full_s3_key="$1"
                 
-                # Extract ks/table from path like host/tag/ks/table.tar.gz.enc
-                local path_part=${full_s3_key#*"'$backup_ts'"/}
-                local ks_name=$(dirname "$path_part")
-                local archive_filename=$(basename "$path_part")
-                local table_name=${archive_filename%%.tar.gz.enc}
+                local path_part
+                path_part=${full_s3_key#*"'$backup_ts'"/}
+                local ks_name
+                ks_name=$(dirname "$path_part" | sed "s/^\///") # remove leading slash if present
+                local archive_filename
+                archive_filename=$(basename "$path_part")
+                local table_name
+                table_name=${archive_filename%%.tar.gz.enc}
 
                 local schema_map_json
                 schema_map_json=$(cat $TMP_SCHEMA_MAP_FILE)
@@ -542,11 +549,14 @@ do_granular_restore() {
             _main() {
                 local full_s3_key="$1"
                 
-                # Extract ks/table from path like host/tag/ks/table.tar.gz.enc
-                local path_part=${full_s3_key#*"'$backup_ts'"/}
-                local ks_name=$(dirname "$path_part")
-                local archive_filename=$(basename "$path_part")
-                local table_name=${archive_filename%%.tar.gz.enc}
+                local path_part
+                path_part=${full_s3_key#*"'$backup_ts'"/}
+                local ks_name
+                ks_name=$(dirname "$path_part" | sed "s/^\///")
+                local archive_filename
+                archive_filename=$(basename "$path_part")
+                local table_name
+                table_name=${archive_filename%%.tar.gz.enc}
 
                 local schema_map_json
                 schema_map_json=$(cat $TMP_SCHEMA_MAP_FILE)
