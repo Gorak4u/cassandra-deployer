@@ -153,28 +153,41 @@ _select_from_list() {
 
 run_interactive_mode() {
     log_info "--- Welcome to the Interactive Cassandra Restore Wizard ---"
+    log_info "Press [Enter] to accept the default value shown in brackets."
 
     if ! command -v aws >/dev/null || ! command -v jq >/dev/null; then
         log_error "Interactive mode requires 'aws' and 'jq' to be installed and configured."
         exit 1
     fi
 
-    # Step 1: Select Host
+    # Step 1: Get S3 Bucket
+    local bucket_input
+    read -p "Enter the S3 bucket name [default: $EFFECTIVE_S3_BUCKET]: " bucket_input
+    if [ -n "$bucket_input" ]; then
+        EFFECTIVE_S3_BUCKET="$bucket_input"
+    fi
+    log_info "Using S3 bucket: $EFFECTIVE_S3_BUCKET"
+
+    # Step 2: List hosts and get Source Host
     log_info "Fetching available hosts from S3..."
     local hosts_raw
-    hosts_raw=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/" | grep ' PRE ' | awk '{print $2}' | sed 's|/||')
+    hosts_raw=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/" | grep ' PRE ' | awk '{print $2}' | sed 's|/||' | xargs)
     if [ -z "$hosts_raw" ]; then
         log_error "No hosts found in S3 bucket '$EFFECTIVE_S3_BUCKET'."
         exit 1
     fi
-    local hosts_list=($hosts_raw)
     
-    local selected_host
-    selected_host=$(_select_from_list "Please select the source host to restore from: " "${hosts_list[@]}")
-    if [ -z "$selected_host" ]; then log_info "Restore cancelled by user."; exit 0; fi
-    EFFECTIVE_SOURCE_HOST="$selected_host" # Override global for this run
+    log_info "Available hosts in bucket:"
+    echo "$hosts_raw" | xargs -n 1 echo "  -"
 
-    # Step 2: Select Restore Mode
+    local host_input
+    read -p "Enter the source host name [default: $EFFECTIVE_SOURCE_HOST]: " host_input
+    if [ -n "$host_input" ]; then
+        EFFECTIVE_SOURCE_HOST="$host_input"
+    fi
+    log_info "Using source host: $EFFECTIVE_SOURCE_HOST"
+
+    # Step 3: Select Restore Mode
     local restore_modes=("Full Node Restore (Destructive)" "Granular Restore (Keyspace/Table)" "Schema-Only Restore" "List Backups" "Show Restore Chain")
     local selected_mode
     selected_mode=$(_select_from_list "Please select the restore mode: " "${restore_modes[@]}")
@@ -191,11 +204,11 @@ run_interactive_mode() {
 
     # Handle modes that don't need a date
     if [ "$mode_flag" == "--list-backups" ]; then
-        "$0" "$mode_flag" --source-host "$EFFECTIVE_SOURCE_HOST"
+        "$0" "$mode_flag" --source-host "$EFFECTIVE_SOURCE_HOST" --s3-bucket "$EFFECTIVE_S3_BUCKET"
         exit 0
     fi
     
-    # Step 3: Select Backup Set (Point-in-Time)
+    # Step 4: Select Backup Set (Point-in-Time)
     log_info "Fetching available backup timestamps for host '$EFFECTIVE_SOURCE_HOST'..."
     local backups_raw
     backups_raw=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | grep ' PRE ' | awk '{print $2}' | sed 's|/||' | sort -r)
@@ -212,7 +225,7 @@ run_interactive_mode() {
 
     # Handle modes that only need a date
     if [ "$mode_flag" == "--show-restore-chain" ]; then
-        "$0" "$mode_flag" --date "$TARGET_DATE" --source-host "$EFFECTIVE_SOURCE_HOST"
+        "$0" "$mode_flag" --date "$TARGET_DATE" --source-host "$EFFECTIVE_SOURCE_HOST" --s3-bucket "$EFFECTIVE_S3_BUCKET"
         exit 0
     fi
 
@@ -220,8 +233,9 @@ run_interactive_mode() {
     cmd_args+=("$mode_flag")
     cmd_args+=(--date "$TARGET_DATE")
     cmd_args+=(--source-host "$EFFECTIVE_SOURCE_HOST")
+    cmd_args+=(--s3-bucket "$EFFECTIVE_S3_BUCKET")
     
-    # Step 4: Handle Granular Restore Specifics
+    # Step 5: Handle Granular Restore Specifics
     if [ "$mode_flag" == "--download-and-restore" ]; then
         log_info "Finding base full backup to list keyspaces..."
         # This function sets BASE_FULL_BACKUP globally
@@ -263,7 +277,7 @@ run_interactive_mode() {
         fi
     fi
 
-    # Step 5: Confirm and Execute
+    # Step 6: Confirm and Execute
     log_warn "--- Restore Plan ---"
     log_warn "The following command will be executed:"
     log_message "${CYAN}$0 ${cmd_args[*]} --yes${NC}"
@@ -290,11 +304,12 @@ AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
 SOURCE_HOST_OVERRIDE=""
 
+# Define effective variables early for use in interactive mode
+EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+
 # === NEW: Entrypoint for Interactive Mode ===
 if [ "$#" -eq 0 ]; then
-    # Define effective variables before calling interactive mode
-    EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
-    EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
     run_interactive_mode
     exit 0
 fi
@@ -317,6 +332,10 @@ while [[ "$#" -gt 0 ]]; do
     esac
     shift
 done
+
+# Redefine effective variables after parsing args
+EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
 
 # Validate arguments
 if [ -z "$MODE" ]; then
@@ -358,11 +377,6 @@ if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
     exit 1
 fi
 echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
-
-# --- Define Effective Variables ---
-EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
-EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
-
 
 # --- Core Logic Functions ---
 
@@ -972,3 +986,4 @@ case $MODE in
 esac
 
 exit 0
+
