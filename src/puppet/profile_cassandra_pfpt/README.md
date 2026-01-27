@@ -2,7 +2,7 @@
 
 > This module provides a complete profile for deploying and managing an Apache Cassandra node. It acts as a wrapper around the `cassandra_pfpt` component module, providing all its configuration data via Hiera lookups. This allows for a clean separation of logic from data.
 >
-> Beyond initial deployment, this profile equips each node with a powerful suite of automation and command-line tools to simplify and safeguard common operational tasks. The primary tool is `cass-ops`, a modern Python-based CLI.
+> Beyond initial deployment, this profile equips each node with a powerful suite of automation and command-line tools to simplify and safeguard common operational tasks. The primary tool is `cass-ops`, a powerful command-line wrapper script.
 
 ---
 
@@ -476,3 +476,4 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
 *   **Scheduled Runs:** When enabled, the Puppet agent will run twice per hour at a staggered minute by default.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.
+```
