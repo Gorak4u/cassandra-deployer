@@ -66,60 +66,6 @@ log_success() { log_message "${GREEN}$1${NC}"; }
 log_warn() { log_message "${YELLOW}$1${NC}"; }
 log_error() { log_message "${RED}$1${NC}"; }
 
-# --- Pre-flight Checks ---
-if [ "$(id -u)" -ne 0 ]; then
-    log_error "This script must be run as root."
-    exit 1
-fi
-
-for tool in jq aws sstableloader openssl pgrep ps cqlsh rsync xargs /usr/local/bin/disk-health-check.sh; do
-    if ! command -v $tool &>/dev/null; then
-        log_error "Required tool '$tool' is not installed or not in PATH."
-        exit 1
-    fi
-done
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    log_error "Backup configuration file not found at $CONFIG_FILE"
-    exit 1
-fi
-
-# --- Source configuration from JSON ---
-S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
-CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
-CASSANDRA_CONF_DIR=$(jq -r '.cassandra_conf_dir' "$CONFIG_FILE")
-CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
-CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
-LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
-SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
-CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
-SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
-SSL_TRUSTSTORE_PATH=$(jq -r '.ssl_truststore_path // "null"' "$CONFIG_FILE")
-SSL_TRUSTSTORE_PASSWORD=$(jq -r '.ssl_truststore_password // "null"' "$CONFIG_FILE")
-BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
-PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
-
-# Validate essential configuration
-if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_error "'cassandra_conf_dir' is not set or invalid in $CONFIG_FILE."; exit 1; fi
-if [ -z "$CASSANDRA_DATA_DIR" ] || [ "$CASSANDRA_DATA_DIR" == "null" ]; then log_error "'cassandra_data_dir' is not set in $CONFIG_FILE."; exit 1; fi
-if [ -z "$CASSANDRA_COMMITLOG_DIR" ] || [ "$CASSANDRA_COMMITLOG_DIR" == "null" ]; then log_error "'commitlog_dir' is not set in $CONFIG_FILE."; exit 1; fi
-if [ -z "$CASSANDRA_CACHES_DIR" ] || [ "$CASSANDRA_CACHES_DIR" == "null" ]; then log_error "'saved_caches_dir' is not set in $CONFIG_FILE."; exit 1; fi
-if [ -z "$LISTEN_ADDRESS" ] || [ "$LISTEN_ADDRESS" == "null" ]; then log_error "'listen_address' is not set in $CONFIG_FILE."; exit 1; fi
-
-
-# Derive restore paths from the main data directory parameter
-RESTORE_BASE_PATH="${CASSANDRA_DATA_DIR%/*}" # e.g., /var/lib/cassandra
-DOWNLOAD_ONLY_PATH="${RESTORE_BASE_PATH}/restore_download"
-
-
-# Determine node list for sstableloader. Use seeds if available, otherwise localhost.
-if [ -n "$SEEDS" ]; then
-    LOADER_NODES="$SEEDS"
-else
-    LOADER_NODES="$LISTEN_ADDRESS"
-fi
-
 
 # --- ALL FUNCTION DEFINITIONS ---
 
@@ -542,7 +488,7 @@ do_full_restore() {
     echo "$SCHEMA_MAP_JSON" > "$TMP_SCHEMA_MAP_FILE"
     log_info "Schema-to-directory mapping downloaded."
     
-    export -f download_and_extract_table log_message log_info log_error
+    export -f download_and_extract_table log_message log_info log_success log_warn log_error
     export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE TEMP_RESTORE_DIR RESTORE_BASE_PATH TMP_SCHEMA_MAP_FILE
     export RED GREEN YELLOW BLUE NC
 
@@ -656,7 +602,7 @@ do_granular_restore() {
     echo "$SCHEMA_MAP_JSON" > "$TMP_SCHEMA_MAP_FILE"
     log_info "Schema-to-directory mapping downloaded."
 
-    export -f download_and_extract_table log_message log_info log_error
+    export -f download_and_extract_table log_message log_info log_success log_warn log_error
     export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE base_output_dir temp_download_dir check_path TMP_SCHEMA_MAP_FILE
     export RED GREEN YELLOW BLUE NC
 
@@ -758,7 +704,7 @@ do_granular_restore() {
                  rm -rf "$final_table_dir_path"
             fi
         }
-        export -f load_table_data log_message log_info log_error
+        export -f load_table_data log_message log_info log_success log_warn log_error
         export RESTORE_LOG_FILE CASSANDRA_DATA_DIR KEYSPACE_NAME CASSANDRA_USER CASSANDRA_CONF_DIR LOADER_NODES CASSANDRA_PASSWORD SSL_ENABLED SSL_TRUSTSTORE_PATH SSL_TRUSTSTORE_PASSWORD
         export RED GREEN YELLOW BLUE NC
         
@@ -881,6 +827,60 @@ do_show_restore_chain() {
 
 
 # --- SCRIPT MAIN EXECUTION ---
+
+# --- Pre-flight Checks ---
+if [ "$(id -u)" -ne 0 ]; then
+    log_error "This script must be run as root."
+    exit 1
+fi
+
+for tool in jq aws sstableloader openssl pgrep ps cqlsh rsync xargs /usr/local/bin/disk-health-check.sh; do
+    if ! command -v $tool &>/dev/null; then
+        log_error "Required tool '$tool' is not installed or not in PATH."
+        exit 1
+    fi
+done
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    log_error "Backup configuration file not found at $CONFIG_FILE"
+    exit 1
+fi
+
+# --- Source configuration from JSON ---
+S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
+CASSANDRA_CONF_DIR=$(jq -r '.cassandra_conf_dir' "$CONFIG_FILE")
+CASSANDRA_COMMITLOG_DIR=$(jq -r '.commitlog_dir' "$CONFIG_FILE")
+CASSANDRA_CACHES_DIR=$(jq -r '.saved_caches_dir' "$CONFIG_FILE")
+LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
+SEEDS=$(jq -r '.seeds_list | join(",")' "$CONFIG_FILE")
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
+SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
+SSL_TRUSTSTORE_PATH=$(jq -r '.ssl_truststore_path // "null"' "$CONFIG_FILE")
+SSL_TRUSTSTORE_PASSWORD=$(jq -r '.ssl_truststore_password // "null"' "$CONFIG_FILE")
+BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
+PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
+
+# Validate essential configuration
+if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_error "'cassandra_conf_dir' is not set or invalid in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_DATA_DIR" ] || [ "$CASSANDRA_DATA_DIR" == "null" ]; then log_error "'cassandra_data_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_COMMITLOG_DIR" ] || [ "$CASSANDRA_COMMITLOG_DIR" == "null" ]; then log_error "'commitlog_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$CASSANDRA_CACHES_DIR" ] || [ "$CASSANDRA_CACHES_DIR" == "null" ]; then log_error "'saved_caches_dir' is not set in $CONFIG_FILE."; exit 1; fi
+if [ -z "$LISTEN_ADDRESS" ] || [ "$LISTEN_ADDRESS" == "null" ]; then log_error "'listen_address' is not set in $CONFIG_FILE."; exit 1; fi
+
+
+# Derive restore paths from the main data directory parameter
+RESTORE_BASE_PATH="${CASSANDRA_DATA_DIR%/*}" # e.g., /var/lib/cassandra
+DOWNLOAD_ONLY_PATH="${RESTORE_BASE_PATH}/restore_download"
+
+
+# Determine node list for sstableloader. Use seeds if available, otherwise localhost.
+if [ -n "$SEEDS" ]; then
+    LOADER_NODES="$SEEDS"
+else
+    LOADER_NODES="$LISTEN_ADDRESS"
+fi
 
 # Define effective variables early for use in interactive mode
 EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
