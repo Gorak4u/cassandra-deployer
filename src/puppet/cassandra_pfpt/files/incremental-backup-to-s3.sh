@@ -37,8 +37,8 @@ usage() {
     log_message "Manages the incremental backup process with modular steps."
     log_message ""
     log_message "Modes (mutually exclusive):"
-    log_message "  --local-only                Archives incremental files to a local directory but does not upload to S3 or clean up."
-    log_message "  --upload-only               Uploads a previously created local backup set to S3. Requires --tag."
+    log_message "  --local-only                Archives incremental files to a local directory but does not upload to S3 or clean up source files."
+    log_message "  --upload-only               Uploads a previously created local backup set to S3 and cleans up. Requires --tag."
     log_message "  (no mode)                   Default. Performs all steps: local backup, upload, and cleanup."
     log_message ""
     log_message "Options:"
@@ -97,6 +97,7 @@ ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
 do_local_backup() {
     log_info "--- Step 1: Creating Local Incremental Backup ---"
     
+    local INCREMENTAL_DIRS_COUNT
     INCREMENTAL_DIRS_COUNT=$(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print | wc -l)
     if [ "$INCREMENTAL_DIRS_COUNT" -eq 0 ]; then
         log_info "No new incremental backup files found. Nothing to do."
@@ -113,10 +114,12 @@ do_local_backup() {
     
     # Use a robust find and while loop to handle any filenames
     find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
-        relative_path=${backup_dir#$CASSANDRA_DATA_DIR/}
+        local relative_path
+        relative_path=${backup_dir#"$CASSANDRA_DATA_DIR"/}
+        local ks_name
         ks_name=$(echo "$relative_path" | cut -d'/' -f1)
 
-        is_system_ks=false
+        local is_system_ks=false
         for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
             if [ "$ks_name" == "$included_ks" ]; then is_system_ks=true; break; fi
         done
@@ -124,12 +127,14 @@ do_local_backup() {
             continue
         fi
         
+        local table_dir_name
         table_dir_name=$(echo "$relative_path" | cut -d'/' -f2)
+        local table_name
         table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
         
         log_info "Processing incremental backup for: $ks_name.$table_name"
         
-        local_tar_path="$LOCAL_BACKUP_DIR/${ks_name}"
+        local local_tar_path="$LOCAL_BACKUP_DIR/$ks_name"
         mkdir -p "$local_tar_path"
         
         local local_tar_file="$local_tar_path/$table_name.tar.gz"
@@ -152,9 +157,11 @@ do_local_backup() {
     done
 
     log_info "Creating backup manifest..."
-    MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
-    NODE_DC=$(nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
-    NODE_RACK=$(nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
+    local MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
+    local NODE_DC
+    NODE_DC=$(su -s /bin/bash "$CASSANDRA_USER" -c "nodetool info" 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+    local NODE_RACK
+    NODE_RACK=$(su -s /bin/bash "$CASSANDRA_USER" -c "nodetool info" 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
 
     jq -n \
       --arg backup_id "$BACKUP_TAG" \
@@ -176,41 +183,30 @@ do_local_backup() {
       }' > "$MANIFEST_FILE"
 
     log_success "--- Local Backup Finished. Stored at $LOCAL_BACKUP_DIR ---"
+    return 0
 }
 
 do_upload() {
     log_info "--- Step 2: Uploading Local Backup to S3 ---"
     
     if [ ! -d "$LOCAL_BACKUP_DIR" ]; then log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"; return 1; fi
+    if [ "$BACKUP_BACKEND" != "s3" ]; then log_warn "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."; return 0; fi
 
-    local upload_failed=false
-    find "$LOCAL_BACKUP_DIR" -type f -name "*.tar.gz.enc" -print0 | while IFS= read -r -d $'\0' enc_file; do
-        relative_file_path=${enc_file#"$LOCAL_BACKUP_DIR/"}
-        s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$relative_file_path"
-        
-        log_info "Uploading $relative_file_path to S3..."
-        if ! aws s3 cp --quiet "$enc_file" "$s3_path"; then
-            log_error "Failed to upload $relative_file_path"
-            upload_failed=true
-        fi
-    done
-    
-    if [ "$upload_failed" = true ]; then log_error "One or more file uploads failed."; return 1; fi
-
-    log_info "Uploading manifest file..."
-    if ! aws s3 cp --quiet "$LOCAL_BACKUP_DIR/backup_manifest.json" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"; then
-        log_error "Failed to upload manifest file."
+    log_info "Uploading all backup files via aws s3 sync..."
+    if ! aws s3 sync --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/"; then
+        log_error "aws s3 sync command failed. Upload is incomplete."
         return 1
     fi
 
     log_success "--- S3 Upload Finished Successfully ---"
+    return 0
 }
 
-do_cleanup() {
-    log_info "--- Step 3: Cleaning Up Source Incremental Files ---"
+do_source_and_local_cleanup() {
+    log_info "--- Step 3: Cleaning Up Source & Local Files ---"
     
     if [ ! -f "$LOCAL_BACKUP_DIR/backup_manifest.json" ]; then
-        log_error "Manifest not found in local backup. Cannot safely clean up."
+        log_error "Manifest not found in local backup. Cannot safely clean up source files."
         return 1
     fi
 
@@ -220,7 +216,7 @@ do_cleanup() {
         table_name=$(echo "$table_spec" | cut -d'/' -f2)
         
         # Find the UUID-based directory name for the table.
-        source_backup_dir=$(find "$CASSANDRA_DATA_DIR/$ks_name" -maxdepth 2 -type d -name "backups" -path "*/${table_name}-*/backups" | head -n 1)
+        source_backup_dir=$(find "$CASSANDRA_DATA_DIR/$ks_name" -maxdepth 2 -type d -name "backups" -path "*/${table_name}-*/backups" 2>/dev/null | head -n 1)
 
         if [ -n "$source_backup_dir" ] && [ -d "$source_backup_dir" ]; then
             log_info "Cleaning incremental files for $ks_name/$table_name at $source_backup_dir"
@@ -244,7 +240,6 @@ if [ "$(id -u)" -ne 0 ]; then log_error "This script must be run as root."; exit
 if [ -f "/var/lib/backup-disabled" ]; then log_info "Backup is disabled via /var/lib/backup-disabled. Aborting."; exit 0; fi
 
 if [ -f "$LOCK_FILE" ]; then
-    log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
     OLD_PID=$(cat "$LOCK_FILE")
     if ps -p "$OLD_PID" > /dev/null; then log_warn "Backup process with PID $OLD_PID is still running. Exiting."; exit 1; fi
     log_warn "Stale lock file found for dead PID $OLD_PID. Removing."; rm -f "$LOCK_FILE"
@@ -267,16 +262,20 @@ log_info "--- Starting Incremental Backup Manager (Mode: $MODE) ---"
 case "$MODE" in
     "local_only")
         do_local_backup
-        ;;
-    "upload_only")
-        if [ ! -d "$LOCAL_BACKUP_DIR" ]; then
-            log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"
+        rc=$?
+        if [ $rc -eq 2 ]; then
+            exit 0 # Nothing to do
+        elif [ $rc -ne 0 ]; then
+            log_error "Local backup creation failed."
             exit 1
         fi
+        log_info "Local incremental backup set created at $LOCAL_BACKUP_DIR. Source files and upload skipped."
+        ;;
+    "upload_only")
         if do_upload; then
-            do_cleanup
+            do_source_and_local_cleanup
         else
-            log_error "Upload failed. Local backup and original incremental files are preserved."
+            log_error "Upload failed. Local backup and original incremental files are preserved for retry."
             exit 1
         fi
         ;;
@@ -284,23 +283,17 @@ case "$MODE" in
         do_local_backup
         local_backup_rc=$?
         if [ $local_backup_rc -eq 2 ]; then
-            # Special return code means nothing to do
-            exit 0
+            exit 0 # Nothing to do
         elif [ $local_backup_rc -ne 0 ]; then
             log_error "Local backup creation failed. Aborting."
             exit 1
         fi
         
-        if [ "$BACKUP_BACKEND" == "s3" ]; then
-          if do_upload; then
-              do_cleanup
-          else
-              log_error "Upload failed. Local backup and original incremental files are preserved."
-              exit 1
-          fi
+        if do_upload; then
+            do_source_and_local_cleanup
         else
-          log_info "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."
-          log_warn "Local backup created at $LOCAL_BACKUP_DIR. Original incremental files have NOT been cleaned up."
+            log_error "Upload failed. Local backup and original incremental files are preserved for retry."
+            exit 1
         fi
         ;;
 esac
