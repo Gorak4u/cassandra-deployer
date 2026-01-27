@@ -39,51 +39,16 @@ log_error() {
     log_message "${RED}$1${NC}"
 }
 
-# --- Argument Parsing ---
-MODE="default"
-BACKUP_TAG_OVERRIDE=""
-
-usage() {
-    log_message "${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}"
-    log_message "Manages the full backup process with modular steps."
-    log_message ""
-    log_message "Modes (mutually exclusive):"
-    log_message "  --local-only                Takes a snapshot and archives it locally. Does not upload or clean up."
-    log_message "  --upload-only               Uploads a previously created local backup set to S3 and cleans up. Requires --tag."
-    log_message "  --cleanup-only              Cleans up old snapshots and local backup directories without creating a new backup."
-    log_message "  (no mode)                   Default. Performs all steps: local backup, upload, and cleanup."
-    log_message ""
-    log_message "Options:"
-    log_message "  --tag <timestamp>           The timestamp tag (YYYY-MM-DD-HH-MM) of the backup set. Required for --upload-only."
-    log_message "  -h, --help                  Show this help message."
-    exit 1
-}
-
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-        --local-only) MODE="local_only" ;;
-        --upload-only) MODE="upload_only" ;;
-        --cleanup-only) MODE="cleanup_only" ;;
-        --tag) BACKUP_TAG_OVERRIDE="$2"; shift ;;
-        -h|--help) usage; exit 0 ;;
-        *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
-    esac
-    shift
-done
-
-if [ "$MODE" == "upload_only" ] && [ -z "$BACKUP_TAG_OVERRIDE" ]; then
-    log_error "--tag <timestamp> is required for --upload-only mode."
-    exit 1
-fi
-
 # --- Pre-flight Checks ---
+# Check for required tools first, so we can log errors if they are missing.
 for tool in jq aws openssl nodetool cqlsh xargs su find; do
-    if ! command -v $tool &>/dev/null; then
+    if ! command -v $tool &> /dev/null; then
         log_error "Required tool '$tool' is not installed or in PATH."
         exit 1
     fi
 done
 
+# Check for config file
 if [ ! -f "$CONFIG_FILE" ]; then
   log_error "Backup configuration file not found at $CONFIG_FILE"
   exit 1
@@ -93,6 +58,7 @@ fi
 S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
+# Overwrite the default LOG_FILE with the one from the config.
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
@@ -107,6 +73,7 @@ BACKUP_EXCLUDE_TABLES=$(jq -r '.backup_exclude_tables // []' "$CONFIG_FILE")
 BACKUP_INCLUDE_ONLY_KEYSPACES=$(jq -r '.backup_include_only_keyspaces // []' "$CONFIG_FILE")
 BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_FILE")
 
+
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
   log_error "One or more required configuration values are missing from $CONFIG_FILE"
@@ -114,15 +81,16 @@ if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" 
 fi
 
 # --- Static Configuration ---
-BACKUP_TAG=${BACKUP_TAG_OVERRIDE:-$(date +'%Y-%m-%d-%H-%M')}
+BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
 HOSTNAME=$(hostname -s)
-LOCAL_BACKUP_BASE_DIR="/var/lib/cassandra/local_backups"
-LOCAL_BACKUP_DIR="$LOCAL_BACKUP_BASE_DIR/$BACKUP_TAG"
+# Derive temp dir from data dir to ensure it's on the correct large volume
+BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
-ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
+ERROR_DIR="$BACKUP_TEMP_DIR/errors"
 
 # --- AWS Credential Check Function ---
 check_aws_credentials() {
+  # Skip check if backend isn't S3 or if uploads are disabled via flag file
   if [ "$BACKUP_BACKEND" != "s3" ] || [ -f "/var/lib/upload-disabled" ]; then
     return 0
   fi
@@ -148,10 +116,12 @@ manage_s3_lifecycle() {
     local policy_id="auto-expire-backups"
     log_info "Checking for S3 lifecycle policy '$policy_id' with retention of $S3_RETENTION_PERIOD days..."
 
+    # Check if a policy with our ID already exists
     local existing_policy_json
     existing_policy_json=$(aws s3api get-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null || echo "")
 
     local existing_policy_days=""
+    # Check if the returned string is valid JSON before trying to parse it
     if echo "$existing_policy_json" | jq -e . > /dev/null 2>&1; then
         existing_policy_days=$(echo "$existing_policy_json" | jq -r --arg ID "$policy_id" '.Rules[] | select(.ID == $ID) | .Expiration.Days // ""')
     fi
@@ -165,6 +135,7 @@ manage_s3_lifecycle() {
         log_info "No lifecycle policy named '$policy_id' found. A new one will be created."
     fi
 
+    # Construct the lifecycle policy JSON
     local lifecycle_json
     lifecycle_json=$(jq -n \
         --arg ID "$policy_id" \
@@ -187,6 +158,7 @@ manage_s3_lifecycle() {
     log_info "Applying lifecycle policy to bucket '$S3_BUCKET_NAME'..."
     if ! aws s3api put-bucket-lifecycle-configuration --bucket "$S3_BUCKET_NAME" --lifecycle-configuration "$lifecycle_json"; then
         log_error "Failed to apply S3 lifecycle policy. Backups will still proceed, but will not be automatically deleted."
+        # Do not fail the backup for this.
         return 0
     fi
 
@@ -200,12 +172,14 @@ ensure_s3_bucket_and_lifecycle() {
     log_info "Checking if S3 bucket 's3://$S3_BUCKET_NAME' exists..."
     if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" > /dev/null 2>&1; then
         log_success "S3 bucket already exists."
+        # Bucket exists, so now we can manage lifecycle
         manage_s3_lifecycle
         return 0
     else
         log_warn "S3 bucket '$S3_BUCKET_NAME' does not exist. Attempting to create it..."
         if aws s3 mb "s3://$S3_BUCKET_NAME"; then
             log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
+            # Bucket was just created, so now we can manage lifecycle
             manage_s3_lifecycle
             return 0
         else
@@ -218,7 +192,10 @@ ensure_s3_bucket_and_lifecycle() {
 
 # --- Utility Functions ---
 
-run_nodetool() { su -s /bin/bash "$CASSANDRA_USER" -c "nodetool $@"; }
+run_nodetool() {
+    local cmd="nodetool $@"
+    su -s /bin/bash "$CASSANDRA_USER" -c "$cmd"
+}
 
 cleanup_old_snapshots() {
     if [ -f "/var/lib/cleanup-disabled" ]; then
@@ -274,16 +251,132 @@ cleanup_old_snapshots() {
     log_info "--- Snapshot Cleanup Finished ---"
 }
 
+
+# --- Cleanup Functions ---
+cleanup_temp_dir() {
+  if [ -d "$BACKUP_TEMP_DIR" ]; then
+    log_info "Cleaning up temporary directory: $BACKUP_TEMP_DIR"
+    rm -rf "$BACKUP_TEMP_DIR"
+  fi
+}
+
+# --- Main Logic ---
+if [ "$(id -u)" -ne 0 ]; then
+  log_error "This script must be run as root."
+  exit 1
+fi
+
+# Pre-flight checks before creating a lock or doing any work
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_info "Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
+
+if ! check_aws_credentials; then
+    exit 1
+fi
+
+if ! ensure_s3_bucket_and_lifecycle; then
+    exit 1 # Fail fast if bucket creation or lifecycle management fails
+fi
+
+if [ -f "$LOCK_FILE" ]; then
+    log_warn "Lock file $LOCK_FILE exists. Checking if process is running..."
+    OLD_PID=$(cat "$LOCK_FILE")
+    if ps -p "$OLD_PID" > /dev/null; then
+        log_warn "Backup process with PID $OLD_PID is still running. Exiting."
+        exit 1
+    else
+        log_warn "Stale lock file found for dead PID $OLD_PID. Removing."
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+# Create a temporary file for the encryption key
+TMP_KEY_FILE=$(mktemp)
+chmod 600 "$TMP_KEY_FILE"
+
+# Create lock file and set combined trap for all cleanup actions
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"; rm -f "$TMP_KEY_FILE"; cleanup_temp_dir' EXIT
+
+# Extract key from config and write to temp file
+ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
+if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then
+    log_error "encryption_key is empty or not found in $CONFIG_FILE"
+    exit 1
+fi
+echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+
+
+# Run cleanup of old snapshots BEFORE taking a new one
+cleanup_old_snapshots
+
+log_info "--- Starting Granular Cassandra Snapshot Backup Process ---"
+log_info "S3 Bucket: $S3_BUCKET_NAME"
+log_info "Backup Timestamp (Tag): $BACKUP_TAG"
+log_info "Streaming Mode: $UPLOAD_STREAMING"
+log_info "Parallelism: $PARALLELISM"
+
+# 1. Create temporary directories
+mkdir -p "$BACKUP_TEMP_DIR" || { log_error "Failed to create temp backup directory on data volume."; exit 1; }
+mkdir -p "$ERROR_DIR"
+
+# 2. Take a node-local snapshot
+log_info "Taking full snapshot with tag: $BACKUP_TAG..."
+if ! run_nodetool snapshot -t "$BACKUP_TAG"; then
+  log_error "Failed to take Cassandra snapshot. Aborting backup."
+  exit 1
+fi
+log_success "Full snapshot taken successfully."
+
+# 3. Archive and Upload, per-table
+log_info "Discovering keyspaces and tables to back up..."
+INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
+
+# Create a mapping of clean table names to their UUID-based directory names
+SCHEMA_MAP_FILE="$BACKUP_TEMP_DIR/schema_mapping.json"
+SCHEMA_MAP="{}"
+while IFS= read -r table_path; do
+    ks_name_map=$(basename "$(dirname "$table_path")")
+    table_dir_name_map=$(basename "$table_path")
+    table_name_map=$(echo "$table_dir_name_map" | rev | cut -d'-' -f2- | rev)
+    
+    is_system_ks_to_skip=true
+    for included_ks_map in $INCLUDED_SYSTEM_KEYSPACES; do
+        if [ "$ks_name_map" == "$included_ks_map" ]; then is_system_ks_to_skip=false; break; fi
+    done
+    if [[ "$ks_name_map" == system* || "$ks_name_map" == dse* || "$ks_name_map" == solr* ]] && [ "$is_system_ks_to_skip" = true ]; then continue; fi
+
+    SCHEMA_MAP=$(echo "$SCHEMA_MAP" | jq --arg key "${ks_name_map}.${table_name_map}" --arg val "$table_dir_name_map" '. + {($key): $val}')
+done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups')
+
+echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
+log_info "Schema-to-directory mapping generated."
+
+# --- Function to process a single table backup (for parallel execution) ---
 process_table_backup() {
     local snapshot_dir="$1"
     
+    # Required variables for the subshell
+    S3_BUCKET_NAME=$(jq -r '.s3_bucket_name' "$CONFIG_FILE")
+    BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
+    UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
+    BACKUP_EXCLUDE_KEYSPACES=$(jq -r '.backup_exclude_keyspaces // []' "$CONFIG_FILE")
+    BACKUP_EXCLUDE_TABLES=$(jq -r '.backup_exclude_tables // []' "$CONFIG_FILE")
+    BACKUP_INCLUDE_ONLY_KEYSPACES=$(jq -r '.backup_include_only_keyspaces // []' "$CONFIG_FILE")
+    BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_FILE")
+
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
-    local ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
-    local table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
-    local table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
-    local full_table_name="${ks_name}.${table_name}"
+    local ks_name
+    ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
+    local table_dir_name
+    table_dir_name=$(echo "$path_without_prefix" | cut -d'/' -f2)
+    local table_name
+    table_name=$(echo "$table_dir_name" | rev | cut -d'-' -f2- | rev)
 
     # --- Filtering Logic ---
+    local full_table_name="${ks_name}.${table_name}"
     local include_mode=false
     if [[ $(echo "$BACKUP_INCLUDE_ONLY_KEYSPACES" | jq 'length') -gt 0 || $(echo "$BACKUP_INCLUDE_ONLY_TABLES" | jq 'length') -gt 0 ]]; then
         include_mode=true
@@ -314,182 +407,211 @@ process_table_backup() {
     # --- End Filtering Logic ---
 
     local is_system_ks=false
-    for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do if [ "$ks_name" == "$included_ks" ]; then is_system_ks=true; break; fi; done
+    for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
+        if [ "$ks_name" == "$included_ks" ]; then
+            is_system_ks=true
+            break
+        fi
+    done
+
     if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then
         log_info "Skipping non-essential system keyspace backup: $ks_name"
         return 0
     fi
     
     log_info "Backing up table: $ks_name.$table_name"
-
-    mkdir -p "$LOCAL_BACKUP_DIR/$ks_name"
-    local local_enc_file="$LOCAL_BACKUP_DIR/$ks_name/$table_name.tar.gz.enc"
-
-    if ! nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | gzip | openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
-        log_error "Failed to archive and encrypt $ks_name.$table_name"
-        touch "$ERROR_DIR/$ks_name.$table_name"
-        return 1
-    fi
-    log_success "Successfully created local encrypted archive for $ks_name.$table_name"
-}
-
-do_local_backup() {
-    log_info "--- Step 1: Creating Local Full Backup ---"
     
-    mkdir -p "$LOCAL_BACKUP_DIR" || { log_error "Failed to create temp backup directory."; return 1; }
-    mkdir -p "$ERROR_DIR"
+    if [ "$BACKUP_BACKEND" == "s3" ]; then
+        if [ -f "/var/lib/upload-disabled" ]; then
+            log_warn "S3 upload is disabled via /var/lib/upload-disabled. Skipping upload for $ks_name.$table_name."
+            return 0
+        fi
+        
+        local s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name.tar.gz.enc"
+        if [ "$UPLOAD_STREAMING" = "true" ]; then
+            nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | \
+            gzip | \
+            openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
+            nice -n 19 ionice -c 3 aws s3 cp --quiet - "$s3_path"
+            
+            local pipeline_status=("${PIPESTATUS[@]}")
+            if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
+                log_error "Streaming backup failed for $ks_name.$table_name. tar: ${pipeline_status[0]}, gzip: ${pipeline_status[1]}, openssl: ${pipeline_status[2]}, aws: ${pipeline_status[3]}"
+                touch "$ERROR_DIR/$ks_name.$table_name"
+            else
+                log_success "Successfully streamed backup for $ks_name.$table_name"
+            fi
+        else
+            local local_tar_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz"
+            local local_enc_file="$BACKUP_TEMP_DIR/$ks_name.$table_name.tar.gz.enc"
 
-    log_info "Taking full snapshot with tag: $BACKUP_TAG..."
-    if ! run_nodetool snapshot -t "$BACKUP_TAG"; then
-      log_error "Failed to take Cassandra snapshot. Aborting backup."
-      return 1
-    fi
-    log_success "Full snapshot taken successfully."
-
-    log_info "Discovering keyspaces and tables to back up..."
-    INCLUDED_SYSTEM_KEYSPACES="system_schema system_auth system_distributed"
-
-    SCHEMA_MAP_FILE="$LOCAL_BACKUP_DIR/schema_mapping.json"
-    SCHEMA_MAP="{}"
-    while IFS= read -r table_path; do
-        ks_name_map=$(basename "$(dirname "$table_path")")
-        table_dir_name_map=$(basename "$table_path")
-        table_name_map=$(echo "$table_dir_name_map" | rev | cut -d'-' -f2- | rev)
-        SCHEMA_MAP=$(echo "$SCHEMA_MAP" | jq --arg key "${ks_name_map}.${table_name_map}" --arg val "$table_dir_name_map" '. + {($key): $val}')
-    done < <(find "$CASSANDRA_DATA_DIR" -maxdepth 2 -mindepth 2 -type d -not -path '*/snapshots' -not -path '*/backups')
-    echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
-    log_info "Schema-to-directory mapping generated."
-
-    export -f process_table_backup log_message log_info log_success log_error
-    export LOG_FILE CONFIG_FILE LOCAL_BACKUP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR
-    export BACKUP_EXCLUDE_KEYSPACES BACKUP_EXCLUDE_TABLES BACKUP_INCLUDE_ONLY_KEYSPACES BACKUP_INCLUDE_ONLY_TABLES
-    export RED GREEN YELLOW BLUE NC
-
-    log_info "--- Starting Parallel Archiving of Tables ---"
-    find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
-    log_info "--- Finished Parallel Archiving of Tables ---"
-
-    TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
-    UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
-    TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
-
-    SCHEMA_DUMP_FILE="$LOCAL_BACKUP_DIR/schema.cql"
-    log_info "Dumping cluster schema to $SCHEMA_DUMP_FILE..."
-    cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
-    if [[ "$SSL_ENABLED" == "true" ]]; then cqlsh_command_parts+=("--ssl"); fi
-    if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD"); fi
-    cqlsh_command_parts+=("-e" "DESCRIBE SCHEMA")
-    if ! "${cqlsh_command_parts[@]}" > "$SCHEMA_DUMP_FILE"; then log_warn "Failed to dump schema."; else log_success "Schema dumped successfully."; fi
-
-    MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
-    log_info "Creating backup manifest at $MANIFEST_FILE..."
-    CLUSTER_NAME=$(run_nodetool describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
-    if [ "$CLUSTER_NAME" == "Unknown" ]; then log_error "Could not get cluster name. Cannot create manifest."; return 1; fi
-    NODE_IP=${LISTEN_ADDRESS:-$(hostname -i)}
-    NODE_DC=$(run_nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
-    NODE_RACK=$(run_nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
-    NODE_TOKENS_RAW=$(run_nodetool ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
-    if [ -z "$NODE_TOKENS_RAW" ]; then log_error "Could not get tokens for node. Cannot create manifest."; return 1; fi
-    NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
-
-    jq -n \
-      --arg cluster_name "$CLUSTER_NAME" --arg backup_id "$BACKUP_TAG" --arg backup_type "full" --arg timestamp "$(date --iso-8601=seconds)" \
-      --arg node_ip "$NODE_IP" --arg node_dc "$NODE_DC" --arg node_rack "$NODE_RACK" --arg tokens "$NODE_TOKENS" \
-      --argjson tables_count "$TABLES_BACKED_UP_SUCCESS_COUNT" \
-      '{"cluster_name": $cluster_name, "backup_id": $backup_id, "backup_type": $backup_type, "timestamp_utc": $timestamp, "source_node": {"ip_address": $node_ip, "datacenter": $node_dc, "rack": $node_rack, "tokens": ($tokens | split(","))}, "tables_backed_up_count": $tables_count}' > "$MANIFEST_FILE"
-    
-    log_success "Manifest created successfully."
-
-    if [ "$UPLOAD_ERRORS" -gt 0 ]; then
-        log_error "--- Local Backup Finished with $UPLOAD_ERRORS ERRORS ---"
-        log_error "The following tables failed to archive:"
-        for f in "$ERROR_DIR"/*; do log_error "  - $(basename "$f")"; done
-        return 1
+            if ! nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -czf "$local_tar_file" .; then
+                log_error "Failed to archive $ks_name.$table_name. Skipping."
+                touch "$ERROR_DIR/$ks_name.$table_name"
+                return 1
+            fi
+            if ! nice -n 19 ionice -c 3 openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -in "$local_tar_file" -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"; then
+                log_error "Failed to encrypt $ks_name.$table_name. Skipping."
+                touch "$ERROR_DIR/$ks_name.$table_name"
+                rm -f "$local_tar_file"
+                return 1
+            fi
+            if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "$local_enc_file" "$s3_path"; then
+                log_error "Failed to upload backup for $ks_name.$table_name"
+                touch "$ERROR_DIR/$ks_name.$table_name"
+            else
+                log_success "Successfully uploaded backup for $ks_name.$table_name"
+            fi
+            rm -f "$local_tar_file" "$local_enc_file"
+        fi
     else
-        log_success "--- Local Backup Finished Successfully. Stored at $LOCAL_BACKUP_DIR ---"
-        return 0
+        log_info "Backup backend is '$BACKUP_BACKEND', skipping upload for $ks_name.$table_name."
     fi
 }
+export -f process_table_backup run_nodetool
+export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR CASSANDRA_USER
+export BACKUP_EXCLUDE_KEYSPACES BACKUP_EXCLUDE_TABLES BACKUP_INCLUDE_ONLY_KEYSPACES BACKUP_INCLUDE_ONLY_TABLES
+export RED GREEN YELLOW BLUE NC
+export -f log_message log_info log_success log_warn log_error
 
-do_upload() {
-    if [ -f "/var/lib/upload-disabled" ]; then
-        log_warn "S3 upload is disabled via /var/lib/upload-disabled. Skipping."
-        return 0
-    fi
-    log_info "--- Step 2: Uploading Local Backup to S3 ---"
-    if [ ! -d "$LOCAL_BACKUP_DIR" ]; then log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"; return 1; fi
-    if [ "$BACKUP_BACKEND" != "s3" ]; then log_warn "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."; return 0; fi
-    
-    log_info "Uploading all backup files via aws s3 sync..."
-    if ! aws s3 sync --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/"; then
-        log_error "aws s3 sync command failed. Upload is incomplete."
-        return 1
-    fi
+# --- Parallel backup execution ---
+log_info "--- Starting Parallel Backup of Tables ---"
+find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
+    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
+log_info "--- Finished Parallel Backup of Tables ---"
 
-    log_success "--- S3 Upload Finished Successfully ---"
-    return 0
-}
+TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
+UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
 
-do_cleanup() {
-    if [ -f "/var/lib/cleanup-disabled" ]; then
-        log_warn "Cleanup is disabled via /var/lib/cleanup-disabled. Skipping."
-        return 0
-    fi
-    log_info "--- Step 3: Cleaning Up ---"
-    cleanup_old_snapshots
-    log_info "Removing local backup staging directory: $LOCAL_BACKUP_DIR"
-    rm -rf "$LOCAL_BACKUP_DIR"
-    log_success "--- Cleanup Finished ---"
-}
 
-# --- Main Logic ---
-if [ "$(id -u)" -ne 0 ]; then log_error "This script must be run as root."; exit 1; fi
+# 4. Dump cluster schema
+SCHEMA_DUMP_FILE="$BACKUP_TEMP_DIR/schema.cql"
+log_info "Dumping cluster schema to $SCHEMA_DUMP_FILE..."
 
-if [ -f "/var/lib/backup-disabled" ] && [ "$MODE" != "cleanup_only" ] && [ "$MODE" != "upload_only" ]; then
-    log_info "Backup creation is disabled via /var/lib/backup-disabled. Aborting."; exit 0;
+cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
+if [[ "$SSL_ENABLED" == "true" ]]; then
+    cqlsh_command_parts+=("--ssl")
+fi
+if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
+    cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
+fi
+cqlsh_command_parts+=("-e" "DESCRIBE SCHEMA")
+
+if ! "${cqlsh_command_parts[@]}" > "$SCHEMA_DUMP_FILE"; then
+    log_warn "Failed to dump schema. The backup will be incomplete for schema-only restores."
+else
+    log_success "Schema dumped successfully."
 fi
 
-if ! check_aws_credentials; then
+
+# 5. Create Backup Manifest
+MANIFEST_FILE="$BACKUP_TEMP_DIR/backup_manifest.json"
+log_info "Creating backup manifest at $MANIFEST_FILE..."
+
+# Tolerate failures in nodetool for manifest generation
+CLUSTER_NAME=$(run_nodetool describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
+if [ "$CLUSTER_NAME" == "Unknown" ]; then
+    log_error "Could not get cluster name from 'nodetool describecluster'. Cannot create a valid manifest."
     exit 1
 fi
 
-if ! ensure_s3_bucket_and_lifecycle; then
+
+if [ -n "$LISTEN_ADDRESS" ]; then
+    NODE_IP="$LISTEN_ADDRESS"
+else
+    NODE_IP="$(hostname -i)"
+fi
+
+NODE_DC=$(run_nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+NODE_RACK=$(run_nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
+
+# Robust token gathering
+NODE_TOKENS_RAW=$(run_nodetool ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
+if [ -z "$NODE_TOKENS_RAW" ]; then
+    log_error "Could not get tokens for node $NODE_IP from 'nodetool ring'. Cannot create a valid manifest."
     exit 1
 fi
+NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
 
-if [ -f "$LOCK_FILE" ]; then
-    OLD_PID=$(cat "$LOCK_FILE"); if ps -p "$OLD_PID" >/dev/null; then log_warn "Backup process with PID $OLD_PID is still running. Exiting."; exit 1; fi
-    log_warn "Stale lock file found for dead PID $OLD_PID. Removing."; rm -f "$LOCK_FILE"
+# For the manifest, we will just list the count of tables
+jq -n \
+  --arg cluster_name "$CLUSTER_NAME" \
+  --arg backup_id "$BACKUP_TAG" \
+  --arg backup_type "full" \
+  --arg timestamp "$(date --iso-8601=seconds)" \
+  --arg node_ip "$NODE_IP" \
+  --arg node_dc "$NODE_DC" \
+  --arg node_rack "$NODE_RACK" \
+  --arg tokens "$NODE_TOKENS" \
+  --argjson tables_count "$TABLES_BACKED_UP_SUCCESS_COUNT" \
+  '{
+    "cluster_name": $cluster_name,
+    "backup_id": $backup_id,
+    "backup_type": $backup_type,
+    "timestamp_utc": $timestamp,
+    "source_node": {
+      "ip_address": $node_ip,
+      "datacenter": $node_dc,
+      "rack": $node_rack,
+      "tokens": ($tokens | split(","))
+    },
+    "tables_backed_up_count": $tables_count
+  }' > "$MANIFEST_FILE"
+
+log_success "Manifest created successfully."
+
+# 6. Upload Manifest, Schema and Schema to S3
+if [ -f "/var/lib/upload-disabled" ]; then
+    log_info "S3 upload is disabled via /var/lib/upload-disabled."
+    log_info "Backup artifacts are available locally with tag: $BACKUP_TAG"
+    log_info "Local snapshot will NOT be automatically cleared."
+else
+    if [ "$BACKUP_BACKEND" == "s3" ]; then
+        log_info "Uploading manifest file..."
+        MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
+        if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
+          log_error "Failed to upload manifest to S3. The backup is not properly indexed."
+          exit 1
+        fi
+        log_success "Manifest uploaded successfully."
+        
+        log_info "Uploading schema mapping file..."
+        SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
+        if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
+            log_error "Failed to upload schema mapping file to S3."
+        else
+            log_success "Schema mapping file uploaded successfully."
+        fi
+
+        if [ -f "$SCHEMA_DUMP_FILE" ]; then
+            log_info "Uploading schema dump..."
+            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
+            if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH"; then
+                log_error "Failed to upload schema.cql to S3."
+            else
+                log_success "Schema dump uploaded successfully."
+            fi
+        fi
+
+    else
+        log_info "Backup backend is set to '$BACKUP_BACKEND', not 's3'. Skipping manifest and schema uploads."
+        log_info "Local snapshot is available with tag: $BACKUP_TAG"
+    fi
 fi
 
-TMP_KEY_FILE=$(mktemp); chmod 600 "$TMP_KEY_FILE"
-echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"; rm -f "$TMP_KEY_FILE"' EXIT
-ENCRYPTION_KEY=$(jq -r '.encryption_key' "$CONFIG_FILE")
-if [ -z "$ENCRYPTION_KEY" ] || [ "$ENCRYPTION_KEY" == "null" ]; then log_error "encryption_key is empty or not found in $CONFIG_FILE"; exit 1; fi
-echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
+if [ "$UPLOAD_ERRORS" -gt 0 ]; then
+    log_error "--- Granular Cassandra Backup Process Finished with $UPLOAD_ERRORS ERRORS ---"
+    log_error "Summary: $TABLES_BACKED_UP_SUCCESS_COUNT / $TOTAL_TABLES_ATTEMPTED tables backed up successfully."
+    log_error "The following tables failed to back up:"
+    for f in "$ERROR_DIR"/*; do
+        log_error "  - $(basename "$f")"
+    done
+    exit 1
+else
+    log_success "--- Granular Cassandra Backup Process Finished Successfully ---"
+    log_success "Summary: All $TOTAL_TABLES_ATTEMPTED tables backed up successfully."
+fi
 
-log_info "--- Starting Full Backup Manager (Mode: $MODE) ---"
-case "$MODE" in
-    "local_only")
-        cleanup_old_snapshots
-        if ! do_local_backup; then log_error "Local backup creation failed."; exit 1; fi
-        ;;
-    "upload_only")
-        if ! do_upload; then log_error "Upload failed."; exit 1; fi
-        do_cleanup
-        ;;
-    "cleanup_only")
-        do_cleanup
-        ;;
-    "default")
-        cleanup_old_snapshots
-        if ! do_local_backup; then log_error "Local backup creation failed. Aborting."; exit 1; fi
-        if ! do_upload; then log_error "Upload failed. Local backup is preserved for retry."; exit 1; fi
-        do_cleanup
-        ;;
-esac
-log_info "--- Full Backup Process Finished ---"
 exit 0
 
-    
