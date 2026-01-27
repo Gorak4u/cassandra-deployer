@@ -67,7 +67,7 @@ if [ "$(id -u)" -ne 0 ]; then
   log_error "This script must be run as root."
   exit 1
 fi
-for tool in jq aws openssl nodetool cqlsh xargs; do
+for tool in jq aws openssl nodetool cqlsh xargs su; do
     if ! command -v $tool &> /dev/null; then
         log_error "Required tool '$tool' is not installed or in PATH."
         exit 1
@@ -121,6 +121,17 @@ fi
 
 # --- Function Declarations ---
 
+run_nodetool() {
+    # This function runs a nodetool command as the cassandra user.
+    # It takes the full nodetool command string (e.g., "listsnapshots" or "snapshot -t mytag") as arguments.
+    # The base $NODETOOL_CMD (with JMX credentials) is prepended automatically.
+    
+    local full_command_to_run="$NODETOOL_CMD $*"
+    # Using su to run as the correct user ensures the command has the right environment
+    su -s /bin/bash "$CASSANDRA_USER" -c "$full_command_to_run"
+    return $?
+}
+
 cleanup_old_snapshots() {
     if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || [ "$KEEP_DAYS" -le 0 ]; then
         log_info "Snapshot retention is not configured to a positive number ($KEEP_DAYS). Skipping old snapshot cleanup."
@@ -130,12 +141,9 @@ cleanup_old_snapshots() {
     log_info "--- Starting Old Snapshot Cleanup ---"
     log_info "Retention period: $KEEP_DAYS days"
     
-    local cutoff_timestamp_days
-    cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
-
     local list_output
-    list_output=$($NODETOOL_CMD listsnapshots 2>&1)
-    local list_exit_code=${PIPESTATUS[0]}
+    list_output=$(run_nodetool listsnapshots 2>&1)
+    local list_exit_code=$?
 
     if [ "$list_exit_code" -ne 0 ]; then
         log_warn "nodetool listsnapshots command failed. Cannot clean up old snapshots."
@@ -153,22 +161,23 @@ cleanup_old_snapshots() {
     fi
 
     log_info "Found snapshots to evaluate for cleanup."
+    local cutoff_timestamp_days
+    cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
     for tag in $tags; do
       local snapshot_timestamp=0
       local parsable_date=""
       
-      if [[ "$tag" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2})$ ]]; then
+      # Try parsing YYYY-MM-DD-HH-MM-SS format (from new adhoc)
+      if [[ "$tag" =~ ^adhoc_([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2}-[0-9]{2})$ ]]; then
           parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
-      elif [[ "$tag" =~ ^adhoc_([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2}-[0-9]{2})$ ]]; then
+      # Try parsing YYYY-MM-DD-HH-MM format (from automated backups)
+      elif [[ "$tag" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2})$ ]]; then
           parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
-      elif [[ "$tag" =~ _([0-9]{8})_([0-9]{6})$ ]]; then
-          local date_part=${BASH_REMATCH[1]}
-          local time_part=${BASH_REMATCH[2]}
-          parsable_date="$date_part ${time_part:0:2}:${time_part:2:2}:${time_part:4:2}"
-      elif [[ "$tag" =~ _([0-9]{14})$ ]]; then
+      # Try parsing legacy adhoc format adhoc_YYYYMMDDHHMMSS
+      elif [[ "$tag" =~ ^adhoc_([0-9]{14})$ ]]; then
           local datetime_part=${BASH_REMATCH[1]}
-          parsable_date="${datetime_part:0:8} ${datetime_part:8:2}:${datetime_part:10:2}:${datetime_part:12:2}"
+          parsable_date="${datetime_part:0:4}-${datetime_part:4:2}-${datetime_part:6:2} ${datetime_part:8:2}:${datetime_part:10:2}:${datetime_part:12:2}"
       fi
       
       if [ -n "$parsable_date" ]; then
@@ -178,7 +187,7 @@ cleanup_old_snapshots() {
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
         if [ "$snapshot_timestamp" -lt "$cutoff_timestamp_days" ]; then
           log_info "Deleting old snapshot: $tag"
-          if ! $NODETOOL_CMD clearsnapshot -t "$tag"; then
+          if ! run_nodetool clearsnapshot -t "$tag"; then
             log_error "Failed to delete snapshot $tag"
           fi
         fi
@@ -304,7 +313,7 @@ do_local_backup() {
 
     # 2. Take snapshot
     log_info "Taking full snapshot with tag: $BACKUP_TAG..."
-    if ! $NODETOOL_CMD snapshot -t "$BACKUP_TAG"; then
+    if ! run_nodetool "snapshot -t \"$BACKUP_TAG\""; then
       log_error "Failed to take Cassandra snapshot. Aborting backup."
       rm -rf "$LOCAL_BACKUP_DIR"
       exit 1
@@ -389,12 +398,12 @@ do_local_backup() {
     # 8. Create manifest
     local MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
     log_info "Creating backup manifest at $MANIFEST_FILE..."
-    local CLUSTER_NAME=$($NODETOOL_CMD describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
+    local CLUSTER_NAME=$(run_nodetool describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
     if [ "$CLUSTER_NAME" == "Unknown" ]; then log_error "Could not get cluster name. Cannot create a valid manifest."; exit 1; fi
     local NODE_IP=${LISTEN_ADDRESS:-$(hostname -i)}
-    local NODE_DC=$($NODETOOL_CMD info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
-    local NODE_RACK=$($NODETOOL_CMD info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
-    local NODE_TOKENS_RAW=$($NODETOOL_CMD ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
+    local NODE_DC=$(run_nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+    local NODE_RACK=$(run_nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
+    local NODE_TOKENS_RAW=$(run_nodetool ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
     if [ -z "$NODE_TOKENS_RAW" ]; then log_error "Could not get tokens. Cannot create a valid manifest."; exit 1; fi
     local NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
     local total_tables_attempted=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
