@@ -69,6 +69,8 @@ usage() {
     cat >&2 <<EOF
 ${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}
 
+If run with no arguments, this script will enter an interactive wizard mode.
+
 Modes (choose one):
   --list-backups                List all available backup sets for a host.
   --show-restore-chain          Show the specific backup files that would be used for a restore to a given date.
@@ -125,6 +127,159 @@ else
     LOADER_NODES="$LISTEN_ADDRESS"
 fi
 
+# --- New Interactive Mode Functions ---
+
+_select_from_list() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+    local selected_option=""
+
+    PS3="$prompt"
+    select opt in "${options[@]}" "Cancel"; do
+        if [[ "$REPLY" -gt 0 && "$REPLY" -le ${#options[@]} ]]; then
+            selected_option="${options[$REPLY-1]}"
+            break
+        elif [ "$opt" == "Cancel" ]; then
+            selected_option=""
+            break
+        else
+            echo "Invalid option. Please try again."
+        fi
+    done
+    # Return the selected option
+    echo "$selected_option"
+}
+
+run_interactive_mode() {
+    log_info "--- Welcome to the Interactive Cassandra Restore Wizard ---"
+
+    if ! command -v aws >/dev/null || ! command -v jq >/dev/null; then
+        log_error "Interactive mode requires 'aws' and 'jq' to be installed and configured."
+        exit 1
+    fi
+
+    # Step 1: Select Host
+    log_info "Fetching available hosts from S3..."
+    local hosts_raw
+    hosts_raw=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/" | grep ' PRE ' | awk '{print $2}' | sed 's|/||')
+    if [ -z "$hosts_raw" ]; then
+        log_error "No hosts found in S3 bucket '$EFFECTIVE_S3_BUCKET'."
+        exit 1
+    fi
+    local hosts_list=($hosts_raw)
+    
+    local selected_host
+    selected_host=$(_select_from_list "Please select the source host to restore from: " "${hosts_list[@]}")
+    if [ -z "$selected_host" ]; then log_info "Restore cancelled by user."; exit 0; fi
+    EFFECTIVE_SOURCE_HOST="$selected_host" # Override global for this run
+
+    # Step 2: Select Restore Mode
+    local restore_modes=("Full Node Restore (Destructive)" "Granular Restore (Keyspace/Table)" "Schema-Only Restore" "List Backups" "Show Restore Chain")
+    local selected_mode
+    selected_mode=$(_select_from_list "Please select the restore mode: " "${restore_modes[@]}")
+    if [ -z "$selected_mode" ]; then log_info "Restore cancelled by user."; exit 0; fi
+
+    local mode_flag=""
+    case "$selected_mode" in
+        "Full Node Restore (Destructive)") mode_flag="--full-restore";;
+        "Granular Restore (Keyspace/Table)") mode_flag="--download-and-restore";;
+        "Schema-Only Restore") mode_flag="--schema-only";;
+        "List Backups") mode_flag="--list-backups";;
+        "Show Restore Chain") mode_flag="--show-restore-chain";;
+    esac
+
+    # Handle modes that don't need a date
+    if [ "$mode_flag" == "--list-backups" ]; then
+        "$0" "$mode_flag" --source-host "$EFFECTIVE_SOURCE_HOST"
+        exit 0
+    fi
+    
+    # Step 3: Select Backup Set (Point-in-Time)
+    log_info "Fetching available backup timestamps for host '$EFFECTIVE_SOURCE_HOST'..."
+    local backups_raw
+    backups_raw=$(aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/" | grep ' PRE ' | awk '{print $2}' | sed 's|/||' | sort -r)
+    if [ -z "$backups_raw" ]; then
+        log_error "No backups found for host '$EFFECTIVE_SOURCE_HOST'."
+        exit 1
+    fi
+    local backup_list=($backups_raw)
+
+    local selected_backup
+    selected_backup=$(_select_from_list "Select the target point-in-time (the latest backup AT or BEFORE this time will be used): " "${backup_list[@]}")
+    if [ -z "$selected_backup" ]; then log_info "Restore cancelled by user."; exit 0; fi
+    TARGET_DATE="$selected_backup" # Set global for find_backup_chain
+
+    # Handle modes that only need a date
+    if [ "$mode_flag" == "--show-restore-chain" ]; then
+        "$0" "$mode_flag" --date "$TARGET_DATE" --source-host "$EFFECTIVE_SOURCE_HOST"
+        exit 0
+    fi
+
+    local cmd_args=()
+    cmd_args+=("$mode_flag")
+    cmd_args+=(--date "$TARGET_DATE")
+    cmd_args+=(--source-host "$EFFECTIVE_SOURCE_HOST")
+    
+    # Step 4: Handle Granular Restore Specifics
+    if [ "$mode_flag" == "--download-and-restore" ]; then
+        log_info "Finding base full backup to list keyspaces..."
+        # This function sets BASE_FULL_BACKUP globally
+        find_backup_chain 
+        if [ -z "$BASE_FULL_BACKUP" ]; then
+            # find_backup_chain already logs an error
+            exit 1
+        fi
+        
+        log_info "Downloading schema map from base backup '$BASE_FULL_BACKUP'..."
+        local schema_map_content
+        schema_map_content=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+        if ! echo "$schema_map_content" | jq -e . > /dev/null 2>&1; then
+            log_error "Could not download or parse schema_mapping.json from base backup. Cannot list keyspaces."
+            exit 1
+        fi
+        
+        # List Keyspaces
+        local keyspaces_raw
+        keyspaces_raw=$(echo "$schema_map_content" | jq -r 'keys | .[] | split(".")[0]' | sort -u)
+        local keyspace_list=($keyspaces_raw)
+        
+        local selected_keyspace
+        selected_keyspace=$(_select_from_list "Please select the keyspace to restore: " "${keyspace_list[@]}")
+        if [ -z "$selected_keyspace" ]; then log_info "Restore cancelled by user."; exit 0; fi
+        cmd_args+=(--keyspace "$selected_keyspace")
+
+        # List Tables
+        local tables_raw
+        tables_raw=$(echo "$schema_map_content" | jq -r --arg ks "$selected_keyspace" 'keys | .[] | select(startswith($ks + ".")) | split(".")[1]' | sort -u)
+        local table_list=("ALL TABLES" $tables_raw)
+        
+        local selected_table
+        selected_table=$(_select_from_list "Select a specific table, or 'ALL TABLES' for the whole keyspace: " "${table_list[@]}")
+        if [ -z "$selected_table" ]; then log_info "Restore cancelled by user."; exit 0; fi
+        
+        if [ "$selected_table" != "ALL TABLES" ]; then
+            cmd_args+=(--table "$selected_table")
+        fi
+    fi
+
+    # Step 5: Confirm and Execute
+    log_warn "--- Restore Plan ---"
+    log_warn "The following command will be executed:"
+    log_message "${CYAN}$0 ${cmd_args[*]} --yes${NC}"
+    log_warn "--------------------"
+
+    read -p "Are you sure you want to proceed? (yes/no): " final_confirmation
+    if [ "$final_confirmation" == "yes" ]; then
+        log_info "Executing restore..."
+        # Recursively call self with the constructed arguments
+        "$0" "${cmd_args[@]}" --yes
+    else
+        log_info "Restore cancelled by user."
+        exit 0
+    fi
+}
+
 # --- Argument Parsing ---
 TARGET_DATE=""
 KEYSPACE_NAME=""
@@ -135,8 +290,13 @@ AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
 SOURCE_HOST_OVERRIDE=""
 
+# === NEW: Entrypoint for Interactive Mode ===
 if [ "$#" -eq 0 ]; then
-    usage
+    # Define effective variables before calling interactive mode
+    EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
+    EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+    run_interactive_mode
+    exit 0
 fi
 
 while [[ "$#" -gt 0 ]]; do
