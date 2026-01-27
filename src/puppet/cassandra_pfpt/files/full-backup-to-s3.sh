@@ -356,7 +356,10 @@ do_local_backup() {
         if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then return 0; fi
         
         log_info "Archiving table: $ks_name.$table_name"
-        local local_enc_file="${LOCAL_BACKUP_DIR}/${ks_name}.${table_name}.tar.gz.enc"
+
+        local table_backup_dir="${LOCAL_BACKUP_DIR}/${ks_name}/${table_name}"
+        mkdir -p "$table_backup_dir"
+        local local_enc_file="${table_backup_dir}/full.tar.gz.enc"
         
         if ! (nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | gzip | openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -out "$local_enc_file" -pass "file:$TMP_KEY_FILE"); then
              log_error "Failed to create local encrypted archive for $ks_name.$table_name"

@@ -425,12 +425,10 @@ do_full_restore() {
                 exit 1
             fi
 
-            s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
-            ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            # Get just the table name, without the UUID
-            table_dir_name_with_uuid=$(basename "$(dirname "$archive_key")")
-            table_name=${table_dir_name_with_uuid%%-*}
-
+            # Path looks like: host/tag/keyspace/table/archive.tar.gz.enc
+            path_parts=($(echo "$archive_key" | tr "/" " "))
+            local ks_dir=${path_parts[2]}
+            local table_name=${path_parts[3]}
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
@@ -523,12 +521,14 @@ do_granular_restore() {
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_info "Processing backup: $backup_ts"
-        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | while read -r archive_key; do
-            if [ -n "$TABLE_NAME" ] && [[ ! "$archive_key" =~ "/${TABLE_NAME}/" ]]; then
-                continue
-            fi
-            echo "$archive_key"
-        done | xargs -I{} -P"$PARALLELISM" bash -c '
+        # List all archives for the keyspace, filter by table if specified, then process
+        local s3_prefix="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
+        if [ -n "$TABLE_NAME" ]; then
+            s3_prefix+="$TABLE_NAME/"
+        fi
+        
+        aws s3 ls --recursive "$s3_prefix" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | \
+        xargs -I{} -P"$PARALLELISM" bash -c '
             archive_key="$1"
             effective_source_host="$2"
             current_backup_ts="$3"
@@ -538,12 +538,11 @@ do_granular_restore() {
                 log_message "${RED}FATAL: schema_map_json is empty inside parallel process for archive $archive_key.${NC}"
                 exit 1
             fi
-
-            s3_path_no_host=$(echo "$archive_key" | sed "s#$effective_source_host/$current_backup_ts/##")
-            ks_dir=$(echo "$s3_path_no_host" | cut -d"/" -f1)
-            # Get just the table name, without the UUID
-            table_dir_name_with_uuid=$(basename "$(dirname "$archive_key")")
-            table_name=${table_dir_name_with_uuid%%-*}
+            
+            # Path looks like: host/tag/keyspace/table/archive.tar.gz.enc
+            path_parts=($(echo "$archive_key" | tr "/" " "))
+            local ks_dir=${path_parts[2]}
+            local table_name=${path_parts[3]}
 
             table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_dir}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
