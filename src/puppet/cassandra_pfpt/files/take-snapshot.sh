@@ -10,7 +10,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-SNAPSHOT_TAG="adhoc_$(date +%Y%m%d_%H%M%S)"
+SNAPSHOT_TAG="adhoc_$(date +%Y%m%d%H%M%S)"
 KEYSPACES="${1:-}" # Optional: comma-separated list of keyspaces
 
 echo -e "${BLUE}Starting snapshot with tag: ${SNAPSHOT_TAG}${NC}"
