@@ -198,7 +198,6 @@ cleanup_old_snapshots() {
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
-    # Get a unique, sorted list of snapshot tags. This is more robust than parsing line by line.
     local tags
     tags=$(nodetool listsnapshots 2>&1 | awk '/^Snapshot name:/{print $3}' | sort -u || true)
     
@@ -212,25 +211,32 @@ cleanup_old_snapshots() {
 
     for tag in $tags; do
       local snapshot_timestamp=0
+      local parsable_date=""
       
-      # Try to parse YYYY-MM-DD-HH-MM format
-      if [[ "$tag" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
-          local parsable_date
-          parsable_date="${tag:0:10} ${tag:11:2}:${tag:14:2}"
-          snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
-      # Try to parse legacy formats like adhoc_snapshot_YYYYMMDDHHMMSS
-      elif [[ "$tag" =~ _([0-9]{8,14})$ ]]; then
-          local snapshot_date_str=${BASH_REMATCH[1]}
-          if [ ${#snapshot_date_str} -eq 8 ]; then # YYYYMMDD
-              snapshot_timestamp=$(date -d "$snapshot_date_str" +%s 2>/dev/null || echo 0)
-          elif [ ${#snapshot_date_str} -eq 14 ]; then # YYYYMMDDHHMMSS
-              snapshot_timestamp=$(date -d "${snapshot_date_str:0:8} ${snapshot_date_str:8:2}:${snapshot_date_str:10:2}:${snapshot_date_str:12:2}" +%s 2>/dev/null || echo 0)
-          fi
+      # Handle 'YYYY-MM-DD-HH-MM' (automated backup format)
+      if [[ "$tag" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2})$ ]]; then
+          parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
+      # Handle 'adhoc_YYYY-MM-DD-HH-MM-SS' (new adhoc format)
+      elif [[ "$tag" =~ ^adhoc_([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2}-[0-9]{2})$ ]]; then
+          parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
+      # Handle 'adhoc_YYYYMMDD_HHMMSS' (original legacy adhoc format)
+      elif [[ "$tag" =~ _([0-9]{8})_([0-9]{6})$ ]]; then
+          local date_part=${BASH_REMATCH[1]}
+          local time_part=${BASH_REMATCH[2]}
+          parsable_date="$date_part ${time_part:0:2}:${time_part:2:2}:${time_part:4:2}"
+      # Handle 'adhoc_YYYYMMDDHHMMSS' (intermediate legacy adhoc format)
+      elif [[ "$tag" =~ _([0-9]{14})$ ]]; then
+          local datetime_part=${BASH_REMATCH[1]}
+          parsable_date="${datetime_part:0:8} ${datetime_part:8:2}:${datetime_part:10:2}:${datetime_part:12:2}"
       fi
       
+      if [ -n "$parsable_date" ]; then
+          snapshot_timestamp=$(date -d "$parsable_date" +%s 2>/dev/null || echo 0)
+      fi
+
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
         if [ "$snapshot_timestamp" -lt "$cutoff_timestamp_days" ]; then
-          log_info "Deleting old snapshot: $tag (timestamp: $snapshot_timestamp is older than cutoff: $cutoff_timestamp_days)"
+          log_info "Deleting old snapshot: $tag"
           if ! nodetool clearsnapshot -t "$tag"; then
             log_error "Failed to delete snapshot $tag"
           fi
