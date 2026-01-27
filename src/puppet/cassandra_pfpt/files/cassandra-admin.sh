@@ -13,49 +13,57 @@ NC='\033[0m' # No Color
 # --- Help Function ---
 usage() {
     echo -e "${BOLD}Cassandra Operations Master Script${NC}"
-    echo ""
+    echo -e ""
     echo -e "A unified wrapper for managing common Cassandra operational tasks on this node."
-    echo ""
+    echo -e ""
     echo -e "${YELLOW}Usage: $0 <command> [arguments...]${NC}"
-    echo ""
-    echo -e "${BLUE}--- Documentation ---${NC}"
-    echo -e "  ${GREEN}manual${NC}                 Display the full operations manual in the terminal."
-    echo ""
-    echo -e "${BLUE}--- Node & Cluster Status ---${NC}"
-    echo -e "  ${GREEN}health${NC}                 Run a comprehensive health check on the local node."
-    echo -e "  ${GREEN}cluster-health${NC}          Quickly check cluster connectivity and nodetool status."
-    echo -e "  ${GREEN}disk-health${NC}             Check disk usage against warning/critical thresholds. Usage: disk-health [-p /path] [-w 80] [-c 90]"
-    echo -e "  ${GREEN}version${NC}                 Audit and print versions of key software (OS, Java, Cassandra)."
-    echo ""
-    echo -e "${BLUE}--- Node Lifecycle & Maintenance ---${NC}"
-    echo -e "  ${GREEN}stop${NC}                   Safely drain and stop the Cassandra service."
-    echo -e "  ${GREEN}restart${NC}                Perform a safe, rolling restart of the Cassandra service."
-    echo -e "  ${GREEN}reboot${NC}                 Safely drain Cassandra and reboot the machine."
-    echo -e "  ${GREEN}drain${NC}                  Drain the node, flushing memtables and stopping client traffic."
-    echo -e "  ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data."
-    echo -e "  ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node."
-    echo -e "  ${GREEN}rebuild${NC} <source_dc>     Rebuild the data on this node by streaming from another datacenter."
-    echo -e "  ${GREEN}upgrade-check${NC}          Run pre-flight checks before a major version upgrade."
-    echo ""
-    echo -e "${BLUE}--- Data Management & Repair ---${NC}"
-    echo -e "  ${GREEN}repair${NC} [<keyspace>]     Run a safe, granular repair on the node's token ranges. Can target a specific keyspace."
-    echo -e "  ${GREEN}cleanup${NC} [opts]          Run 'nodetool cleanup' with safety checks. Use 'cleanup -- --help' for options."
-    echo -e "  ${GREEN}compact${NC} [opts]          Run 'nodetool compact' with safety checks. Use 'compact -- --help' for options."
-    echo -e "  ${GREEN}garbage-collect${NC} [opts]  Run 'nodetool garbagecollect' with safety checks. Use 'garbage-collect -- --help' for options."
-    echo -e "  ${GREEN}upgrade-sstables${NC} [opts] Run 'nodetool upgradesstables' with safety checks. Use 'upgrade-sstables -- --help' for options."
-    echo ""
-    echo -e "${BLUE}--- Backup & Recovery ---${NC}"
-    echo -e "  ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3."
-    echo -e "  ${GREEN}backup-status${NC}          Check the status of the last completed backup for a node."
-    echo -e "  ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag. Optionally specify comma-separated keyspaces."
-    echo -e "  ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains. Run 'restore -- --help' for all options."
-    echo ""
-    echo -e "${BLUE}--- Advanced & Destructive Operations (Use with caution!) ---${NC}"
-    echo -e "  ${GREEN}assassinate${NC} <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring."
-    echo ""
-    echo -e "${BLUE}--- Performance Testing ---${NC}"
-    echo -e "  ${GREEN}stress${NC} [opts]            Run 'cassandra-stress' via a robust wrapper. Run 'stress -- --help' for options."
-    echo ""
+    echo -e ""
+    echo -e "${BLUE}COMMANDS:${NC}"
+    echo -e ""
+    echo -e "  ${BOLD}STATUS & HEALTH CHECKS${NC}"
+    echo -e "    ${GREEN}health${NC}                 Run a comprehensive health check on the local node."
+    echo -e "    ${GREEN}cluster-health${NC}          Quickly check cluster connectivity and nodetool status."
+    echo -e "    ${GREEN}disk-health${NC}             Check disk usage against warning/critical thresholds."
+    echo -e "    ${GREEN}version${NC}                 Audit and print versions of key software (OS, Java, Cassandra)."
+    echo -e "    ${GREEN}upgrade-check${NC}          Run pre-flight checks before a major version upgrade."
+    echo -e ""
+    echo -e "  ${BOLD}NODE LIFECYCLE & MAINTENANCE${NC}"
+    echo -e "    ${GREEN}stop${NC}                   Safely drain and stop the Cassandra service."
+    echo -e "    ${GREEN}restart${NC}                Perform a safe, rolling restart of the Cassandra service."
+    echo -e "    ${GREEN}reboot${NC}                 Safely drain Cassandra and reboot the machine."
+    echo -e "    ${GREEN}drain${NC}                  Drain the node, flushing memtables and stopping client traffic."
+    echo -e "    ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data."
+    echo -e "    ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node."
+    echo -e "    ${GREEN}rebuild${NC} <source_dc>     Rebuild the data on this node by streaming from another datacenter."
+    echo -e ""
+    echo -e "  ${BOLD}DATA MANAGEMENT & REPAIR${NC}"
+    echo -e "    ${GREEN}repair${NC} [<keyspace>]     Run a safe, granular repair on the node's token ranges. Can target a specific keyspace."
+    echo -e "    ${GREEN}cleanup${NC} [opts]          Run 'nodetool cleanup' with safety checks."
+    echo -e "    ${GREEN}compact${NC} [opts]          Run 'nodetool compact' with safety checks."
+    echo -e "    ${GREEN}garbage-collect${NC} [opts]  Run 'nodetool garbagecollect' with safety checks."
+    echo -e "    ${GREEN}upgrade-sstables${NC} [opts] Run 'nodetool upgradesstables' with safety checks."
+    echo -e ""
+    echo -e "  ${BOLD}BACKUP & RECOVERY${NC}"
+    echo -e "    ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3."
+    echo -e "    ${GREEN}incremental-backup${NC}      Manually trigger an incremental backup to S3."
+    echo -e "    ${GREEN}backup-status${NC}          Check the status of the last completed backup for a node."
+    echo -e "    ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag."
+    echo -e "    ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains."
+    echo -e ""
+    echo -e "  ${BOLD}DOCUMENTATION${NC}"
+    echo -e "    ${GREEN}manual${NC}                 Display the full operations manual in the terminal."
+    echo -e "    ${GREEN}backup-guide${NC}           Display the full backup and recovery guide."
+    echo -e "    ${GREEN}puppet-guide${NC}           Display the Puppet architecture guide."
+    echo -e ""
+    echo -e "  ${BOLD}ADVANCED & DESTRUCTIVE (USE WITH CAUTION!)${NC}"
+    echo -e "    ${GREEN}assassinate${NC} <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring."
+    echo -e ""
+    echo -e "  ${BOLD}PERFORMANCE TESTING${NC}"
+    echo -e "    ${GREEN}stress${NC} [opts]            Run 'cassandra-stress' via a robust wrapper."
+    echo -e ""
+    echo -e "  ${BOLD}HELP${NC}"
+    echo -e "    ${GREEN}-h, --help${NC}              Show this help message."
+    echo -e ""
     exit 1
 }
 
@@ -122,6 +130,9 @@ case "$COMMAND" in
     backup)
         /usr/local/bin/full-backup-to-s3.sh "$@"
         ;;
+    incremental-backup)
+        /usr/local/bin/incremental-backup-to-s3.sh "$@"
+        ;;
     backup-status)
         /usr/local/bin/backup-status.sh "$@"
         ;;
@@ -129,7 +140,6 @@ case "$COMMAND" in
         /usr/local/bin/take-snapshot.sh "$@"
         ;;
     restore)
-        # Note: The restore script has complex arguments.
         /usr/local/bin/restore-from-s3.sh "$@"
         ;;
     assassinate)
@@ -140,6 +150,12 @@ case "$COMMAND" in
         ;;
     manual)
         /usr/local/bin/cassandra-manual.sh "$@"
+        ;;
+    backup-guide)
+        less -R /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md
+        ;;
+    puppet-guide)
+        less -R /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md
         ;;
     help|--help|-h)
         usage
