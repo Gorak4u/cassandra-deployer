@@ -33,7 +33,7 @@
 
 ## Description
 
-This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` command-line tool, installed in `/usr/local/bin`.
+This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` shell script, installed in `/usr/local/bin`.
 
 ## Setup
 
