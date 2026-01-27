@@ -152,7 +152,16 @@ cleanup_old_snapshots() {
     fi
     
     local tags
-    tags=$(echo "$list_output" | awk '/^Snapshot name:/{print $3}' | sort -u)
+    # Detect output format to support both C* 3.x and 4.x
+    if echo "$list_output" | grep -q "List of snapshots:"; then
+        # C* 4.x format - a simple list after a header
+        log_info "Detected Cassandra 4.x listsnapshots format."
+        tags=$(echo "$list_output" | tail -n +2 | sort -u)
+    else
+        # C* 3.x format - detailed view with 'Snapshot name:'
+        log_info "Detected Cassandra 3.x listsnapshots format."
+        tags=$(echo "$list_output" | awk '/Snapshot name:/{print $3}' | sort -u)
+    fi
     
     if [ -z "$tags" ]; then
         log_info "No snapshots found to evaluate for cleanup. This could be due to a nodetool error or because there are none."
