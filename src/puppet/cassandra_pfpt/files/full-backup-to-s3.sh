@@ -67,7 +67,7 @@ if [ "$(id -u)" -ne 0 ]; then
   log_error "This script must be run as root."
   exit 1
 fi
-for tool in jq aws openssl nodetool cqlsh xargs su; do
+for tool in jq aws openssl nodetool cqlsh xargs su find; do
     if ! command -v $tool &> /dev/null; then
         log_error "Required tool '$tool' is not installed or in PATH."
         exit 1
@@ -138,53 +138,42 @@ cleanup_old_snapshots() {
         return
     fi
 
-    log_info "--- Starting Old Snapshot Cleanup ---"
+    log_info "--- Starting Old Snapshot Cleanup via Direct File Deletion ---"
     log_info "Retention period: $KEEP_DAYS days"
     
-    local list_output
-    list_output=$(run_nodetool listsnapshots 2>&1)
-    local list_exit_code=$?
+    local all_snapshot_dirs
+    all_snapshot_dirs=$(find "$CASSANDRA_DATA_DIR" -type d -path '*/snapshots/*' -prune -print 2>/dev/null || echo "")
 
-    if [ "$list_exit_code" -ne 0 ]; then
-        log_warn "nodetool listsnapshots command failed. Cannot clean up old snapshots."
-        log_warn "Nodetool output: $list_output"
-        return # Exit the function, don't fail the whole backup
-    fi
-    
-    local tags
-    # Detect output format to support both C* 3.x and 4.x
-    if echo "$list_output" | grep -q "Snapshot Details:"; then
-        # C* 4.x format - a table with headers
-        log_info "Detected Cassandra 4.x listsnapshots tabular format."
-        # Skip the first two header lines ("Snapshot Details:", "Snapshot name..."), then get unique names from the first column.
-        tags=$(echo "$list_output" | awk 'NR > 2 {print $1}' | sort -u)
-    else
-        # C* 3.x format - detailed view with 'Snapshot name:'
-        log_info "Assuming Cassandra 3.x listsnapshots format."
-        tags=$(echo "$list_output" | awk '/Snapshot name:/{print $3}' | sort -u)
-    fi
-    
-    if [ -z "$tags" ]; then
-        log_info "No snapshots found to evaluate for cleanup. This could be due to a nodetool error or because there are none."
+    if [ -z "$all_snapshot_dirs" ]; then
+        log_info "No snapshot directories found on filesystem. Nothing to clean up."
         log_info "--- Snapshot Cleanup Finished ---"
         return
     fi
-
+    
+    local unique_tags
+    unique_tags=$(echo "$all_snapshot_dirs" | xargs -n 1 basename | sort -u)
+    
+    if [ -z "$unique_tags" ]; then
+        log_info "Found snapshot parent directories, but no actual snapshots to evaluate."
+        log_info "--- Snapshot Cleanup Finished ---"
+        return
+    fi
+    
     log_info "Found snapshots to evaluate for cleanup."
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
-    for tag in $tags; do
+    for tag in $unique_tags; do
       local snapshot_timestamp=0
       local parsable_date=""
       
-      # Try parsing YYYY-MM-DD-HH-MM-SS format (from new adhoc)
+      # Try parsing new adhoc format 'adhoc_YYYY-MM-DD-HH-MM-SS'
       if [[ "$tag" =~ ^adhoc_([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2}-[0-9]{2})$ ]]; then
           parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
-      # Try parsing YYYY-MM-DD-HH-MM format (from automated backups)
+      # Try parsing automated backup format 'YYYY-MM-DD-HH-MM'
       elif [[ "$tag" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})-([0-9]{2}-[0-9]{2})$ ]]; then
           parsable_date="${BASH_REMATCH[1]} ${BASH_REMATCH[2]//-/:}"
-      # Try parsing legacy adhoc format adhoc_YYYYMMDDHHMMSS
+      # Try parsing legacy adhoc format 'adhoc_YYYYMMDDHHMMSS'
       elif [[ "$tag" =~ ^adhoc_([0-9]{14})$ ]]; then
           local datetime_part=${BASH_REMATCH[1]}
           parsable_date="${datetime_part:0:4}-${datetime_part:4:2}-${datetime_part:6:2} ${datetime_part:8:2}:${datetime_part:10:2}:${datetime_part:12:2}"
@@ -196,10 +185,10 @@ cleanup_old_snapshots() {
 
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
         if [ "$snapshot_timestamp" -lt "$cutoff_timestamp_days" ]; then
-          log_info "Deleting old snapshot: $tag"
-          if ! run_nodetool clearsnapshot -t "$tag"; then
-            log_error "Failed to delete snapshot $tag"
-          fi
+          log_info "Deleting old snapshot directories with tag: $tag"
+          # Find all directories with this name under any 'snapshots' directory and delete them
+          find "$CASSANDRA_DATA_DIR" -type d -name "$tag" -path '*/snapshots/*' -exec rm -rf {} +
+          log_success "Deletion complete for snapshot tag: $tag"
         fi
       else
         log_warn "Could not parse date from snapshot tag '$tag'. Skipping cleanup for this tag."
