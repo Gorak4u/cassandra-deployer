@@ -81,7 +81,6 @@ CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.full_backup_log_file' "$CONFIG_FILE")
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 KEEP_DAYS=$(jq -r '.clearsnapshot_keep_days // 0' "$CONFIG_FILE")
-UPLOAD_STREAMING=$(jq -r '.upload_streaming // "false"' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
 SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
@@ -105,7 +104,6 @@ ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
 # --- Utility Functions ---
 
 run_nodetool() {
-    # This function ensures nodetool is run as the correct user with the correct environment.
     local cmd="nodetool $@"
     su -s /bin/bash "$CASSANDRA_USER" -c "$cmd"
 }
@@ -319,9 +317,9 @@ process_table_backup() {
     
     log_info "Archiving table: $ks_name.$table_name"
     
-    # Changed to use LOCAL_BACKUP_DIR
     local local_archive_path="$LOCAL_BACKUP_DIR/$ks_name"
     mkdir -p "$local_archive_path"
+    
     local local_tar_file="$local_archive_path/$table_name.tar.gz"
     local local_enc_file="$local_archive_path/$table_name.tar.gz.enc"
 
@@ -434,5 +432,18 @@ case "$MODE" in
         ;;
 esac
 
-log_info "--- Full Backup Process Finished ---"
+# Summary
+if [ "$MODE" != "cleanup_only" ] && [ "$MODE" != "upload_only" ]; then
+    UPLOAD_ERRORS=$(find "$ERROR_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$UPLOAD_ERRORS" -gt 0 ]; then
+        TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
+        TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
+        log_error "--- Full Backup Finished with $UPLOAD_ERRORS ERRORS ---"
+        log_error "Summary: $TABLES_BACKED_UP_SUCCESS_COUNT / $TOTAL_TABLES_ATTEMPTED tables processed successfully."
+        exit 1
+    else
+        log_success "--- Full Backup Finished Successfully ---"
+    fi
+fi
+
 exit 0

@@ -415,24 +415,28 @@ do_full_restore() {
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_info "Processing backup: $backup_ts"
-        aws s3 ls "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | \
-        xargs -I{} -P"$PARALLELISM" bash -c '
-            local filename="$1"
-            local full_archive_key_path="'"$EFFECTIVE_SOURCE_HOST/$backup_ts"'/$(basename "$filename")"
+        local s3_path_prefix="$EFFECTIVE_SOURCE_HOST/$backup_ts/"
 
-            local ks_name=$(echo "$filename" | cut -d. -f1)
-            local table_name=$(echo "$filename" | cut -d. -f2)
+        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$s3_path_prefix" | grep '\.tar\.gz\.enc$' | awk '{print $4}' | \
+        xargs -I{} -P"$PARALLELISM" bash -c '
+            local full_s3_key="$1"
+            
+            # Extract ks/table from path like host/tag/ks/table.tar.gz.enc
+            local path_part=${full_s3_key#*"'$backup_ts'"/}
+            local ks_name=$(dirname "$path_part")
+            local archive_filename=$(basename "$path_part")
+            local table_name=${archive_filename%%.tar.gz.enc}
 
             local schema_map_json=$(cat $TMP_SCHEMA_MAP_FILE)
 
             local table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_name}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
-                log_message "${YELLOW}WARNING: Full restore could not find mapping for ${ks_name}.${table_name}. Skipping archive $filename${NC}"
+                log_message "${YELLOW}WARNING: Full restore could not find mapping for ${ks_name}.${table_name}. Skipping archive $full_s3_key${NC}"
                 exit 0
             fi
 
             local output_dir="$TEMP_RESTORE_DIR/$ks_name/$table_uuid_dir"
-            download_and_extract_table "$full_archive_key_path" "$output_dir" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
+            download_and_extract_table "$full_s3_key" "$output_dir" "$TEMP_RESTORE_DIR" "$RESTORE_BASE_PATH"
         ' _ {}
     done
     log_success "All data from backup chain downloaded and extracted to temporary directory."
@@ -517,35 +521,37 @@ do_granular_restore() {
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
         log_info "Processing backup: $backup_ts"
-        local s3_path_base="s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/"
+        local s3_path_prefix="$EFFECTIVE_SOURCE_HOST/$backup_ts/$KEYSPACE_NAME/"
         
         # Build a grep pattern for the filename
-        local filename_pattern_to_grep="${KEYSPACE_NAME}"
+        local filename_pattern_to_grep
         if [ -n "$TABLE_NAME" ]; then
-            filename_pattern_to_grep+="\.${TABLE_NAME}\.tar\.gz\.enc"
+            filename_pattern_to_grep="/${TABLE_NAME}\.tar\.gz\.enc$"
         else
             # Match any table in the keyspace
-            filename_pattern_to_grep+="\..*\.tar\.gz\.enc"
+            filename_pattern_to_grep="\.tar\.gz\.enc$"
         fi
 
-        aws s3 ls "$s3_path_base" | grep -E "$filename_pattern_to_grep" | awk '{print $4}' | \
+        aws s3 ls --recursive "s3://$EFFECTIVE_S3_BUCKET/$s3_path_prefix" | grep -E "$filename_pattern_to_grep" | awk '{print $4}' | \
         xargs -I{} -P"$PARALLELISM" bash -c '
-            local filename="$1"
-            local full_archive_key_path="'"$EFFECTIVE_SOURCE_HOST/$backup_ts"'/$(basename "$filename")"
-
-            local ks_name=$(echo "$filename" | cut -d. -f1)
-            local table_name=$(echo "$filename" | cut -d. -f2)
+            local full_s3_key="$1"
+            
+            # Extract ks/table from path like host/tag/ks/table.tar.gz.enc
+            local path_part=${full_s3_key#*"'$backup_ts'"/}
+            local ks_name=$(dirname "$path_part")
+            local archive_filename=$(basename "$path_part")
+            local table_name=${archive_filename%%.tar.gz.enc}
 
             local schema_map_json=$(cat $TMP_SCHEMA_MAP_FILE)
 
             local table_uuid_dir=$(echo "$schema_map_json" | jq -r ".\"${ks_name}.${table_name}\"")
             if [ -z "$table_uuid_dir" ] || [ "$table_uuid_dir" == "null" ]; then
-                log_message "${YELLOW}WARNING: Granular restore could not find mapping for ${ks_name}.${table_name}. Skipping archive $filename${NC}"
+                log_message "${YELLOW}WARNING: Granular restore could not find mapping for ${ks_name}.${table_name}. Skipping archive $full_s3_key${NC}"
                 exit 0
             fi
 
             local output_dir="$base_output_dir/$ks_name/$table_uuid_dir"
-            download_and_extract_table "$full_archive_key_path" "$output_dir" "$temp_download_dir" "$check_path"
+            download_and_extract_table "$full_s3_key" "$output_dir" "$temp_download_dir" "$check_path"
         ' _ {}
     done
     
