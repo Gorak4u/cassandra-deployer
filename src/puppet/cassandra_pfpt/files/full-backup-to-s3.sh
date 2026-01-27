@@ -367,6 +367,7 @@ process_table_backup() {
     BACKUP_INCLUDE_ONLY_KEYSPACES=$(jq -r '.backup_include_only_keyspaces // []' "$CONFIG_FILE")
     BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_FILE")
 
+
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
     local ks_name
     ks_name=$(echo "$path_without_prefix" | cut -d'/' -f1)
@@ -384,21 +385,26 @@ process_table_backup() {
 
     if [ "$include_mode" = true ]; then
         local should_include=false
+        # Check if keyspace is in include list
         if echo "$BACKUP_INCLUDE_ONLY_KEYSPACES" | jq -e ".[] | select(. == \"$ks_name\")" > /dev/null; then
             should_include=true
         fi
+        # Check if table is in include list
         if echo "$BACKUP_INCLUDE_ONLY_TABLES" | jq -e ".[] | select(. == \"$full_table_name\")" > /dev/null; then
             should_include=true
         fi
+
         if [ "$should_include" = false ]; then
             log_info "Skipping table $full_table_name as it is not in the include-only lists."
             return 0
         fi
-    else
+    else # exclude mode
+        # Check if keyspace is in exclude list
         if echo "$BACKUP_EXCLUDE_KEYSPACES" | jq -e ".[] | select(. == \"$ks_name\")" > /dev/null; then
             log_info "Skipping table $full_table_name as its keyspace is excluded."
             return 0
         fi
+        # Check if table is in exclude list
         if echo "$BACKUP_EXCLUDE_TABLES" | jq -e ".[] | select(. == \"$full_table_name\")" > /dev/null; then
             log_info "Skipping table $full_table_name as it is explicitly excluded."
             return 0
@@ -614,4 +620,3 @@ else
 fi
 
 exit 0
-
