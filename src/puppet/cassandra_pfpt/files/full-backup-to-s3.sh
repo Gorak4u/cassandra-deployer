@@ -167,6 +167,11 @@ ensure_s3_bucket_and_lifecycle() {
 # --- Core Backup Step Functions ---
 
 do_cleanup_snapshots() {
+    if [ -f "/var/lib/cleanup-disabled" ]; then
+        log_warn "Snapshot cleanup is disabled via /var/lib/cleanup-disabled. Skipping."
+        return 0
+    fi
+
     if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || [ "$KEEP_DAYS" -le 0 ]; then
         log_info "Snapshot retention is not configured to a positive number ($KEEP_DAYS). Skipping old snapshot cleanup."
         return
@@ -219,7 +224,6 @@ do_local_backup() {
     log_info "--- Step 1: Creating Local Full Backup ---"
     log_info "Backup Timestamp (Tag): $BACKUP_TAG"
     
-    # This function now uses the persistent LOCAL_BACKUP_DIR instead of a temporary one.
     mkdir -p "$LOCAL_BACKUP_DIR" || { log_error "Failed to create local backup directory."; return 1; }
     mkdir -p "$ERROR_DIR"
 
@@ -246,7 +250,6 @@ do_local_backup() {
     echo "$SCHEMA_MAP" > "$SCHEMA_MAP_FILE"
     log_info "Schema-to-directory mapping generated."
 
-    # Export variables needed by the sub-shell function
     export -f process_table_backup log_message log_info log_success log_warn log_error
     export LOG_FILE CONFIG_FILE TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR LOCAL_BACKUP_DIR
     export RED GREEN YELLOW BLUE NC
@@ -337,9 +340,12 @@ process_table_backup() {
 }
 
 do_upload() {
+    if [ -f "/var/lib/upload-disabled" ]; then
+        log_warn "S3 upload is disabled via /var/lib/upload-disabled. Skipping."
+        return 0
+    fi
     log_info "--- Step 2: Uploading Local Backup to S3 ---"
     if [ ! -d "$LOCAL_BACKUP_DIR" ]; then log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"; return 1; fi
-    if [ -f "/var/lib/upload-disabled" ]; then log_warn "S3 upload is disabled via /var/lib/upload-disabled. Skipping."; return 0; fi
     if [ "$BACKUP_BACKEND" != "s3" ]; then log_warn "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."; return 0; fi
 
     # Use aws s3 sync for efficient, parallel upload.
@@ -354,6 +360,10 @@ do_upload() {
 }
 
 do_post_upload_cleanup() {
+    if [ -f "/var/lib/cleanup-disabled" ]; then
+        log_warn "Local staging cleanup is disabled via /var/lib/cleanup-disabled. Skipping."
+        return 0
+    fi
     if [ -d "$LOCAL_BACKUP_DIR" ]; then
         log_info "Cleaning up local backup staging directory: $LOCAL_BACKUP_DIR"
         rm -rf "$LOCAL_BACKUP_DIR"

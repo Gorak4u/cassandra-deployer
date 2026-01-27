@@ -77,6 +77,8 @@ CASSANDRA_DATA_DIR=$(jq -r '.cassandra_data_dir' "$CONFIG_FILE")
 LOG_FILE=$(jq -r '.incremental_backup_log_file' "$CONFIG_FILE") # Overwrite default
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -187,6 +189,11 @@ do_local_backup() {
 }
 
 do_upload() {
+    if [ -f "/var/lib/upload-disabled" ]; then
+        log_warn "S3 upload is disabled via /var/lib/upload-disabled. Skipping."
+        return 0
+    fi
+
     log_info "--- Step 2: Uploading Local Backup to S3 ---"
     
     if [ ! -d "$LOCAL_BACKUP_DIR" ]; then log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"; return 1; fi
@@ -203,6 +210,10 @@ do_upload() {
 }
 
 do_source_and_local_cleanup() {
+    if [ -f "/var/lib/cleanup-disabled" ]; then
+        log_warn "Source and local staging cleanup is disabled via /var/lib/cleanup-disabled. Skipping."
+        return 0
+    fi
     log_info "--- Step 3: Cleaning Up Source & Local Files ---"
     
     if [ ! -f "$LOCAL_BACKUP_DIR/backup_manifest.json" ]; then
@@ -237,7 +248,10 @@ do_source_and_local_cleanup() {
 
 if [ "$(id -u)" -ne 0 ]; then log_error "This script must be run as root."; exit 1; fi
 
-if [ -f "/var/lib/backup-disabled" ]; then log_info "Backup is disabled via /var/lib/backup-disabled. Aborting."; exit 0; fi
+if [ -f "/var/lib/backup-disabled" ]; then
+    log_info "Backup is disabled via /var/lib/backup-disabled. Aborting."
+    exit 0
+fi
 
 if [ -f "$LOCK_FILE" ]; then
     OLD_PID=$(cat "$LOCK_FILE")
