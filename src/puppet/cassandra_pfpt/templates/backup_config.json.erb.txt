@@ -18,5 +18,7 @@
     "cassandra_password": "<%= @cassandra_password.unwrap %>",
     "ssl_enabled": <%= @ssl_enabled %>,
     "ssl_truststore_path": "<%= @truststore_path %>",
-    "ssl_truststore_password": "<%= @truststore_password.unwrap %>"
+    "ssl_truststore_password": "<%= @truststore_password.unwrap %>",
+    "jvm_opts_file": "/etc/cassandra/conf/jvm-server.options",
+    "jmx_password_file": "<%= @jmx_password_file_path %>"
 }

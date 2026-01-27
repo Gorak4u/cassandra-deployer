@@ -91,11 +91,32 @@ SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 S3_RETENTION_PERIOD=$(jq -r '.s3_retention_period // 0' "$CONFIG_FILE")
 HOSTNAME=$(hostname -s)
+JVM_OPTS_FILE=$(jq -r '.jvm_opts_file' "$CONFIG_FILE")
+JMX_PASS_FILE=$(jq -r '.jmx_password_file' "$CONFIG_FILE")
+
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
   log_error "One or more required configuration values are missing from $CONFIG_FILE"
   exit 1
+fi
+
+# --- JMX Auth Setup ---
+NODETOOL_CMD="nodetool"
+if [ -f "$JVM_OPTS_FILE" ] && grep -q -- '-Dcom.sun.management.jmxremote.authenticate=true' "$JVM_OPTS_FILE"; then
+    log_info "JMX authentication is enabled. Configuring nodetool command."
+    if [ -f "$JMX_PASS_FILE" ]; then
+        JMX_USER=$(awk '/monitorRole/ {print $1}' "$JMX_PASS_FILE" 2>/dev/null)
+        JMX_PASS=$(awk '/monitorRole/ {print $2}' "$JMX_PASS_FILE" 2>/dev/null)
+        if [ -n "$JMX_USER" ] && [ -n "$JMX_PASS" ]; then
+             NODETOOL_CMD="nodetool -u $JMX_USER -pw $JMX_PASS"
+             log_info "Using JMX user 'monitorRole' for nodetool commands."
+        else
+            log_warn "Could not find 'monitorRole' credentials in $JMX_PASS_FILE. Nodetool commands might fail."
+        fi
+    else
+        log_warn "JMX auth is on, but password file $JMX_PASS_FILE not found. Nodetool commands might fail."
+    fi
 fi
 
 # --- Function Declarations ---
@@ -112,8 +133,18 @@ cleanup_old_snapshots() {
     local cutoff_timestamp_days
     cutoff_timestamp_days=$(date -d "-$KEEP_DAYS days" +%s)
 
+    local list_output
+    list_output=$($NODETOOL_CMD listsnapshots 2>&1)
+    local list_exit_code=${PIPESTATUS[0]}
+
+    if [ "$list_exit_code" -ne 0 ]; then
+        log_warn "nodetool listsnapshots command failed. Cannot clean up old snapshots."
+        log_warn "Nodetool output: $list_output"
+        return # Exit the function, don't fail the whole backup
+    fi
+    
     local tags
-    tags=$(nodetool listsnapshots 2>&1 | awk '/^Snapshot name:/{print $3}' | sort -u || true)
+    tags=$(echo "$list_output" | awk '/^Snapshot name:/{print $3}' | sort -u)
     
     if [ -z "$tags" ]; then
         log_info "No snapshots found to evaluate for cleanup. This could be due to a nodetool error or because there are none."
@@ -147,7 +178,7 @@ cleanup_old_snapshots() {
       if [[ "$snapshot_timestamp" -gt 0 ]]; then
         if [ "$snapshot_timestamp" -lt "$cutoff_timestamp_days" ]; then
           log_info "Deleting old snapshot: $tag"
-          if ! nodetool clearsnapshot -t "$tag"; then
+          if ! $NODETOOL_CMD clearsnapshot -t "$tag"; then
             log_error "Failed to delete snapshot $tag"
           fi
         fi
@@ -273,7 +304,7 @@ do_local_backup() {
 
     # 2. Take snapshot
     log_info "Taking full snapshot with tag: $BACKUP_TAG..."
-    if ! nodetool snapshot -t "$BACKUP_TAG"; then
+    if ! $NODETOOL_CMD snapshot -t "$BACKUP_TAG"; then
       log_error "Failed to take Cassandra snapshot. Aborting backup."
       rm -rf "$LOCAL_BACKUP_DIR"
       exit 1
@@ -358,12 +389,12 @@ do_local_backup() {
     # 8. Create manifest
     local MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
     log_info "Creating backup manifest at $MANIFEST_FILE..."
-    local CLUSTER_NAME=$(nodetool describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
+    local CLUSTER_NAME=$($NODETOOL_CMD describecluster 2>/dev/null | grep 'Name:' | awk '{print $2}' || echo "Unknown")
     if [ "$CLUSTER_NAME" == "Unknown" ]; then log_error "Could not get cluster name. Cannot create a valid manifest."; exit 1; fi
     local NODE_IP=${LISTEN_ADDRESS:-$(hostname -i)}
-    local NODE_DC=$(nodetool info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
-    local NODE_RACK=$(nodetool info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
-    local NODE_TOKENS_RAW=$(nodetool ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
+    local NODE_DC=$($NODETOOL_CMD info 2>/dev/null | grep -E '^\s*Data Center' | awk '{print $4}' || echo "Unknown")
+    local NODE_RACK=$($NODETOOL_CMD info 2>/dev/null | grep -E '^\s*Rack' | awk '{print $3}' || echo "Unknown")
+    local NODE_TOKENS_RAW=$($NODETOOL_CMD ring 2>/dev/null | grep "\b$NODE_IP\b" | awk '{print $NF}' || echo "")
     if [ -z "$NODE_TOKENS_RAW" ]; then log_error "Could not get tokens. Cannot create a valid manifest."; exit 1; fi
     local NODE_TOKENS=$(echo "$NODE_TOKENS_RAW" | tr '\n' ',' | sed 's/,$//')
     local total_tables_attempted=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
