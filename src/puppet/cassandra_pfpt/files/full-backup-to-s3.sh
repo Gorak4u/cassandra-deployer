@@ -153,13 +153,14 @@ cleanup_old_snapshots() {
     
     local tags
     # Detect output format to support both C* 3.x and 4.x
-    if echo "$list_output" | grep -q "List of snapshots:"; then
-        # C* 4.x format - a simple list after a header
-        log_info "Detected Cassandra 4.x listsnapshots format."
-        tags=$(echo "$list_output" | tail -n +2 | sort -u)
+    if echo "$list_output" | grep -q "Snapshot Details:"; then
+        # C* 4.x format - a table with headers
+        log_info "Detected Cassandra 4.x listsnapshots tabular format."
+        # Skip the first two header lines ("Snapshot Details:", "Snapshot name..."), then get unique names from the first column.
+        tags=$(echo "$list_output" | awk 'NR > 2 {print $1}' | sort -u)
     else
         # C* 3.x format - detailed view with 'Snapshot name:'
-        log_info "Detected Cassandra 3.x listsnapshots format."
+        log_info "Assuming Cassandra 3.x listsnapshots format."
         tags=$(echo "$list_output" | awk '/Snapshot name:/{print $3}' | sort -u)
     fi
     
@@ -439,6 +440,7 @@ do_local_backup() {
 do_upload() {
     log_info "--- Step 3: Uploading backup to S3 ---"
     
+    export BACKUP_TAG=${BACKUP_TAG_OVERRIDE:-$BACKUP_TAG}
     if [ -z "$BACKUP_TAG" ]; then
         log_error "Backup tag is not set. This should not happen in default or upload-only mode."
         exit 1
@@ -515,7 +517,6 @@ case $MODE in
     "upload_only")
         log_info "--- Running in Upload-Only Mode ---"
         if [ -z "$BACKUP_TAG_OVERRIDE" ]; then log_error "--tag is required for --upload-only mode."; usage; exit 1; fi
-        export BACKUP_TAG="$BACKUP_TAG_OVERRIDE"
         do_upload
         log_success "Mode finished successfully."
         ;;
