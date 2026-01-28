@@ -108,24 +108,30 @@ run_stress() {
     local op_spec="$1"   # e.g., "write=1" or "write=2,read=1"
     local count_spec="$2" # e.g., "n=10M" or "duration=30s"
 
-    local cmd_args=("user" "profile=$PROFILE_PATH" "ops($op_spec)")
-    
-    if [ -n "$count_spec" ]; then
-        cmd_args+=("$count_spec")
-    fi
-    
-    # Add global options
-    cmd_args+=("-node" "$NODES" "-cl" "$CL" "-truncate" "$TRUNCATE")
+    # Start with base command and subcommand
+    local cmd_array=("$CMD_BASE" "user")
 
-    # Add auth/ssl options
-    if [ -n "${CASSANDRA_USER:-}" ]; then cmd_args+=("-user" "$CASSANDRA_USER"); fi
-    if [ -n "${CASSANDRA_PASS:-}" ]; then cmd_args+=("-password" "$CASSANDRA_PASS"); fi
-    if [ "${USE_SSL:-false}" = true ]; then cmd_args+=("-mode" "ssl" "encryption=true"); fi
+    # Add subcommand arguments (key=value pairs without dashes)
+    cmd_array+=("profile=$PROFILE_PATH")
+    cmd_array+=("ops($op_spec)")
+    if [ -n "$count_spec" ]; then
+        cmd_array+=("$count_spec")
+    fi
+    cmd_array+=("cl=$CL")
+    cmd_array+=("truncate=$TRUNCATE")
+
+    # Add global options (with dashes) at the end
+    cmd_array+=("-node" "$NODES")
+    if [ -n "${CASSANDRA_USER:-}" ]; then cmd_array+=("-user" "$CASSANDRA_USER"); fi
+    if [ -n "${CASSANDRA_PASS:-}" ]; then cmd_array+=("-password" "$CASSANDRA_PASS"); fi
+    if [ "${USE_SSL:-false}" = true ]; then cmd_array+=("-mode" "ssl" "encryption=true"); fi
+
 
     log_message "${BLUE}Executing stress operation...${NC}"
-    log_message "Command: $CMD_BASE ${cmd_args[*]}"
+    # Use "${cmd_array[@]}" to handle arguments with spaces correctly
+    log_message "Command: ${cmd_array[*]}"
 
-    if "$CMD_BASE" "${cmd_args[@]}"; then
+    if "${cmd_array[@]}"; then
         log_message "${GREEN}--- Operation completed successfully. ---${NC}"
         return 0
     else
