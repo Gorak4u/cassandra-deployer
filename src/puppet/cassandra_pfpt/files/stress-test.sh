@@ -8,6 +8,8 @@ TABLE="users_large"
 PROFILE_PATH="/etc/cassandra/conf/stress-schema.yaml"
 CONFIG_PATH="/etc/cassandra/conf/stress.conf"
 NODES=""
+OPS_SPEC="" # New: for custom ops ratios
+DURATION="" # New: for time-based runs
 WRITE_COUNT=""
 READ_COUNT=""
 DELETE_COUNT=""
@@ -39,34 +41,38 @@ usage() {
     log_message "A robust wrapper for cassandra-stress."
     log_message "Credentials and SSL settings are automatically configured via $CONFIG_PATH."
     log_message ""
-    log_message "Operations (at least one is required):"
-    log_message "  -w, --write <count>     Number of rows to write (e.g., 10M for 10 million)."
-    log_message "  -r, --read <count>      Number of rows to read. Use 'ALL' for a full read test."
-    log_message "  -d, --delete <count>    Number of rows to delete."
+    log_message "Operations (at least one operation type is required):"
+    log_message "  -w, --write <count>      Number of rows to write (e.g., 10M for 10 million). Shortcut for --ops 'write=1' -n <count>."
+    log_message "  -r, --read <count>       Number of rows to read. Shortcut for --ops 'read=1' -n <count>."
+    log_message "  -d, --delete <count>     Number of rows to delete. Shortcut for --ops 'delete=1' -n <count>."
+    log_message "  --ops <spec>             Advanced: Specify custom operation ratios, e.g., 'write=2,read=1'."
+    log_message "  -n, --count <count>      Number of operations to perform when using --ops."
+    log_message "  --duration <time>        Time to run (e.g., '30s', '10m', '1h'). Overrides operation counts."
     log_message ""
     log_message "Configuration:"
-    log_message "  -k, --keyspace <name>   Keyspace to use. Default: $KEYSPACE"
-    log_message "  -t, --table <table>     Table to use. Default: $TABLE"
-    log_message "  -p, --profile <path>    Path to the stress profile YAML. Default: $PROFILE_PATH"
-    log_message "  -n, --nodes <list>      Comma-separated list of node IPs. Default: auto-detect from nodetool."
-    log_message "  -cl, --cl <level>       Consistency Level to use. Default: $CL"
-    log_message "  --truncate <when>     Truncate the table: never, before, or each. Default: $TRUNCATE"
-    log_message "  --no-warmup             Skip the read phase before a write operation."
-    log_message "  -h, --help              Show this help message."
+    log_message "  -p, --profile <path>     Path to the stress profile YAML. Default: $PROFILE_PATH"
+    log_message "  --nodes <list>           Comma-separated list of node IPs. Default: auto-detect from nodetool."
+    log_message "  --cl <level>             Consistency Level to use. Default: $CL"
+    log_message "  --truncate <when>        Truncate the table: never, before, or each. Default: $TRUNCATE"
+    log_message "  --no-warmup              Skip the read phase before a write operation."
+    log_message "  -h, --help               Show this help message."
     exit 1
 }
 
 # --- Argument Parsing ---
+# Using a temporary variable for -n/--count because it's used with --ops
+OP_COUNT=""
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -w|--write) WRITE_COUNT="$2"; shift ;;
         -r|--read) READ_COUNT="$2"; shift ;;
         -d|--delete) DELETE_COUNT="$2"; shift ;;
-        -k|--keyspace) KEYSPACE="$2"; shift ;;
-        -t|--table) TABLE="$2"; shift ;;
+        --ops) OPS_SPEC="$2"; shift ;;
+        -n|--count) OP_COUNT="$2"; shift ;;
+        --duration) DURATION="$2"; shift ;;
         -p|--profile) PROFILE_PATH="$2"; shift ;;
-        -n|--nodes) NODES="$2"; shift ;;
-        -cl|--cl) CL="$2"; shift ;;
+        --nodes) NODES="$2"; shift ;;
+        --cl) CL="$2"; shift ;;
         --truncate) TRUNCATE="$2"; shift ;;
         --no-warmup) NO_WARMUP=true ;;
         -h|--help) usage ;;
@@ -74,12 +80,6 @@ while [[ "$#" -gt 0 ]]; do
     esac
     shift
 done
-
-# Validate that at least one operation is specified
-if [ -z "$WRITE_COUNT" ] && [ -z "$READ_COUNT" ] && [ -z "$DELETE_COUNT" ]; then
-    log_message "${RED}ERROR: You must specify at least one operation (-w, -r, or -d).${NC}"
-    usage
-fi
 
 # --- Main Logic ---
 log_message "${BLUE}--- Starting Cassandra Stress Test ---${NC}"
@@ -95,78 +95,95 @@ if [ -z "$NODES" ]; then
     log_message "${BLUE}Found nodes: $NODES${NC}"
 fi
 
-# Construct the base command
+# Check if profile exists
+if [ ! -f "$PROFILE_PATH" ]; then
+    log_message "${RED}ERROR: Stress profile not found at $PROFILE_PATH. This wrapper requires a profile.${NC}"
+    exit 1
+fi
+
 CMD_BASE="cassandra-stress"
-CMD_ARGS=()
 
-if [ -f "$PROFILE_PATH" ]; then
-    CMD_ARGS+=("user" "profile=$PROFILE_PATH")
-else
-    log_message "${YELLOW}WARNING: Stress profile not found at $PROFILE_PATH. Relying on command-line schema.${NC}"
-    CMD_ARGS+=("keyspace=$KEYSPACE" "table=$TABLE")
-fi
-
-CMD_ARGS+=("-node" "$NODES")
-CMD_ARGS+=("-cl" "$CL")
-CMD_ARGS+=("-truncate" "$TRUNCATE")
-
-# Add authentication arguments if provided in config
-if [ -n "${CASSANDRA_USER:-}" ]; then
-    CMD_ARGS+=("-user" "$CASSANDRA_USER")
-fi
-if [ -n "${CASSANDRA_PASS:-}" ]; then
-    CMD_ARGS+=("-password" "$CASSANDRA_PASS")
-fi
-
-# Add SSL mode if requested in config
-if [ "${USE_SSL:-false}" = true ]; then
-    CMD_ARGS+=("-mode" "ssl" "encryption=true")
-fi
-
-
-# Function to run a stress operation
+# --- Function to run a stress operation ---
 run_stress() {
-    local operation_type="$1"
-    local operation_count="$2"
-    
-    local op_cmd_args=("${CMD_ARGS[@]}")
-    op_cmd_args+=("$operation_type" "n=$operation_count")
-    
-    log_message "${BLUE}Executing $operation_type operation with count: $operation_count${NC}"
-    log_message "Command: $CMD_BASE ${op_cmd_args[*]}"
+    local op_spec="$1"   # e.g., "write=1" or "write=2,read=1"
+    local count_spec="$2" # e.g., "n=10M" or "duration=30s"
 
-    if "$CMD_BASE" "${op_cmd_args[@]}"; then
-        log_message "${GREEN}--- $operation_type operation completed successfully. ---${NC}"
+    local cmd_args=("user" "profile=$PROFILE_PATH" "ops($op_spec)")
+    
+    if [ -n "$count_spec" ]; then
+        cmd_args+=("$count_spec")
+    fi
+    
+    # Add global options
+    cmd_args+=("-node" "$NODES" "-cl" "$CL" "-truncate" "$TRUNCATE")
+
+    # Add auth/ssl options
+    if [ -n "${CASSANDRA_USER:-}" ]; then cmd_args+=("-user" "$CASSANDRA_USER"); fi
+    if [ -n "${CASSANDRA_PASS:-}" ]; then cmd_args+=("-password" "$CASSANDRA_PASS"); fi
+    if [ "${USE_SSL:-false}" = true ]; then cmd_args+=("-mode" "ssl" "encryption=true"); fi
+
+    log_message "${BLUE}Executing stress operation...${NC}"
+    log_message "Command: $CMD_BASE ${cmd_args[*]}"
+
+    if "$CMD_BASE" "${cmd_args[@]}"; then
+        log_message "${GREEN}--- Operation completed successfully. ---${NC}"
+        return 0
     else
         local exit_code=$?
-        log_message "${RED}ERROR: $operation_type operation failed with exit code $exit_code.${NC}"
-        exit $exit_code
+        log_message "${RED}ERROR: Stress operation failed with exit code $exit_code.${NC}"
+        return $exit_code
     fi
 }
 
-# Execute operations in a safe order: write -> read -> delete
-if [ -n "$WRITE_COUNT" ]; then
-    if [ "$NO_WARMUP" = false ]; then
-        log_message "${BLUE}Performing pre-write warmup read to populate caches...${NC}"
-        run_stress "read" "100k" # A small, fixed read to warm up the system
-    fi
-    run_stress "write" "$WRITE_COUNT"
-fi
+# --- Determine which operations to run ---
 
-if [ -n "$READ_COUNT" ]; then
-    if [[ "$READ_COUNT" == "ALL" ]]; then
-        log_message "${BLUE}Read set to ALL. This will read all previously written data.${NC}"
-        # The 'n=' parameter for read defaults to all written data if not specified, 
-        # but let's make it explicit for mixed workloads.
-        read_op_count="${WRITE_COUNT:-10M}" # Default to a large number if no write was done
-        run_stress "read" "$read_op_count"
-    else
-        run_stress "read" "$READ_COUNT"
+# Handle complex --ops first
+if [ -n "$OPS_SPEC" ]; then
+    if [ -z "$OP_COUNT" ] && [ -z "$DURATION" ]; then
+        log_message "${RED}ERROR: When using --ops, you must also specify --count or --duration.${NC}"
+        usage
     fi
-fi
+    
+    count_arg=""
+    if [ -n "$DURATION" ]; then
+        count_arg="duration=$DURATION"
+    elif [ -n "$OP_COUNT" ]; then
+        count_arg="n=$OP_COUNT"
+    fi
+    
+    run_stress "$OPS_SPEC" "$count_arg"
 
-if [ -n "$DELETE_COUNT" ]; then
-    run_stress "delete" "$DELETE_COUNT"
+# Handle simple -w, -r, -d flags
+else
+    # Validate that at least one operation is specified
+    if [ -z "$WRITE_COUNT" ] && [ -z "$READ_COUNT" ] && [ -z "$DELETE_COUNT" ]; then
+        log_message "${RED}ERROR: You must specify at least one operation (-w, -r, -d) or use --ops.${NC}"
+        usage
+    fi
+
+    # Execute operations in a safe order: write -> read -> delete
+    if [ -n "$WRITE_COUNT" ]; then
+        if [ "$NO_WARMUP" = false ]; then
+            log_message "${BLUE}Performing pre-write warmup read to populate caches...${NC}"
+            # This uses the new run_stress function correctly
+            run_stress "read=1" "n=100k" || log_message "${YELLOW}Warmup read failed, continuing with write anyway.${NC}"
+        fi
+        run_stress "write=1" "n=$WRITE_COUNT" || exit 1
+    fi
+
+    if [ -n "$READ_COUNT" ]; then
+        if [[ "$READ_COUNT" == "ALL" ]]; then
+            log_message "${BLUE}Read set to ALL. This will read all previously written data.${NC}"
+            read_op_count="${WRITE_COUNT:-10M}" # Default to a large number if no write was done
+            run_stress "read=1" "n=$read_op_count" || exit 1
+        else
+            run_stress "read=1" "n=$READ_COUNT" || exit 1
+        fi
+    fi
+
+    if [ -n "$DELETE_COUNT" ]; then
+        run_stress "delete=1" "n=$DELETE_COUNT" || exit 1
+    fi
 fi
 
 log_message "${GREEN}--- Cassandra Stress Test Finished ---${NC}"
