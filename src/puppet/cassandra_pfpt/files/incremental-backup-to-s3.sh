@@ -78,7 +78,9 @@ LOG_FILE=$(jq -r '.incremental_backup_log_file' "$CONFIG_FILE") # Overwrite defa
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
 CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
-
+S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
+S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
+S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -199,9 +201,16 @@ do_upload() {
     if [ ! -d "$LOCAL_BACKUP_DIR" ]; then log_error "Local backup directory not found: $LOCAL_BACKUP_DIR"; return 1; fi
     if [ "$BACKUP_BACKEND" != "s3" ]; then log_warn "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."; return 0; fi
 
-    log_info "Uploading all backup files via aws s3 sync..."
-    if ! aws s3 sync --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/"; then
-        log_error "aws s3 sync command failed. Upload is incomplete."
+    local object_lock_flags=()
+    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+        local retain_until_date
+        retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
+        object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
+    fi
+
+    log_info "Uploading all backup files via aws s3 cp --recursive..."
+    if ! aws s3 cp --recursive --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/" "${object_lock_flags[@]}"; then
+        log_error "aws s3 cp --recursive command failed. Upload is incomplete."
         return 1
     fi
 
@@ -314,3 +323,5 @@ esac
 
 log_info "--- Incremental Backup Process Finished ---"
 exit 0
+
+    

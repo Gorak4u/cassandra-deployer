@@ -439,6 +439,9 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::backup_backend` (String): The storage backend to use for uploads. Set to `'local'` to disable uploads. Default: `'s3'`.
 *   `profile_cassandra_pfpt::backup_s3_bucket` (String): The name of the S3 bucket to use when `backup_backend` is `'s3'`. Defaults to a sanitized version of the cluster name.
 *   `profile_cassandra_pfpt::s3_retention_period` (Integer): The number of days to keep backups in S3 before they are automatically deleted by a lifecycle policy. The policy is applied automatically by the backup script. Set to 0 to disable. Default: `15`.
+*   `profile_cassandra_pfpt::backup_s3_object_lock_enabled` (Boolean): Enables S3 Object Lock for WORM (Write-Once, Read-Many) protection on all backup files. The S3 bucket MUST be created with Object Lock enabled for this to work. Default: `false`.
+*   `profile_cassandra_pfpt::backup_s3_object_lock_mode` (String): Sets the lock mode. Can be `GOVERNANCE` (allows bypass with special permissions) or `COMPLIANCE` (absolute lock). Default: `'GOVERNANCE'`.
+*   `profile_cassandra_pfpt::backup_s3_object_lock_retention_days` (Integer): The number of days each backup object is locked for. Defaults to the value of `s3_retention_period`.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
 *   `profile_cassandra_pfpt::backup_parallelism` (Integer): The number of concurrent tables to process during backup or restore operations. Default: `4`.
@@ -504,3 +507,5 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
 *   **Scheduled Runs:** When enabled, the Puppet agent will run twice per hour at a staggered minute by default.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.
+
+    

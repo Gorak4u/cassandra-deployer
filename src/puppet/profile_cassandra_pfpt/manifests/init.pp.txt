@@ -179,6 +179,9 @@ class profile_cassandra_pfpt {
   $backup_exclude_tables            = lookup('profile_cassandra_pfpt::backup_exclude_tables', { 'default_value' => [] })
   $backup_include_only_keyspaces    = lookup('profile_cassandra_pfpt::backup_include_only_keyspaces', { 'default_value' => [] })
   $backup_include_only_tables       = lookup('profile_cassandra_pfpt::backup_include_only_tables', { 'default_value' => [] })
+  $backup_s3_object_lock_enabled    = lookup('profile_cassandra_pfpt::backup_s3_object_lock_enabled', { 'default_value' => false })
+  $backup_s3_object_lock_mode       = lookup('profile_cassandra_pfpt::backup_s3_object_lock_mode', { 'default_value' => 'GOVERNANCE' })
+  $backup_s3_object_lock_retention  = lookup('profile_cassandra_pfpt::backup_s3_object_lock_retention_days', { 'default_value' => $s3_retention_period })
 
   # --- Automated Repair ---
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
@@ -389,6 +392,9 @@ class profile_cassandra_pfpt {
     backup_exclude_tables            => $backup_exclude_tables,
     backup_include_only_keyspaces    => $backup_include_only_keyspaces,
     backup_include_only_tables       => $backup_include_only_tables,
+    backup_s3_object_lock_enabled    => $backup_s3_object_lock_enabled,
+    backup_s3_object_lock_mode       => $backup_s3_object_lock_mode,
+    backup_s3_object_lock_retention  => $backup_s3_object_lock_retention,
     # Automated Repair
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
@@ -429,3 +435,5 @@ class profile_cassandra_pfpt {
     puppet_cron_schedule_string      => $puppet_cron_schedule_string,
   }
 }
+
+    

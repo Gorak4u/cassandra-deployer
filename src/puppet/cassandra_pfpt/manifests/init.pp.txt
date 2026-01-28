@@ -153,6 +153,9 @@ class cassandra_pfpt (
   Array[String] $backup_exclude_tables = [],
   Array[String] $backup_include_only_keyspaces = [],
   Array[String] $backup_include_only_tables = [],
+  Boolean $backup_s3_object_lock_enabled,
+  Enum['GOVERNANCE', 'COMPLIANCE'] $backup_s3_object_lock_mode,
+  Integer $backup_s3_object_lock_retention,
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
@@ -257,6 +260,7 @@ class cassandra_pfpt (
     }
     Class['cassandra_pfpt::install'] -> Class['cassandra_pfpt::stress']
   }
+
   if $ssl_enabled {
     contain cassandra_pfpt::ssl
     Class['cassandra_pfpt::java']
@@ -271,3 +275,5 @@ class cassandra_pfpt (
     -> Class['cassandra_pfpt::service']
   }
 }
+
+    

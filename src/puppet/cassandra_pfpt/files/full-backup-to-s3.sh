@@ -72,7 +72,9 @@ BACKUP_EXCLUDE_KEYSPACES=$(jq -r '.backup_exclude_keyspaces // []' "$CONFIG_FILE
 BACKUP_EXCLUDE_TABLES=$(jq -r '.backup_exclude_tables // []' "$CONFIG_FILE")
 BACKUP_INCLUDE_ONLY_KEYSPACES=$(jq -r '.backup_include_only_keyspaces // []' "$CONFIG_FILE")
 BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_FILE")
-
+S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
+S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
+S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -107,6 +109,23 @@ check_aws_credentials() {
 }
 
 # --- S3 Bucket Management Functions ---
+
+check_existing_bucket_lock_config() {
+    if [ "$S3_OBJECT_LOCK_ENABLED" != "true" ]; then
+        return 0
+    fi
+    log_info "Verifying Object Lock configuration for existing bucket..."
+    local lock_config
+    lock_config=$(aws s3api get-object-lock-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null)
+    if [ -z "$lock_config" ] || ! echo "$lock_config" | jq -e '.ObjectLockConfiguration.ObjectLockEnabled == "Enabled"' > /dev/null; then
+        log_error "S3_OBJECT_LOCK_ENABLED is true in config, but bucket '$S3_BUCKET_NAME' does not have Object Lock enabled."
+        log_error "Please create a new bucket with Object Lock enabled and update your configuration, or disable this feature."
+        return 1
+    fi
+    log_success "Bucket '$S3_BUCKET_NAME' is correctly configured for Object Lock."
+    return 0
+}
+
 manage_s3_lifecycle() {
     if [ "$BACKUP_BACKEND" != "s3" ] || [[ ! "$S3_RETENTION_PERIOD" =~ ^[1-9][0-9]*$ ]]; then
         log_info "S3 lifecycle management is skipped. Backend is not 's3' or retention period is not a positive number."
@@ -172,19 +191,33 @@ ensure_s3_bucket_and_lifecycle() {
     log_info "Checking if S3 bucket 's3://$S3_BUCKET_NAME' exists..."
     if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" > /dev/null 2>&1; then
         log_success "S3 bucket already exists."
-        # Bucket exists, so now we can manage lifecycle
+        if ! check_existing_bucket_lock_config; then
+            return 1
+        fi
         manage_s3_lifecycle
         return 0
     else
         log_warn "S3 bucket '$S3_BUCKET_NAME' does not exist. Attempting to create it..."
-        if aws s3 mb "s3://$S3_BUCKET_NAME"; then
+        
+        local create_bucket_args=("--bucket" "$S3_BUCKET_NAME")
+        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ]; then
+            create_bucket_args+=("--object-lock-enabled-for-bucket")
+            log_info "Object Lock will be enabled for the new bucket."
+        fi
+
+        local region
+        region=$(aws configure get region 2>/dev/null || echo "us-east-1")
+        if [ "$region" != "us-east-1" ]; then
+            create_bucket_args+=("--create-bucket-configuration" "LocationConstraint=$region")
+        fi
+
+        if aws s3api create-bucket "${create_bucket_args[@]}"; then
             log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
-            # Bucket was just created, so now we can manage lifecycle
             manage_s3_lifecycle
             return 0
         else
             log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
-            log_error "Please check your AWS permissions (s3:CreateBucket) and ensure the bucket name is globally unique."
+            log_error "Please check your AWS permissions and ensure the bucket name is globally unique."
             return 1
         fi
     fi
@@ -366,6 +399,9 @@ process_table_backup() {
     BACKUP_EXCLUDE_TABLES=$(jq -r '.backup_exclude_tables // []' "$CONFIG_FILE")
     BACKUP_INCLUDE_ONLY_KEYSPACES=$(jq -r '.backup_include_only_keyspaces // []' "$CONFIG_FILE")
     BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_FILE")
+    S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
+    S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
+    S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
 
 
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
@@ -434,11 +470,19 @@ process_table_backup() {
         fi
         
         local s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name.tar.gz.enc"
+        
+        local object_lock_flags=()
+        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+            local retain_until_date
+            retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
+            object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
+        fi
+
         if [ "$UPLOAD_STREAMING" = "true" ]; then
             nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
-            nice -n 19 ionice -c 3 aws s3 cp --quiet - "$s3_path"
+            nice -n 19 ionice -c 3 aws s3 cp --quiet - "$s3_path" "${object_lock_flags[@]}"
             
             local pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
@@ -462,7 +506,7 @@ process_table_backup() {
                 rm -f "$local_tar_file"
                 return 1
             fi
-            if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "$local_enc_file" "$s3_path"; then
+            if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "$local_enc_file" "$s3_path" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload backup for $ks_name.$table_name"
                 touch "$ERROR_DIR/$ks_name.$table_name"
             else
@@ -573,10 +617,17 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_info "Backup artifacts are available locally with tag: $BACKUP_TAG"
     log_info "Local snapshot will NOT be automatically cleared."
 else
+    local object_lock_flags=()
+    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+        local retain_until_date
+        retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
+        object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
+    fi
+    
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         log_info "Uploading manifest file..."
         MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
-        if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH"; then
+        if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH" "${object_lock_flags[@]}"; then
           log_error "Failed to upload manifest to S3. The backup is not properly indexed."
           exit 1
         fi
@@ -584,7 +635,7 @@ else
         
         log_info "Uploading schema mapping file..."
         SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
-        if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH"; then
+        if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH" "${object_lock_flags[@]}"; then
             log_error "Failed to upload schema mapping file to S3."
         else
             log_success "Schema mapping file uploaded successfully."
@@ -593,7 +644,7 @@ else
         if [ -f "$SCHEMA_DUMP_FILE" ]; then
             log_info "Uploading schema dump..."
             SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
-            if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH"; then
+            if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload schema.cql to S3."
             else
                 log_success "Schema dump uploaded successfully."
@@ -620,3 +671,5 @@ else
 fi
 
 exit 0
+
+    

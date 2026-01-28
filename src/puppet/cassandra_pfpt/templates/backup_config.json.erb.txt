@@ -24,5 +24,10 @@
     "ssl_truststore_path": "<%= @truststore_path %>",
     "ssl_truststore_password": "<%= @truststore_password.unwrap %>",
     "jvm_opts_file": "/etc/cassandra/conf/jvm-server.options",
-    "jmx_password_file": "<%= @jmx_password_file_path %>"
+    "jmx_password_file": "<%= @jmx_password_file_path %>",
+    "s3_object_lock_enabled": <%= @backup_s3_object_lock_enabled %>,
+    "s3_object_lock_mode": "<%= @backup_s3_object_lock_mode %>",
+    "s3_object_lock_retention": <%= @backup_s3_object_lock_retention %>
 }
+
+    
