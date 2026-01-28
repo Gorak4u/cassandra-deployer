@@ -34,7 +34,6 @@ class cassandra_pfpt::service inherits cassandra_pfpt {
     logoutput   => on_failure,
     # If we can connect with the *new* password, skip running the ALTER
     unless      => "cqlsh ${cqlsh_ssl_opt} -u cassandra -p '${cassandra_password.unwrap}' -e \"SELECT cluster_name FROM system.local;\" >/dev/null 2>&1",
-    onlyif      => "${manage_bin_dir}/cluster-health.sh --silent",
     require     => [ Service['cassandra'], File[$change_password_cql] ],
   }
 }
