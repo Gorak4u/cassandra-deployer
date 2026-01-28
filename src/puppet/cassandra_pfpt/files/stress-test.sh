@@ -13,6 +13,8 @@ READ_COUNT=""
 DELETE_COUNT=""
 LOG_FILE="/var/log/cassandra/stress-test.log"
 NO_WARMUP=false
+CL="LOCAL_ONE"
+TRUNCATE="never"
 
 # Source credentials and SSL settings from config file if it exists
 if [ -f "$CONFIG_PATH" ]; then
@@ -47,6 +49,8 @@ usage() {
     log_message "  -t, --table <table>     Table to use. Default: $TABLE"
     log_message "  -p, --profile <path>    Path to the stress profile YAML. Default: $PROFILE_PATH"
     log_message "  -n, --nodes <list>      Comma-separated list of node IPs. Default: auto-detect from nodetool."
+    log_message "  -cl, --cl <level>       Consistency Level to use. Default: $CL"
+    log_message "  --truncate <when>     Truncate the table: never, before, or each. Default: $TRUNCATE"
     log_message "  --no-warmup             Skip the read phase before a write operation."
     log_message "  -h, --help              Show this help message."
     exit 1
@@ -62,6 +66,8 @@ while [[ "$#" -gt 0 ]]; do
         -t|--table) TABLE="$2"; shift ;;
         -p|--profile) PROFILE_PATH="$2"; shift ;;
         -n|--nodes) NODES="$2"; shift ;;
+        -cl|--cl) CL="$2"; shift ;;
+        --truncate) TRUNCATE="$2"; shift ;;
         --no-warmup) NO_WARMUP=true ;;
         -h|--help) usage ;;
         *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
@@ -101,6 +107,8 @@ else
 fi
 
 CMD_ARGS+=("-node" "$NODES")
+CMD_ARGS+=("-cl" "$CL")
+CMD_ARGS+=("-truncate" "$TRUNCATE")
 
 # Add authentication arguments if provided in config
 if [ -n "${CASSANDRA_USER:-}" ]; then
