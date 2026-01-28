@@ -1,189 +1,179 @@
 #!/bin/bash
-# This file is managed by Puppet.
-# A wrapper for the cassandra-stress tool, designed from scratch to provide a
-# user-friendly interface for common stress testing commands.
 set -euo pipefail
 
 # --- Defaults & Configuration ---
 CONFIG_PATH="/etc/cassandra/conf/stress.conf"
+# This is now a template file
+PROFILE_TEMPLATE_PATH="/etc/cassandra/conf/stress-schema.yaml"
 LOG_FILE="/var/log/cassandra/stress-test.log"
 
-# Script options
-COMMAND=""
-OPS_SPEC=""
-PROFILE_PATH=""
-NODE_LIST=""
-CONSISTENCY_LEVEL="LOCAL_ONE"
-TRUNCATE_STRATEGY="never"
-PORT="9042"
-DURATION=""
-OP_COUNT=""
+# --- Script Variables ---
+WRITE_COUNT=""
+READ_COUNT=""
+NODES=""
+AUTO_DETECTED_NODES=""
+# These will hold the final values to be used
+EFFECTIVE_KEYSPACE="my_app"
+EFFECTIVE_TABLE="users_large"
+# These will hold the command-line overrides
+KEYSPACE_OVERRIDE=""
+TABLE_OVERRIDE=""
 
-# --- Color Codes & Logging ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# --- Temp file for dynamic profile ---
+TEMP_PROFILE_PATH=""
+cleanup_temp_file() {
+    if [[ -n "$TEMP_PROFILE_PATH" && -f "$TEMP_PROFILE_PATH" ]]; then
+        rm -f "$TEMP_PROFILE_PATH"
+    fi
+}
+trap cleanup_temp_file EXIT
 
+# --- Logging ---
 log_message() {
-    echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 # --- Usage ---
 usage() {
-    log_message "${YELLOW}Usage: $0 <command> [options]${NC}"
+    log_message "Usage: $0 [OPTIONS]"
+    log_message "A robust wrapper for cassandra-stress using a YAML profile."
+    log_message "This script will dynamically create the keyspace and table if they do not exist."
     log_message ""
-    log_message "${BLUE}DESCRIPTION:${NC}"
-    log_message "  A user-friendly wrapper for the 'cassandra-stress' utility."
+    log_message "Operations (at least one is required):"
+    log_message "  -w, --write <count>     Number of rows to write (e.g., 10M)."
+    log_message "  -r, --read <count>      Number of rows to read."
     log_message ""
-    log_message "${BLUE}COMMANDS (choose one):${NC}"
-    log_message "  -w, --write <count>      Run a simple write test (e.g., 10M)."
-    log_message "  -r, --read <count>       Run a simple read test."
-    log_message "  --mixed <ops_spec>       Run a mixed-ratio test (e.g., 'insert=1,read=2')."
-    log_message "  --user <profile_path>    Run a test based on a user-defined YAML profile. Requires --ops."
-    log_message ""
-    log_message "${BLUE}OPTIONS:${NC}"
-    log_message "  -n, --count <count>      Number of operations for mixed/user/write/read commands."
-    log_message "  --duration <time>        Run for a specific duration (e.g., '30s', '10m'). Overrides -n."
-    log_message "  --ops <ops_spec>         Operations spec for user/mixed mode (e.g., 'insert=1,read_one=1')."
-    log_message "  --nodes <list>           Comma-separated list of nodes (default: auto-detect)."
-    log_message "  --cl <level>             Consistency Level to use (default: LOCAL_ONE)."
-    log_message "  --truncate <when>        Truncate table: 'never', 'before', or 'each' (default: never)."
-    log_message "  --port <port>            The CQL native port (default: 9042)."
-    log_message "  -h, --help               Show this help message."
+    log_message "Configuration:"
+    log_message "  -n, --nodes <list>      Comma-separated list of node IPs. Default: auto-detect from 'nodetool status'."
+    log_message "  -k, --keyspace <name>   Override the default keyspace ('my_app')."
+    log_message "  -t, --table <table>     Override the default table ('users_large')."
+    log_message "  -h, --help              Show this help message."
     exit 1
 }
 
 # --- Argument Parsing ---
-if [ "$#" -eq 0 ]; then
-    usage
-fi
-
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -w|--write)
-            COMMAND="write"
-            OP_COUNT="$2"
-            shift ;;
-        -r|--read)
-            COMMAND="read"
-            OP_COUNT="$2"
-            shift ;;
-        --mixed)
-            COMMAND="mixed"
-            OPS_SPEC="$2"
-            shift ;;
-        --user)
-            COMMAND="user"
-            PROFILE_PATH="$2"
-            shift ;;
-        -n|--count)
-            OP_COUNT="$2"
-            shift ;;
-        --duration)
-            DURATION="$2"
-            shift ;;
-        --ops)
-            OPS_SPEC="$2"
-            shift ;;
-        --nodes)
-            NODE_LIST="$2"
-            shift ;;
-        --cl)
-            CONSISTENCY_LEVEL="$2"
-            shift ;;
-        --truncate)
-            TRUNCATE_STRATEGY="$2"
-            shift ;;
-        --port)
-            PORT="$2"
-            shift ;;
-        -h|--help)
-            usage ;;
-        *)
-            log_message "${RED}Unknown parameter passed: $1${NC}"
-            usage ;;
+        -w|--write) WRITE_COUNT="$2"; shift ;;
+        -r|--read) READ_COUNT="$2"; shift ;;
+        -n|--nodes) NODES="$2"; shift ;;
+        -k|--keyspace) KEYSPACE_OVERRIDE="$2"; shift ;;
+        -t|--table) TABLE_OVERRIDE="$2"; shift ;;
+        -h|--help) usage ;;
+        *) log_message "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
 
 # --- Main Logic ---
+log_message "--- Starting Cassandra Stress Test ---"
 
-# Validate a command was chosen
-if [ -z "$COMMAND" ]; then
-    log_message "${RED}ERROR: You must specify a command (-w, -r, --user, etc.).${NC}"
+# 1. Validate Inputs
+if [ -z "$WRITE_COUNT" ] && [ -z "$READ_COUNT" ]; then
+    log_message "ERROR: You must specify at least one operation (-w or -r)."
     usage
 fi
 
-# For simple write/read commands, set the ops spec automatically
-if [[ "$COMMAND" == "write" && -z "$OPS_SPEC" ]]; then
-    OPS_SPEC="insert=1"
-fi
-if [[ "$COMMAND" == "read" && -z "$OPS_SPEC" ]]; then
-    OPS_SPEC="read=1"
-fi
-
-
-log_message "${BLUE}--- Preparing Cassandra Stress Test (Command: $COMMAND) ---${NC}"
-
-# Source credentials and SSL settings from config file if it exists
+# 2. Source external config for credentials and SSL
 if [ -f "$CONFIG_PATH" ]; then
     source "$CONFIG_PATH"
+else
+    log_message "WARNING: Config file not found at $CONFIG_PATH. Assuming no auth/ssl."
 fi
 
-# Auto-detect nodes if not provided
-if [ -z "$NODE_LIST" ]; then
-    log_message "${BLUE}Auto-detecting cluster nodes...${NC}"
-    NODE_LIST=$(nodetool status 2>/dev/null | grep '^UN' | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
-    if [ -z "$NODE_LIST" ]; then
-        log_message "${RED}ERROR: Could not auto-detect any UP/NORMAL nodes.${NC}"
+# 3. Determine nodes to connect to
+if [ -z "$NODES" ]; then
+    log_message "Auto-detecting cluster nodes..."
+    AUTO_DETECTED_NODES=$(nodetool status | grep '^UN' | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+    if [ -z "$AUTO_DETECTED_NODES" ]; then
+        log_message "ERROR: Could not auto-detect any UP/NORMAL nodes."
         exit 1
     fi
-    log_message "${BLUE}Found nodes: $NODE_LIST${NC}"
+    log_message "Found nodes: $AUTO_DETECTED_NODES"
+    NODES="$AUTO_DETECTED_NODES"
 fi
 
-# Build Command-Specific Options (these are key=value pairs)
-declare -a CMD_OPTS
-if [ -n "$OP_COUNT" ]; then CMD_OPTS+=("n=$OP_COUNT"); fi
-if [ -n "$DURATION" ]; then CMD_OPTS+=("duration=$DURATION"); fi
-if [ -n "$OPS_SPEC" ]; then CMD_OPTS+=("ops($OPS_SPEC)"); fi
-if [ -n "$PROFILE_PATH" ]; then CMD_OPTS+=("profile=$PROFILE_PATH"); fi
-CMD_OPTS+=("cl=$CONSISTENCY_LEVEL")
-CMD_OPTS+=("truncate=$TRUNCATE_STRATEGY")
-
-# Build Global Options (prefixed with -)
-declare -a GLOBAL_OPTS
-GLOBAL_OPTS+=("-node" "$NODE_LIST")
-GLOBAL_OPTS+=("-port" "$PORT")
-
-# Build the -mode option string correctly
-declare -a MODE_PARTS=("native" "cql3")
-if [ -n "${CASSANDRA_USER:-}" ]; then MODE_PARTS+=("user=${CASSANDRA_USER}"); fi
-if [ -n "${CASSANDRA_PASS:-}" ]; then MODE_PARTS+=("password=${CASSANDRA_PASS}"); fi
-if [ "${USE_SSL:-false}" = true ]; then MODE_PARTS+=("ssl"); fi
-
-# Join the parts into a single string for the -mode argument
-MODE_STRING=$(IFS=' '; echo "${MODE_PARTS[*]}")
-GLOBAL_OPTS+=("-mode" "$MODE_STRING")
-
-
-# Build the final command array in the correct order
-# cassandra-stress [global-opts] <command> [command-opts]
-FINAL_CMD=("cassandra-stress")
-FINAL_CMD+=("${GLOBAL_OPTS[@]}")
-FINAL_CMD+=("$COMMAND")
-FINAL_CMD+=("${CMD_OPTS[@]}")
-
-log_message "${BLUE}Executing stress command...${NC}"
-log_message "Full command: ${FINAL_CMD[*]}"
-
-# Execute the command
-if "${FINAL_CMD[@]}"; then
-    log_message "${GREEN}--- Stress test completed successfully. ---${NC}"
-    exit 0
-else
-    EXIT_CODE=$?
-    log_message "${RED}ERROR: Stress test command failed with exit code $EXIT_CODE.${NC}"
-    exit $EXIT_CODE
+# 4. Generate the dynamic YAML profile
+if [ -n "$KEYSPACE_OVERRIDE" ]; then
+    EFFECTIVE_KEYSPACE="$KEYSPACE_OVERRIDE"
 fi
+if [ -n "$TABLE_OVERRIDE" ]; then
+    EFFECTIVE_TABLE="$TABLE_OVERRIDE"
+fi
+
+log_message "Using keyspace: '$EFFECTIVE_KEYSPACE' and table: '$EFFECTIVE_TABLE'"
+TEMP_PROFILE_PATH=$(mktemp)
+log_message "Generating temporary stress profile at $TEMP_PROFILE_PATH"
+
+# Replace placeholders in the template. The default names are the placeholders.
+sed "s/my_app/$EFFECTIVE_KEYSPACE/g; s/users_large/$EFFECTIVE_TABLE/g" "$PROFILE_TEMPLATE_PATH" > "$TEMP_PROFILE_PATH"
+
+# --- Function to run a stress operation ---
+run_stress() {
+    local op_type="$1"
+    local count="$2"
+    local ops_string=""
+
+    if [ "$op_type" == "write" ]; then
+        ops_string="ops(insert=1)"
+    elif [ "$op_type" == "read" ]; then
+        # Note: The query name 'read_one' is hardcoded in the YAML, so we use it here.
+        ops_string="ops(read_one=1)"
+    else
+        log_message "ERROR: Invalid operation type '$op_type'."
+        return 1
+    fi
+
+    # Build the command array
+    # The 'user' subcommand is required to use a YAML profile.
+    local CMD_ARRAY=(
+        "cassandra-stress"
+        "user"
+        "profile=$TEMP_PROFILE_PATH" # Use the dynamically generated profile
+        "n=$count"
+        "$ops_string"
+        "-node" "$NODES"
+    )
+
+    if [ "${USE_SSL:-false}" = true ]; then
+        CMD_ARRAY+=("-mode" "cql3" "native" "ssl")
+    else
+        CMD_ARRAY+=("-mode" "cql3" "native")
+    fi
+
+    # The user/password must be key=value, not flags, for the 'user' subcommand.
+    if [ -n "${CASSANDRA_USER:-}" ]; then
+        CMD_ARRAY+=("user=${CASSANDRA_USER}")
+    fi
+    
+    if [ -n "${CASSANDRA_PASS:-}" ]; then
+        CMD_ARRAY+=("password=${CASSANDRA_PASS}")
+    fi
+    
+    log_message "Executing $op_type operation with count: $count"
+    # Use printf for safe quoting of arguments
+    log_message "Command: $(printf '%q ' "${CMD_ARRAY[@]}")"
+
+    if ! "${CMD_ARRAY[@]}"; then
+        local EXIT_CODE=$?
+        log_message "ERROR: $op_type operation failed with exit code $EXIT_CODE."
+        return $EXIT_CODE
+    fi
+    return 0
+}
+
+# 5. Execute Operations
+if [ -n "$WRITE_COUNT" ]; then
+    if ! run_stress "write" "$WRITE_COUNT"; then
+        exit 1
+    fi
+fi
+
+if [ -n "$READ_COUNT" ]; then
+    if ! run_stress "read" "$READ_COUNT"; then
+        exit 1
+    fi
+fi
+
+log_message "--- Cassandra Stress Test Finished Successfully ---"
+exit 0
