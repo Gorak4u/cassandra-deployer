@@ -241,7 +241,6 @@ class cassandra_pfpt (
   }
   if $manage_coralogix_agent {
     contain cassandra_pfpt::coralogix
-    Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::coralogix']
   }
   if $manage_full_backups or $manage_incremental_backups {
     contain cassandra_pfpt::backup
@@ -261,19 +260,14 @@ class cassandra_pfpt (
     Class['cassandra_pfpt::install'] -> Class['cassandra_pfpt::stress']
   }
 
+  Class['cassandra_pfpt::java']
+  -> Class['cassandra_pfpt::install']
+  -> Class['cassandra_pfpt::config']
+
   if $ssl_enabled {
     contain cassandra_pfpt::ssl
-    Class['cassandra_pfpt::java']
-    -> Class['cassandra_pfpt::install']
-    -> Class['cassandra_pfpt::ssl']
-    -> Class['cassandra_pfpt::config']
-    -> Class['cassandra_pfpt::service']
+    Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::ssl'] -> Class['cassandra_pfpt::service']
   } else {
-    Class['cassandra_pfpt::java']
-    -> Class['cassandra_pfpt::install']
-    -> Class['cassandra_pfpt::config']
-    -> Class['cassandra_pfpt::service']
+    Class['cassandra_pfpt::config'] -> Class['cassandra_pfpt::service']
   }
 }
-
-    

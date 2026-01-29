@@ -550,7 +550,7 @@ process_table_backup() {
         log_info "Backup backend is '$BACKUP_BACKEND', skipping upload for $ks_name.$table_name."
     fi
 }
-export -f process_table_backup run_nodetool
+export -f process_table_backup run_nodetool log_message log_info log_success log_warn log_error
 export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR CASSANDRA_USER
 export BACKUP_EXCLUDE_KEYSPACES BACKUP_EXCLUDE_TABLES BACKUP_INCLUDE_ONLY_KEYSPACES BACKUP_INCLUDE_ONLY_TABLES
 export RED GREEN YELLOW BLUE NC
@@ -560,7 +560,7 @@ export S3_OBJECT_LOCK_APPLICABLE
 # --- Parallel backup execution ---
 log_info "--- Starting Parallel Backup of Tables ---"
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
-    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "{}"'
+    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "$@"' _ {}
 log_info "--- Finished Parallel Backup of Tables ---"
 
 TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
@@ -572,13 +572,14 @@ TABLES_BACKED_UP_SUCCESS_COUNT=$((TOTAL_TABLES_ATTEMPTED - UPLOAD_ERRORS))
 SCHEMA_DUMP_FILE="$BACKUP_TEMP_DIR/schema.cql"
 log_info "Dumping cluster schema to $SCHEMA_DUMP_FILE..."
 
-cqlsh_command_parts=("cqlsh" "$LISTEN_ADDRESS")
+cqlsh_command_parts=("cqlsh")
 if [[ "$SSL_ENABLED" == "true" ]]; then
     cqlsh_command_parts+=("--ssl")
 fi
 if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
     cqlsh_command_parts+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
 fi
+cqlsh_command_parts+=("$LISTEN_ADDRESS")
 cqlsh_command_parts+=("-e" "DESCRIBE SCHEMA")
 
 if ! "${cqlsh_command_parts[@]}" > "$SCHEMA_DUMP_FILE"; then
@@ -659,7 +660,7 @@ else
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         log_info "Uploading manifest file..."
-        MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
+        local MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
         if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH" "${object_lock_flags[@]}"; then
           log_error "Failed to upload manifest to S3. The backup is not properly indexed."
           exit 1
@@ -667,7 +668,7 @@ else
         log_success "Manifest uploaded successfully."
         
         log_info "Uploading schema mapping file..."
-        SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
+        local SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
         if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH" "${object_lock_flags[@]}"; then
             log_error "Failed to upload schema mapping file to S3."
         else
@@ -676,7 +677,7 @@ else
 
         if [ -f "$SCHEMA_DUMP_FILE" ]; then
             log_info "Uploading schema dump..."
-            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
+            local SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
             if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload schema.cql to S3."
             else
@@ -704,5 +705,3 @@ else
 fi
 
 exit 0
-
-    

@@ -689,7 +689,7 @@ do_granular_restore() {
             local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
-                loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
+                loader_cmd+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
             fi
             if [ "$SSL_ENABLED" == "true" ]; then
                 loader_cmd+=("--ssl-storage-port" "7001" "--ssl-truststore" "$SSL_TRUSTSTORE_PATH" "--ssl-truststore-password" "$SSL_TRUSTSTORE_PASSWORD")
