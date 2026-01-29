@@ -70,6 +70,7 @@ class cassandra_pfpt (
   Integer $max_hints_delivery_threads,
   Boolean $native_transport_flush_in_batches_legacy,
   Integer $native_transport_max_frame_size_in_mb,
+  Integer $native_transport_port,
   Integer $range_request_timeout_in_ms,
   Integer $read_request_timeout_in_ms,
   Integer $request_timeout_in_ms,
