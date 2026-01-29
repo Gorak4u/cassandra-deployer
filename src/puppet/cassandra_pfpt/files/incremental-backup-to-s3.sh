@@ -93,7 +93,7 @@ HOSTNAME=$(hostname -s)
 BACKUP_TAG=${BACKUP_TAG_OVERRIDE:-$(date +'%Y-%m-%d-%H-%M')}
 LOCAL_BACKUP_BASE_DIR="/var/lib/cassandra/local_backups"
 LOCAL_BACKUP_DIR="$LOCAL_BACKUP_BASE_DIR/$BACKUP_TAG"
-LOCK_FILE="/var/run/cassandra_backup.lock"
+LOCK_FILE="/tmp/cassandra_backup.lock"
 ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
 S3_OBJECT_LOCK_APPLICABLE="false"
 

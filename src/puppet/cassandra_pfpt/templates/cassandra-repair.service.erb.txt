@@ -11,6 +11,7 @@ After=cassandra.service
 Type=oneshot
 User=root
 Group=root
+RuntimeDirectory=cassandra
 <% if @repair_keyspace and @repair_keyspace != '' -%>
 ExecStart=<%= @manage_bin_dir %>/cass-ops repair <%= @repair_keyspace %>
 <% else -%>

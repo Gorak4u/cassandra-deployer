@@ -87,7 +87,7 @@ BACKUP_TAG=$(date +'%Y-%m-%d-%H-%M') # NEW timestamp format
 HOSTNAME=$(hostname -s)
 # Derive temp dir from data dir to ensure it's on the correct large volume
 BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
-LOCK_FILE="/var/run/cassandra_backup.lock"
+LOCK_FILE="/tmp/cassandra_backup.lock"
 ERROR_DIR="$BACKUP_TEMP_DIR/errors"
 S3_OBJECT_LOCK_APPLICABLE="false"
 

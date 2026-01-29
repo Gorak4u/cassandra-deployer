@@ -13,7 +13,7 @@ DISK_CHECK_PATH="/var/lib/cassandra/data"
 WARNING_THRESHOLD=75
 CRITICAL_THRESHOLD=85
 LOG_FILE="/var/log/cassandra/repair.log"
-LOCK_FILE="/var/run/cassandra_repair.lock"
+LOCK_FILE="/run/cassandra/repair.lock"
 KEYSPACE="${1:-}" # Optional: specify a keyspace
 
 # The new python script will log to stdout, which will be captured by systemd's journal.
