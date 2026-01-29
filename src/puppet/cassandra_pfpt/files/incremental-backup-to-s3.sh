@@ -131,8 +131,9 @@ do_local_backup() {
 
     log_info "Archiving incremental files from source directories..."
     
-    # Use a robust find and while loop to handle any filenames
-    find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0 | while IFS= read -r -d $'\0' backup_dir; do
+    # Use process substitution to avoid creating a subshell for the while loop,
+    # which allows the TABLES_BACKED_UP variable to be modified in the main shell.
+    while IFS= read -r -d $'\0' backup_dir; do
         local relative_path
         relative_path=${backup_dir#"$CASSANDRA_DATA_DIR"/}
         local ks_name
@@ -173,7 +174,7 @@ do_local_backup() {
         fi
         rm -f "$local_tar_file" # Remove unencrypted archive
         TABLES_BACKED_UP=$(echo "$TABLES_BACKED_UP" | jq ". + [\"$ks_name/$table_name\"]")
-    done
+    done < <(find "$CASSANDRA_DATA_DIR" -type d -name "backups" -not -empty -print0)
 
     log_info "Creating backup manifest..."
     local MANIFEST_FILE="$LOCAL_BACKUP_DIR/backup_manifest.json"
