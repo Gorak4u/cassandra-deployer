@@ -547,7 +547,7 @@ process_table_backup() {
             rm -f "$local_tar_file" "$local_enc_file"
         fi
     else
-        log_info "Backup backend is '$BACKUP_BACKEND', skipping upload for $ks_name.$table_name."
+        log_info "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload for $ks_name.$table_name."
     fi
 }
 export -f process_table_backup run_nodetool log_message log_info log_success log_warn log_error
@@ -560,7 +560,7 @@ export S3_OBJECT_LOCK_APPLICABLE
 # --- Parallel backup execution ---
 log_info "--- Starting Parallel Backup of Tables ---"
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
-    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "$@"' _ {}
+    xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "$1"' _ {}
 log_info "--- Finished Parallel Backup of Tables ---"
 
 TOTAL_TABLES_ATTEMPTED=$(find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty | wc -l | tr -d ' ')
@@ -651,16 +651,15 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_info "Backup artifacts are available locally with tag: $BACKUP_TAG"
     log_info "Local snapshot will NOT be automatically cleared."
 else
-    local object_lock_flags=()
+    object_lock_flags=()
     if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_APPLICABLE" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
-        local retain_until_date
         retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
         object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
     fi
     
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         log_info "Uploading manifest file..."
-        local MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
+        MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
         if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH" "${object_lock_flags[@]}"; then
           log_error "Failed to upload manifest to S3. The backup is not properly indexed."
           exit 1
@@ -668,7 +667,7 @@ else
         log_success "Manifest uploaded successfully."
         
         log_info "Uploading schema mapping file..."
-        local SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
+        SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
         if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH" "${object_lock_flags[@]}"; then
             log_error "Failed to upload schema mapping file to S3."
         else
@@ -677,7 +676,7 @@ else
 
         if [ -f "$SCHEMA_DUMP_FILE" ]; then
             log_info "Uploading schema dump..."
-            local SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
+            SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
             if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload schema.cql to S3."
             else
