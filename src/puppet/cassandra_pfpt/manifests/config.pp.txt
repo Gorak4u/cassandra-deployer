@@ -48,14 +48,37 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
     require => Package['cassandra'],
     notify  => Class['cassandra_pfpt::service'],
   }
-  file { '/root/.cassandra/cqlshrc':
-    ensure  => 'file',
-    content => template('cassandra_pfpt/cqlshrc.erb'),
-    owner   => 'root',
-    group   => 'root',
-    mode    => '0600',
-    require => File['/root/.cassandra'],
+
+  if Integer($cassandra_major_version) >= 4 {
+    # For Cassandra 4.0+, use the modern credentials file approach
+    file { '/root/.cassandra/credentials':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/credentials.erb'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0600',
+      require => File['/root/.cassandra'],
+    }
+    file { '/root/.cassandra/cqlshrc':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/cqlshrc_v4.erb'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0600',
+      require => File['/root/.cassandra'],
+    }
+  } else {
+    # For Cassandra 3.x and older, use the legacy authentication method
+    file { '/root/.cassandra/cqlshrc':
+      ensure  => 'file',
+      content => template('cassandra_pfpt/cqlshrc.erb'),
+      owner   => 'root',
+      group   => 'root',
+      mode    => '0600',
+      require => File['/root/.cassandra'],
+    }
   }
+
   file { $manage_bin_dir:
     ensure => 'directory',
     owner  => 'root',
@@ -192,7 +215,6 @@ class cassandra_pfpt::config inherits cassandra_pfpt {
       command     => 'systemctl daemon-reload',
       path        => ['/bin', '/usr/bin'],
       refreshonly => true,
-      before      => Class['cassandra_pfpt::service'],
     }
   }
 }
