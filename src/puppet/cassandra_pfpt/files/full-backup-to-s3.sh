@@ -463,18 +463,16 @@ process_table_backup() {
         fi
 
         if [ "$should_include" = false ]; then
-            log_info "Skipping table $full_table_name as it is not in the include-only lists."
+            # This is too noisy for parallel execution
             return 0
         fi
     else # exclude mode
         # Check if keyspace is in exclude list
         if echo "$BACKUP_EXCLUDE_KEYSPACES" | jq -e ".[] | select(. == \"$ks_name\")" > /dev/null; then
-            log_info "Skipping table $full_table_name as its keyspace is excluded."
             return 0
         fi
         # Check if table is in exclude list
         if echo "$BACKUP_EXCLUDE_TABLES" | jq -e ".[] | select(. == \"$full_table_name\")" > /dev/null; then
-            log_info "Skipping table $full_table_name as it is explicitly excluded."
             return 0
         fi
     fi
@@ -489,7 +487,7 @@ process_table_backup() {
     done
 
     if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then
-        log_info "Skipping non-essential system keyspace backup: $ks_name"
+        # Silently return. The pre-scan will log this.
         return 0
     fi
     
@@ -558,6 +556,27 @@ export S3_OBJECT_LOCK_APPLICABLE
 
 
 # --- Parallel backup execution ---
+# Pre-scan and log skipped keyspaces to avoid noisy parallel logging
+log_info "--- Pre-scanning for keyspaces to skip ---"
+SKIPPED_KEYSPACES=$(mktemp)
+find "$CASSANDRA_DATA_DIR" -mindepth 1 -maxdepth 1 -type d | while read -r ks_path; do
+    ks_name=$(basename "$ks_path")
+    is_system_ks=false
+    for included_ks in $INCLUDED_SYSTEM_KEYSPACES; do
+        if [ "$ks_name" == "$included_ks" ]; then
+            is_system_ks=true
+            break
+        fi
+    done
+    if [[ "$ks_name" == system* || "$ks_name" == dse* || "$ks_name" == solr* ]] && [ "$is_system_ks" = false ]; then
+        if ! grep -Fxq "$ks_name" "$SKIPPED_KEYSPACES"; then
+            log_info "Skipping non-essential system keyspace backup: $ks_name"
+            echo "$ks_name" >> "$SKIPPED_KEYSPACES"
+        fi
+    fi
+done
+rm -f "$SKIPPED_KEYSPACES"
+
 log_info "--- Starting Parallel Backup of Tables ---"
 find "$CASSANDRA_DATA_DIR" -type d -path "*/snapshots/$BACKUP_TAG" -not -empty -print0 | \
     xargs -0 -P "$PARALLELISM" -I {} bash -c 'process_table_backup "$1"' _ {}
