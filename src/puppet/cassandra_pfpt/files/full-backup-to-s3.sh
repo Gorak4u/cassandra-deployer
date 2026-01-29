@@ -89,6 +89,8 @@ HOSTNAME=$(hostname -s)
 BACKUP_TEMP_DIR="${CASSANDRA_DATA_DIR%/*}/backup_temp_$$"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 ERROR_DIR="$BACKUP_TEMP_DIR/errors"
+S3_OBJECT_LOCK_APPLICABLE="false"
+
 
 # --- AWS Credential Check Function ---
 check_aws_credentials() {
@@ -112,17 +114,27 @@ check_aws_credentials() {
 
 check_existing_bucket_lock_config() {
     if [ "$S3_OBJECT_LOCK_ENABLED" != "true" ]; then
+        S3_OBJECT_LOCK_APPLICABLE="false"
         return 0
     fi
     log_info "Verifying Object Lock configuration for existing bucket..."
     local lock_config
     lock_config=$(aws s3api get-object-lock-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null)
-    if [ -z "$lock_config" ] || ! echo "$lock_config" | jq -e '.ObjectLockConfiguration.ObjectLockEnabled == "Enabled"' > /dev/null; then
-        log_error "S3_OBJECT_LOCK_ENABLED is true in config, but bucket '$S3_BUCKET_NAME' does not have Object Lock enabled."
-        log_error "Please create a new bucket with Object Lock enabled and update your configuration, or disable this feature."
-        return 1
+    if [ $? -ne 0 ]; then
+        log_warn "Could not get S3 Object Lock configuration. This may be due to missing IAM permissions (s3:GetObjectLockConfiguration)."
+        log_warn "Backup will proceed without applying Object Lock to uploads."
+        S3_OBJECT_LOCK_APPLICABLE="false"
+        return 0
     fi
-    log_success "Bucket '$S3_BUCKET_NAME' is correctly configured for Object Lock."
+
+    if echo "$lock_config" | jq -e '.ObjectLockConfiguration.ObjectLockEnabled == "Enabled"' > /dev/null; then
+        log_success "Bucket '$S3_BUCKET_NAME' is correctly configured for Object Lock."
+        S3_OBJECT_LOCK_APPLICABLE="true"
+    else
+        log_warn "S3_OBJECT_LOCK_ENABLED is true in config, but bucket '$S3_BUCKET_NAME' does not have Object Lock enabled."
+        log_warn "Backup will proceed without applying Object Lock to uploads."
+        S3_OBJECT_LOCK_APPLICABLE="false"
+    fi
     return 0
 }
 
@@ -191,35 +203,55 @@ ensure_s3_bucket_and_lifecycle() {
     log_info "Checking if S3 bucket 's3://$S3_BUCKET_NAME' exists..."
     if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" > /dev/null 2>&1; then
         log_success "S3 bucket already exists."
-        if ! check_existing_bucket_lock_config; then
-            return 1
-        fi
+        check_existing_bucket_lock_config
         manage_s3_lifecycle
         return 0
     else
         log_warn "S3 bucket '$S3_BUCKET_NAME' does not exist. Attempting to create it..."
         
-        local create_bucket_args=("--bucket" "$S3_BUCKET_NAME")
-        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ]; then
-            create_bucket_args+=("--object-lock-enabled-for-bucket")
-            log_info "Object Lock will be enabled for the new bucket."
-        fi
-
         local region
         region=$(aws configure get region 2>/dev/null || echo "us-east-1")
+
+        local create_bucket_args=("--bucket" "$S3_BUCKET_NAME")
         if [ "$region" != "us-east-1" ]; then
             create_bucket_args+=("--create-bucket-configuration" "LocationConstraint=$region")
         fi
 
-        if aws s3api create-bucket "${create_bucket_args[@]}"; then
-            log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
-            manage_s3_lifecycle
-            return 0
-        else
-            log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
-            log_error "Please check your AWS permissions and ensure the bucket name is globally unique."
-            return 1
+        local try_with_lock=false
+        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ]; then
+            create_bucket_args+=("--object-lock-enabled-for-bucket")
+            log_info "Attempting to create bucket with Object Lock enabled."
+            try_with_lock=true
         fi
+        
+        if ! aws s3api create-bucket "${create_bucket_args[@]}" >/dev/null 2>&1; then
+            if [ "$try_with_lock" == "true" ]; then
+                log_warn "Failed to create bucket with Object Lock. This may be due to missing IAM permissions (e.g., s3:PutBucketObjectLockConfiguration)."
+                log_warn "Retrying to create the bucket without Object Lock..."
+                
+                local plain_create_args=("--bucket" "$S3_BUCKET_NAME")
+                if [ "$region" != "us-east-1" ]; then
+                   plain_create_args+=("--create-bucket-configuration" "LocationConstraint=$region")
+                fi
+
+                if ! aws s3api create-bucket "${plain_create_args[@]}"; then
+                    log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
+                    return 1
+                fi
+                S3_OBJECT_LOCK_APPLICABLE="false"
+            else
+                 log_error "Failed to create S3 bucket '$S3_BUCKET_NAME'."
+                 return 1
+            fi
+        else
+            if [ "$try_with_lock" == "true" ]; then
+                S3_OBJECT_LOCK_APPLICABLE="true"
+            fi
+        fi
+        
+        log_success "Successfully created S3 bucket '$S3_BUCKET_NAME'."
+        manage_s3_lifecycle
+        return 0
     fi
 }
 
@@ -472,7 +504,7 @@ process_table_backup() {
         local s3_path="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/$ks_name/$table_name.tar.gz.enc"
         
         local object_lock_flags=()
-        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+        if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_APPLICABLE" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
             local retain_until_date
             retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
             object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
@@ -522,7 +554,8 @@ export -f process_table_backup run_nodetool
 export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR CASSANDRA_USER
 export BACKUP_EXCLUDE_KEYSPACES BACKUP_EXCLUDE_TABLES BACKUP_INCLUDE_ONLY_KEYSPACES BACKUP_INCLUDE_ONLY_TABLES
 export RED GREEN YELLOW BLUE NC
-export -f log_message log_info log_success log_warn log_error
+export S3_OBJECT_LOCK_APPLICABLE
+
 
 # --- Parallel backup execution ---
 log_info "--- Starting Parallel Backup of Tables ---"
@@ -618,7 +651,7 @@ if [ -f "/var/lib/upload-disabled" ]; then
     log_info "Local snapshot will NOT be automatically cleared."
 else
     local object_lock_flags=()
-    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_APPLICABLE" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
         local retain_until_date
         retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
         object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")

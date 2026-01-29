@@ -95,8 +95,23 @@ LOCAL_BACKUP_BASE_DIR="/var/lib/cassandra/local_backups"
 LOCAL_BACKUP_DIR="$LOCAL_BACKUP_BASE_DIR/$BACKUP_TAG"
 LOCK_FILE="/var/run/cassandra_backup.lock"
 ERROR_DIR="$LOCAL_BACKUP_DIR/errors"
+S3_OBJECT_LOCK_APPLICABLE="false"
+
 
 # --- Functions ---
+
+check_bucket_lock_status() {
+    S3_OBJECT_LOCK_APPLICABLE="false" # Default to false
+    if [ "$S3_OBJECT_LOCK_ENABLED" != "true" ] || [ "$BACKUP_BACKEND" != "s3" ]; then
+        return 0
+    fi
+
+    # Don't logspam this check in the incremental script, just check and set flag
+    if aws s3api get-object-lock-configuration --bucket "$S3_BUCKET_NAME" 2>/dev/null | jq -e '.ObjectLockConfiguration.ObjectLockEnabled == "Enabled"' > /dev/null; then
+        S3_OBJECT_LOCK_APPLICABLE="true"
+    fi
+    return 0
+}
 
 do_local_backup() {
     log_info "--- Step 1: Creating Local Incremental Backup ---"
@@ -202,7 +217,7 @@ do_upload() {
     if [ "$BACKUP_BACKEND" != "s3" ]; then log_warn "Backup backend is '$BACKUP_BACKEND', not 's3'. Skipping upload."; return 0; fi
 
     local object_lock_flags=()
-    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
+    if [ "$S3_OBJECT_LOCK_ENABLED" == "true" ] && [ "$S3_OBJECT_LOCK_APPLICABLE" == "true" ] && [ "$S3_OBJECT_LOCK_RETENTION" -gt 0 ]; then
         local retain_until_date
         retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
         object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
@@ -281,6 +296,7 @@ echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 # --- Main Execution Flow ---
 log_info "--- Starting Incremental Backup Manager (Mode: $MODE) ---"
+check_bucket_lock_status
 
 case "$MODE" in
     "local_only")
