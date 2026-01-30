@@ -75,7 +75,14 @@ while [[ "$#" -gt 0 ]]; do
         -n|--nodes) IFS=',' read -r -a NODES <<< "$2"; shift ;;
         -f|--nodes-file)
             if [ ! -f "$2" ]; then log_error "Node file not found: $2"; exit 1; fi
-            mapfile -t NODES < "$2"
+            # Use while read loop for better compatibility than mapfile
+            NODES=()
+            while IFS= read -r line; do
+                # Ignore empty lines
+                if [ -n "$line" ]; then
+                    NODES+=("$line")
+                fi
+            done < "$2"
             shift ;;
         --node) NODES=("$2"); shift ;;
         --qv-query) QV_QUERY="$2"; shift ;;
@@ -120,11 +127,18 @@ if [ -n "$QV_QUERY" ]; then
         exit 1
     fi
     
-    # Use process substitution and mapfile to read nodes into an array.
+    # Use a while read loop for compatibility with older bash versions (instead of mapfile).
     # The '-t' flag provides one FQDN per line, which is ideal for this.
     # The eval is used to correctly handle the quoted query string with its spaces.
     log_info "Running query: qv -t ${QV_QUERY}"
-    mapfile -t NODES < <(eval "qv -t $QV_QUERY" 2>/dev/null)
+    NODES=()
+    while IFS= read -r line; do
+        # Ignore empty lines
+        if [ -n "$line" ]; then
+            NODES+=("$line")
+        fi
+    done < <(eval "qv -t $QV_QUERY" 2>/dev/null)
+
 
     if [ ${#NODES[@]} -eq 0 ]; then
         log_error "The qv query returned no hosts. Aborting."
@@ -205,9 +219,14 @@ if [ "$PARALLEL" = true ]; then
         wait "$pid"
     done
 
-    # Collect results from temp file
+    # Collect results from temp file using a compatible loop
     if [ -f "failed_nodes.$$" ]; then
-        mapfile -t failed_nodes < "failed_nodes.$$"
+        failed_nodes=()
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                failed_nodes+=("$line")
+            fi
+        done < "failed_nodes.$$"
         rm "failed_nodes.$$"
     fi
 fi
