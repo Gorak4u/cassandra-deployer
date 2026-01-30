@@ -1,168 +1,161 @@
-#!/bin/bash
+#!/usr/bin/env python3
 # This file is managed by Puppet.
-set -euo pipefail
 
-# --- Color Codes ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+import argparse
+import subprocess
+import sys
+from colorama import Fore, Style, init
 
-# --- Help Function ---
-usage() {
-    echo -e "${BOLD}Cassandra Operations Master Script${NC}"
-    echo -e ""
-    echo -e "A unified wrapper for managing common Cassandra operational tasks on this node."
-    echo -e ""
-    echo -e "${YELLOW}Usage: $0 <command> [arguments...]${NC}"
-    echo -e ""
-    echo -e "${BLUE}COMMANDS:${NC}"
-    echo -e ""
-    echo -e "  ${BOLD}STATUS & HEALTH CHECKS${NC}"
-    echo -e "    ${GREEN}health${NC}                 Run a comprehensive health check on the local node."
-    echo -e "    ${GREEN}cluster-health${NC}          Quickly check cluster connectivity and nodetool status."
-    echo -e "    ${GREEN}disk-health${NC}             Check disk usage against warning/critical thresholds."
-    echo -e "    ${GREEN}version${NC}                 Audit and print versions of key software (OS, Java, Cassandra)."
-    echo -e "    ${GREEN}upgrade-check${NC}          Run pre-flight checks before a major version upgrade."
-    echo -e ""
-    echo -e "  ${BOLD}NODE LIFECYCLE & MAINTENANCE${NC}"
-    echo -e "    ${GREEN}stop${NC}                   Safely drain and stop the Cassandra service."
-    echo -e "    ${GREEN}restart${NC}                Perform a safe, rolling restart of the Cassandra service."
-    echo -e "    ${GREEN}reboot${NC}                 Safely drain Cassandra and reboot the machine."
-    echo -e "    ${GREEN}drain${NC}                  Drain the node, flushing memtables and stopping client traffic."
-    echo -e "    ${GREEN}decommission${NC}           Permanently remove this node from the cluster after streaming its data."
-    echo -e "    ${GREEN}replace${NC} <dead_node_ip>  Configure this NEW, STOPPED node to replace a dead node."
-    echo -e "    ${GREEN}rebuild${NC} <source_dc>     Rebuild the data on this node by streaming from another datacenter."
-    echo -e ""
-    echo -e "  ${BOLD}DATA MANAGEMENT & REPAIR${NC}"
-    echo -e "    ${GREEN}repair${NC} [<keyspace>]     Run a safe, granular repair on the node's token ranges. Can target a specific keyspace."
-    echo -e "    ${GREEN}cleanup${NC} [opts]          Run 'nodetool cleanup' with safety checks."
-    echo -e "    ${GREEN}compact${NC} [opts]          Run 'nodetool compact' with safety checks."
-    echo -e "    ${GREEN}garbage-collect${NC} [opts]  Run 'nodetool garbagecollect' with safety checks."
-    echo -e "    ${GREEN}upgrade-sstables${NC} [opts] Run 'nodetool upgradesstables' with safety checks."
-    echo -e ""
-    echo -e "  ${BOLD}BACKUP & RECOVERY${NC}"
-    echo -e "    ${GREEN}backup${NC}                  Manually trigger a full, node-local backup to S3."
-    echo -e "    ${GREEN}incremental-backup${NC}      Manually trigger an incremental backup to S3."
-    echo -e "    ${GREEN}backup-status${NC}          Check the status of the last completed backup for a node."
-    echo -e "    ${GREEN}snapshot${NC} [<keyspaces>]  Take an ad-hoc snapshot with a generated tag."
-    echo -e "    ${GREEN}restore${NC} [opts]          Restore data from S3, list backups, or show restore chains."
-    echo -e ""
-    echo -e "  ${BOLD}DOCUMENTATION${NC}"
-    echo -e "    ${GREEN}manual${NC}                 Display the full operations manual in the terminal."
-    echo -e "    ${GREEN}backup-guide${NC}           Display the full backup and recovery guide."
-    echo -e "    ${GREEN}puppet-guide${NC}           Display the Puppet architecture guide."
-    echo -e ""
-    echo -e "  ${BOLD}ADVANCED & DESTRUCTIVE (USE WITH CAUTION!)${NC}"
-    echo -e "    ${GREEN}assassinate${NC} <dead_node_ip> Forcibly remove a dead node from the cluster's gossip ring."
-    echo -e ""
-    echo -e "  ${BOLD}PERFORMANCE TESTING${NC}"
-    echo -e "    ${GREEN}stress${NC} [opts]            Run 'cassandra-stress' via a robust wrapper."
-    echo -e ""
-    echo -e "  ${BOLD}HELP${NC}"
-    echo -e "    ${GREEN}-h, --help${NC}              Show this help message."
-    echo -e ""
-    exit 1
-}
+# Initialize colorama
+init(autoreset=True)
 
-if [ "$#" -eq 0 ]; then
-    usage
-fi
+def show_help(parser):
+    """Prints a custom, formatted help message."""
+    print(f"{Style.BRIGHT}{Fore.YELLOW}Usage: cass-ops [-h] <command> ...{Style.RESET_ALL}")
+    print("\nUnified operations script for Cassandra.\n")
+    
+    # Manually format commands for better readability
+    print(f"{Style.BRIGHT}Available Commands:{Style.RESET_ALL}")
+    commands = {
+        'health': "Run a comprehensive health check on the local node.",
+        'cluster-health': "Quickly check cluster connectivity and nodetool status.",
+        'disk-health': "Check disk usage against warning/critical thresholds.",
+        'version': "Audit and print versions of key software (OS, Java, Cassandra).",
+        
+        'stop': f"{Fore.YELLOW}Safely drain and stop the Cassandra service.{Style.RESET_ALL}",
+        'restart': f"{Fore.YELLOW}Perform a safe, rolling restart of the Cassandra service.{Style.RESET_ALL}",
+        'reboot': f"{Fore.RED}Safely drain Cassandra and reboot the machine.{Style.RESET_ALL}",
+        'drain': "Drain the node, flushing memtables and stopping client traffic.",
+        'decommission': f"{Fore.RED}Permanently remove this node from the cluster after streaming its data.{Style.RESET_ALL}",
+        'replace': "Configure this NEW, STOPPED node to replace a dead node.",
+        'rebuild': "Rebuild the data on this node by streaming from another datacenter.",
+        
+        'repair': "Manually run a full, blocking repair on a keyspace or the entire node.",
+        'cleanup': "Run 'nodetool cleanup' with safety checks.",
+        'compact': "Run 'nodetool compact' with safety checks.",
+        'garbage-collect': "Run 'nodetool garbagecollect' with safety checks.",
+        'upgrade-sstables': "Run 'nodetool upgradesstables' with safety checks.",
+        
+        'backup': "Manually trigger a full, node-local backup to S3.",
+        'incremental-backup': "Manually trigger an incremental backup to S3.",
+        'backup-status': "Check the status of the last completed backup for a node.",
+        'snapshot': "Take an ad-hoc snapshot with a generated tag.",
+        'restore': "Restore data from S3, list backups, or show restore chains.",
+        
+        'assassinate': f"{Fore.RED}Forcibly remove a dead node from the cluster's gossip ring.{Style.RESET_ALL}",
+        'stress': "Run 'cassandra-stress' via a robust wrapper.",
+        'manual': "Display the full operations manual in the terminal.",
+        'upgrade-check': "Run pre-flight checks before a major version upgrade.",
+        'backup-guide': "Display the full backup and recovery guide.",
+        'puppet-guide': "Display the Puppet architecture guide.",
+    }
+    
+    # Group commands for clarity
+    groups = {
+        'Health & Info': ['health', 'cluster-health', 'disk-health', 'version'],
+        'Node Lifecycle': ['stop', 'restart', 'reboot', 'drain', 'decommission', 'replace', 'rebuild'],
+        'Data Maintenance': ['repair', 'cleanup', 'compact', 'garbage-collect', 'upgrade-sstables'],
+        'Backup & Recovery': ['backup', 'incremental-backup', 'backup-status', 'snapshot', 'restore'],
+        'Advanced & Other': ['assassinate', 'stress', 'manual', 'upgrade-check', 'backup-guide', 'puppet-guide']
+    }
 
-COMMAND="$1"
-shift # Remove the command from the argument list
+    for group_name, cmd_list in groups.items():
+        print(f"\n  {Style.BRIGHT}{group_name}:{Style.RESET_ALL}")
+        for cmd in cmd_list:
+            print(f"    {Fore.GREEN}{cmd:<20}{Style.RESET_ALL} {commands[cmd]}")
+            
+    print(f"\n{Style.BRIGHT}optional arguments:{Style.RESET_ALL}")
+    print(f"  -h, --help            show this help message and exit")
 
-# The main dispatcher
-case "$COMMAND" in
-    health)
-        /usr/local/bin/node_health_check.sh "$@"
-        ;;
-    cluster-health)
-        /usr/local/bin/cluster-health.sh "$@"
-        ;;
-    disk-health)
-        /usr/local/bin/disk-health-check.sh "$@"
-        ;;
-    version)
-        /usr/local/bin/version-check.sh "$@"
-        ;;
-    stop)
-        /usr/local/bin/stop-node.sh "$@"
-        ;;
-    restart)
-        /usr/local/bin/rolling_restart.sh "$@"
-        ;;
-    reboot)
-        /usr/local/bin/reboot-node.sh "$@"
-        ;;
-    drain)
-        /usr/local/bin/drain-node.sh "$@"
-        ;;
-    decommission)
-        /usr/local/bin/decommission-node.sh "$@"
-        ;;
-    replace)
-        /usr/local/bin/prepare-replacement.sh "$@"
-        ;;
-    rebuild)
-        /usr/local/bin/rebuild-node.sh "$@"
-        ;;
-    upgrade-check)
-        /usr/local/bin/cassandra-upgrade-precheck.sh "$@"
-        ;;
-    repair)
-        /usr/local/bin/range-repair.sh "$@"
-        ;;
-    cleanup)
-        /usr/local/bin/cleanup-node.sh "$@"
-        ;;
-    compact)
-        /usr/local/bin/compaction-manager.sh "$@"
-        ;;
-    garbage-collect)
-        /usr/local/bin/garbage-collect.sh "$@"
-        ;;
-    upgrade-sstables)
-        /usr/local/bin/upgrade-sstables.sh "$@"
-        ;;
-    backup)
-        /usr/local/bin/full-backup-to-s3.sh "$@"
-        ;;
-    incremental-backup)
-        /usr/local/bin/incremental-backup-to-s3.sh "$@"
-        ;;
-    backup-status)
-        /usr/local/bin/backup-status.sh "$@"
-        ;;
-    snapshot)
-        /usr/local/bin/take-snapshot.sh "$@"
-        ;;
-    restore)
-        /usr/local/bin/restore-from-s3.sh "$@"
-        ;;
-    assassinate)
-        /usr/local/bin/assassinate-node.sh "$@"
-        ;;
-    stress)
-        /usr/local/bin/stress-test.sh "$@"
-        ;;
-    manual)
-        /usr/local/bin/cassandra-manual.sh "$@"
-        ;;
-    backup-guide)
-        less -R /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md
-        ;;
-    puppet-guide)
-        less -R /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md
-        ;;
-    help|--help|-h)
-        usage
-        ;;
-    *)
-        echo -e "${RED}Error: Unknown command '$COMMAND'${NC}"
-        echo ""
-        usage
-        ;;
-esac
+
+def main():
+    # Main parser
+    parser = argparse.ArgumentParser(
+        description='Unified operations script for Cassandra.',
+        add_help=False # Disable default help to use our custom one
+    )
+    # Add a custom help flag
+    parser.add_argument('-h', '--help', action='store_true', help='show this help message and exit')
+    
+    # Subparsers for commands
+    subparsers = parser.add_subparsers(dest='command', help='Available Commands')
+    
+    # Define subparsers for commands that take arguments
+    for cmd in ['replace', 'rebuild', 'assassinate', 'repair', 'cleanup', 'compact', 'garbage-collect', 'upgrade-sstables', 'backup-status', 'snapshot', 'restore', 'stress']:
+        cmd_parser = subparsers.add_parser(cmd, add_help=False)
+        cmd_parser.add_argument('args', nargs=argparse.REMAINDER)
+        
+    # Define subparsers for commands that take no arguments
+    for cmd in ['health', 'cluster-health', 'disk-health', 'version', 'stop', 'restart', 'reboot', 'drain', 'decommission', 'backup', 'incremental-backup', 'manual', 'upgrade-check', 'backup-guide', 'puppet-guide']:
+        subparsers.add_parser(cmd, add_help=False)
+
+    # Parse known args. This allows us to handle the main command and pass the rest through.
+    args, remaining_args = parser.parse_known_args()
+    
+    if args.help and not args.command:
+        show_help(parser)
+        sys.exit(0)
+
+    if not args.command:
+        show_help(parser)
+        sys.exit(1)
+
+    # Build the full command to execute
+    script_map = {
+        'health': 'node_health_check.sh',
+        'cluster-health': 'cluster-health.sh',
+        'disk-health': 'disk-health-check.sh',
+        'version': 'version-check.sh',
+        'stop': 'stop-node.sh',
+        'restart': 'rolling_restart.sh',
+        'reboot': 'reboot-node.sh',
+        'drain': 'drain-node.sh',
+        'decommission': 'decommission-node.sh',
+        'replace': 'prepare-replacement.sh',
+        'rebuild': 'rebuild-node.sh',
+        'repair': 'full-repair.sh',
+        'cleanup': 'cleanup-node.sh',
+        'compact': 'compaction-manager.sh',
+        'garbage-collect': 'garbage-collect.sh',
+        'upgrade-sstables': 'upgrade-sstables.sh',
+        'backup': 'full-backup-to-s3.sh',
+        'incremental-backup': 'incremental-backup-to-s3.sh',
+        'backup-status': 'backup-status.sh',
+        'snapshot': 'take-snapshot.sh',
+        'restore': 'restore-from-s3.sh',
+        'assassinate': 'assassinate-node.sh',
+        'stress': 'stress-test.sh',
+        'manual': 'cassandra-manual.sh',
+        'upgrade-check': 'cassandra-upgrade-precheck.sh',
+        'backup-guide': 'less /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md',
+        'puppet-guide': 'less /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md'
+    }
+
+    script_name = script_map.get(args.command)
+    if not script_name:
+        print(f"Error: Command '{args.command}' is not implemented.", file=sys.stderr)
+        sys.exit(1)
+
+    # For commands that are not simple scripts, handle them specially
+    if args.command in ['backup-guide', 'puppet-guide']:
+        cmd_to_run = script_name.split()
+    else:
+        cmd_to_run = [f"/usr/local/bin/{script_name}"] + remaining_args
+
+    try:
+        # Use subprocess.run which is more modern and flexible
+        result = subprocess.run(cmd_to_run, check=False) # check=False to handle non-zero exit codes manually
+        sys.exit(result.returncode)
+    except FileNotFoundError:
+        print(f"Error: The script for command '{args.command}' was not found.", file=sys.stderr)
+        sys.exit(127)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    # Ensure script is run as root
+    if __import__('os').getuid() != 0:
+        print(f"{Fore.RED}Error: This script must be run with sudo or as the root user.{Style.RESET_ALL}", file=sys.stderr)
+        sys.exit(1)
+    main()

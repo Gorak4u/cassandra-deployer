@@ -13,7 +13,7 @@ User=root
 Group=root
 RuntimeDirectory=cassandra
 <%
-  cmd_parts = [@manage_bin_dir + '/cass-ops', 'repair']
+  cmd_parts = [@manage_bin_dir + '/range-repair.sh']
   if @repair_duration_hours and @repair_duration_hours > 0
     cmd_parts << '--hours'
     cmd_parts << @repair_duration_hours
