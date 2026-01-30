@@ -525,3 +525,4 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
 
     
 
+
