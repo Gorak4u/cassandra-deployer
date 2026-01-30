@@ -10,6 +10,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # --- Configuration ---
+CONFIG_FILE="/etc/backup/config.json"
 DISK_CHECK_PATH="/var/lib/cassandra/data"
 WARNING_THRESHOLD=75
 CRITICAL_THRESHOLD=85
@@ -57,6 +58,14 @@ done
 
 # --- Pre-flight Checks ---
 
+if [ ! -f "$CONFIG_FILE" ]; then log_message "${RED}Backup configuration file not found at $CONFIG_FILE${NC}"; exit 1; fi
+
+LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
+if [ -z "$LISTEN_ADDRESS" ] || [ "$LISTEN_ADDRESS" == "null" ]; then
+    log_message "${RED}Could not determine listen_address from $CONFIG_FILE. Aborting repair.${NC}"
+    exit 1
+fi
+
 # 1. Lock File Management
 if [ -f "$LOCK_FILE" ]; then
     OLD_PID=$(cat "$LOCK_FILE")
@@ -100,7 +109,9 @@ log_message "${GREEN}Disk usage OK. Proceeding with repair.${NC}"
 # --- Command Execution ---
 
 # Build the command to execute
-PYTHON_CMD_ARRAY=("/usr/local/bin/cassandra_range_repair.py")
+PYTHON_CMD_ARRAY=("/usr/local/sbin/cassandra_range_repair.py")
+PYTHON_CMD_ARRAY+=("--local-ip" "$LISTEN_ADDRESS")
+
 if [ "$HOURS" != "0" ]; then
     PYTHON_CMD_ARRAY+=("--hours" "$HOURS")
     log_message "${BLUE}Repair timed to complete in $HOURS hours.${NC}"
