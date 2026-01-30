@@ -12,6 +12,7 @@ WRITE_COUNT=""
 READ_COUNT=""
 NODES=""
 AUTO_DETECTED_NODES=""
+RF_STRING=""
 # These will hold the final values to be used
 EFFECTIVE_KEYSPACE="my_app"
 EFFECTIVE_TABLE="users_large"
@@ -45,6 +46,7 @@ usage() {
     log_message ""
     log_message "Configuration:"
     log_message "  -n, --nodes <list>      Comma-separated list of node IPs. Default: auto-detect from 'nodetool status'."
+    log_message "  --rf <strategy>         Set the replication factor. E.g., 'dc1:3,dc2:3' for NetworkTopologyStrategy."
     log_message "  -k, --keyspace <name>   Override the default keyspace ('my_app')."
     log_message "  -t, --table <table>     Override the default table ('users_large')."
     log_message "  -h, --help              Show this help message."
@@ -57,6 +59,7 @@ while [[ "$#" -gt 0 ]]; do
         -w|--write) WRITE_COUNT="$2"; shift ;;
         -r|--read) READ_COUNT="$2"; shift ;;
         -n|--nodes) NODES="$2"; shift ;;
+        --rf) RF_STRING="$2"; shift ;;
         -k|--keyspace) KEYSPACE_OVERRIDE="$2"; shift ;;
         -t|--table) TABLE_OVERRIDE="$2"; shift ;;
         -h|--help) usage ;;
@@ -101,12 +104,42 @@ if [ -n "$TABLE_OVERRIDE" ]; then
     EFFECTIVE_TABLE="$TABLE_OVERRIDE"
 fi
 
+# Construct replication strategy string
+REPLICATION_STRATEGY=""
+if [[ -n "$RF_STRING" ]]; then
+    log_message "Using custom replication factor: $RF_STRING"
+    MAP_PARTS=""
+    IFS=',' read -ra DCRS <<< "$RF_STRING"
+    for dc_rf in "${DCRS[@]}"; do
+        DC=$(echo "$dc_rf" | cut -d':' -f1)
+        RF=$(echo "$dc_rf" | cut -d':' -f2)
+        if [ -z "$RF" ]; then # Handle single number for SimpleStrategy
+            REPLICATION_STRATEGY="{'class': 'SimpleStrategy', 'replication_factor': ${DC}}"
+            break
+        fi
+        if [[ -n "$MAP_PARTS" ]]; then
+            MAP_PARTS+=", "
+        fi
+        MAP_PARTS+="'${DC}': ${RF}"
+    done
+    if [[ -z "$REPLICATION_STRATEGY" ]]; then
+        REPLICATION_STRATEGY="{'class': 'NetworkTopologyStrategy', ${MAP_PARTS}}"
+    fi
+else
+    log_message "Using default replication: SimpleStrategy, RF=1"
+    REPLICATION_STRATEGY="{'class': 'SimpleStrategy', 'replication_factor': 1}"
+fi
+
 log_message "Using keyspace: '$EFFECTIVE_KEYSPACE' and table: '$EFFECTIVE_TABLE'"
 TEMP_PROFILE_PATH=$(mktemp)
 log_message "Generating temporary stress profile at $TEMP_PROFILE_PATH"
 
-# Replace placeholders in the template. The default names are the placeholders.
-sed "s/my_app/$EFFECTIVE_KEYSPACE/g; s/users_large/$EFFECTIVE_TABLE/g" "$PROFILE_TEMPLATE_PATH" > "$TEMP_PROFILE_PATH"
+# Replace placeholders in the template. Use | as a delimiter for sed to avoid issues with JSON.
+sed -e "s/my_app/$EFFECTIVE_KEYSPACE/g" \
+    -e "s/users_large/$EFFECTIVE_TABLE/g" \
+    -e "s|__REPLICATION_STRATEGY__|${REPLICATION_STRATEGY}|g" \
+    "$PROFILE_TEMPLATE_PATH" > "$TEMP_PROFILE_PATH"
+
 
 # --- Function to run a stress operation ---
 run_stress() {

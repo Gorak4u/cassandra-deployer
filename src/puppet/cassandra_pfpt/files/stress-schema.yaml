@@ -6,7 +6,7 @@ keyspace: my_app
 table: users_large
 
 keyspace_definition: |
-  CREATE KEYSPACE IF NOT EXISTS my_app WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+  CREATE KEYSPACE IF NOT EXISTS my_app WITH replication = __REPLICATION_STRATEGY__;
 
 # The table schema, including a large 'data' blob to increase row size.
 table_definition: |
