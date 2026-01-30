@@ -183,6 +183,7 @@ run_task() {
     local node="$1"
     local output
     local rc=0
+    local REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$"
     
     local TIMEOUT_CMD=""
     if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
