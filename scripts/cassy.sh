@@ -75,7 +75,7 @@ usage() {
     echo -e "${YELLOW}OPTIONS${NC}"
     
     # Using printf for aligned columns. Increased padding to handle color codes.
-    local format_string="  %-48s %s\n"
+    local format_string="  %-50s %s\n"
     
     echo -e "${BOLD}Node Selection (choose one method):${NC}"
     printf "$format_string" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
@@ -586,6 +586,7 @@ fi
     
 
     
+
 
 
 
