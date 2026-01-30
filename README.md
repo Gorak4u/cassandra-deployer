@@ -41,46 +41,58 @@ The script can run any command or execute a local script file on your cluster no
 | `-h`, `--help` | | Show the help message. |
 
 
-### Examples
+### Production Cassandra Operations with `cassy.sh`
 
-**Static Node Lists:**
-```bash
-# Get the status from a specific list of nodes, one by one
-./scripts/cassy.sh --nodes "node1.example.com,node2.example.com" -c "sudo cass-ops health"
+This section provides recipes for common, production-level Cassandra maintenance tasks using `cassy.sh`.
 
-# Run a full repair on the entire cluster in parallel, using a file for the node list
-./scripts/cassy.sh --nodes-file /path/to/my_nodes.txt --parallel -c "sudo cass-ops repair"
-
-# Execute a local diagnostic script on a single node
-./scripts/cassy.sh --node "node1.example.com" -s ./my_local_check.sh
-```
-
-**Dynamic Inventory with `qv`:**
-If your management node has the `qv` inventory tool, you can use it to fetch the list of nodes dynamically.
+#### **Pattern 1: Safe Rolling Restart of a Datacenter**
+A rolling restart is a common maintenance task. It must be done sequentially to ensure the cluster remains available. `cassy.sh`'s default sequential mode is perfect for this, as the on-node `cass-ops restart` script waits for the node to become healthy before exiting.
 
 ```bash
-# Get the hostname from all Cassandra nodes in the SC4 datacenter
-./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" -c "hostname"
-
-# Run a cluster health check on all Cassandra nodes in the AWSLAB datacenter in parallel
-./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" -P -c "sudo cass-ops cluster-health"
+# Restart all Cassandra nodes in the AWSLAB datacenter, one by one.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" -c "sudo cass-ops restart"
 ```
 
-**Advanced Usage:**
+#### **Pattern 2: Parallel Cluster-Wide Repair**
+Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster. For very large clusters, it's best practice to run it per-datacenter to control cross-datacenter network traffic.
+
 ```bash
-# Dry run: see what would happen without executing
-./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt" --dry-run -c "sudo reboot"
-
-# JSON output: get machine-readable results for automation
-./scripts/cassy.sh --nodes "node1,node2" --json -c "sudo cass-ops health"
-
-# Save output: log the output of each node to a separate file in the 'logs' directory
-./scripts/cassy.sh --nodes "node1,node2" --output-dir ./logs -c "cat /var/log/cassandra/system.log"
-
-# Timeout: run a command but kill it if it takes longer than 5 minutes
-./scripts/cassy.sh --node "node1" --timeout 300 -c "sudo cass-ops repair -k my_large_keyspace"
+# Run repair on all Cassandra nodes in the SC4 datacenter simultaneously.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel -c "sudo cass-ops repair"
 ```
 
+#### **Pattern 3: Cluster-Wide Health Auditing**
+You can use `cassy.sh` with the `--json` flag to programmatically audit your cluster's health and parse the results, which is ideal for automation.
+
+```bash
+# Get health status from all nodes and use jq to print the details of any failed checks.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt" --json -c "sudo cass-ops health --json" | jq '.results[] | select(.status == "FAILED")'
+```
+
+#### **A Note on Safety: Parallel vs. Sequential Execution**
+
+The `--parallel` (`-P`) flag is powerful but potentially dangerous. Running an operation on all nodes at once can lead to a cluster-wide outage if used incorrectly.
+
+*   **Commands that are generally SAFE for parallel execution:**
+    *   `cass-ops health`
+    *   `cass-ops cluster-health`
+    *   `cass-ops disk-health`
+    *   `cass-ops backup-status`
+    *   `cass-ops repair` (though consider DC-by-DC for large clusters)
+    *   `cass-ops cleanup`
+
+*   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`):**
+    *   `cass-ops restart`
+    *   `cass-ops reboot`
+    *   `cass-ops decommission`
+    *   `cass-ops upgrade-sstables`
+    *   Any command that takes a node out of the gossip ring or stops the service.
+
+Always use `--dry-run` first if you are unsure.
+```bash
+# Always a good idea before a destructive operation!
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt" --dry-run -c "sudo cass-ops decommission"
+```
 For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
