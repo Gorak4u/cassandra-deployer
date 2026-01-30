@@ -118,7 +118,7 @@ while [[ "$#" -gt 0 ]]; do
         -P|--parallel)
             PARALLEL=true
             # Check if the next argument is a positive integer for batch size
-            if [[ -n "$2" && "$2" =~ ^[1-9][0-9]*$ ]]; then
+            if [[ -n "${2:-}" && "$2" =~ ^[1-9][0-9]*$ ]]; then
                 PARALLEL_BATCH_SIZE="$2"
                 shift # consume the number
             fi
@@ -203,7 +203,48 @@ if [ -n "$QV_QUERY" ]; then
     if [ ${#NODES[@]} -eq 0 ]; then log_error "The qv query returned no hosts. Aborting."; exit 1; fi
 fi
 
-# --- Pre-Execution Hook ---
+# --- Internal Health Check Function (for rolling ops) ---
+_run_health_check() {
+    local node_to_check="$1"
+    local max_retries=12
+    local retry_delay=15
+
+    log_info "--- [Health Check] Verifying stability of ${node_to_check} ---"
+
+    for i in $(seq 1 $max_retries); do
+        log_info "  [Health Check] Cycle ${i}/${max_retries} for ${node_to_check}..."
+
+        # Check 1: Ping
+        if ! ping -c 3 "${node_to_check}" >/dev/null 2>&1; then
+            log_warn "    - FAIL: Node is not responding to ping. Will retry in ${retry_delay}s."
+            sleep $retry_delay
+            continue
+        fi
+        log_info "    - OK: Node is reachable via ping."
+
+        # Check 2: SSH
+        if ! ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "echo 'SSH OK'" >/dev/null 2>&1; then
+            log_warn "    - FAIL: SSH connection failed. Will retry in ${retry_delay}s."
+            sleep $retry_delay
+            continue
+        fi
+        log_info "    - OK: SSH is responsive."
+
+        # Check 3: Cluster Health from the node's perspective
+        if ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "sudo /usr/local/bin/cass-ops cluster-health --silent" >/dev/null 2>&1; then
+            log_success "--- [Health Check] SUCCESS: Node ${node_to_check} is healthy and cluster is stable. ---"
+            return 0 # Success
+        fi
+
+        log_warn "    - FAIL: 'cass-ops cluster-health' failed on the node. Service may not be ready. Will retry in ${retry_delay}s."
+        sleep $retry_delay
+    done
+
+    log_error "--- [Health Check] CRITICAL: Node ${node_to_check} did not pass health check after ${max_retries} attempts. ---"
+    return 1 # Failure
+}
+
+# --- Pre-Execution Hooks ---
 if [ -n "$PRE_EXEC_CHECK" ]; then
     log_info "--- Running Pre-Execution Check ---"
     if ! "$PRE_EXEC_CHECK"; then
@@ -211,6 +252,16 @@ if [ -n "$PRE_EXEC_CHECK" ]; then
         exit 3
     fi
     log_success "Pre-execution check passed."
+fi
+
+# Pre-flight health check for rolling operations
+if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
+    log_info "--- Running Pre-Rolling Operation Master Health Check ---"
+    if ! _run_health_check "${NODES[0]}"; then
+        log_error "Initial health check on node ${NODES[0]} failed. Aborting rolling operation before it starts."
+        exit 4
+    fi
+    log_success "Initial health check passed. Starting rolling operation."
 fi
 
 # --- Dry-Run ---
@@ -256,47 +307,6 @@ ACTION_DESC=""
 if [ -n "$COMMAND" ]; then ACTION_DESC="command: $COMMAND"; else ACTION_DESC="script: $SCRIPT_PATH"; fi
 log_info "Executing $ACTION_DESC"
 
-_run_health_check() {
-    local node_to_check="$1"
-    local max_retries=12
-    local retry_delay=15
-
-    log_info "--- [Health Check] Verifying stability of ${node_to_check} ---"
-
-    for i in $(seq 1 $max_retries); do
-        log_info "  [Health Check] Cycle ${i}/${max_retries} for ${node_to_check}..."
-
-        # Check 1: Ping
-        if ! ping -c 3 "${node_to_check}" >/dev/null 2>&1; then
-            log_warn "    - FAIL: Node is not responding to ping. Will retry in ${retry_delay}s."
-            sleep $retry_delay
-            continue
-        fi
-        log_info "    - OK: Node is reachable via ping."
-
-        # Check 2: SSH
-        if ! ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "echo 'SSH OK'" >/dev/null 2>&1; then
-            log_warn "    - FAIL: SSH connection failed. Will retry in ${retry_delay}s."
-            sleep $retry_delay
-            continue
-        fi
-        log_info "    - OK: SSH is responsive."
-
-        # Check 3: Cluster Health from the node's perspective
-        if ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "sudo /usr/local/bin/cass-ops cluster-health --silent" >/dev/null 2>&1; then
-            log_success "--- [Health Check] SUCCESS: Node ${node_to_check} is healthy and cluster is stable. ---"
-            return 0 # Success
-        fi
-
-        log_warn "    - FAIL: 'cass-ops cluster-health' failed on the node. Service may not be ready. Will retry in ${retry_delay}s."
-        sleep $retry_delay
-    done
-
-    log_error "--- [Health Check] CRITICAL: Node ${node_to_check} did not pass health check after ${max_retries} attempts. ---"
-    return 1 # Failure
-}
-
-
 run_task() {
     local node="$1"
     local output_buffer=""
@@ -314,14 +324,22 @@ run_task() {
         
         local TIMEOUT_CMD=""
         if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
+
+        local SSH_CMD_PREFIX=""
+        if command -v stdbuf &> /dev/null; then
+            SSH_CMD_PREFIX="stdbuf -oL -eL"
+        else
+            # Only warn once in sequential mode to avoid spamming logs
+            if [ "$PARALLEL" = false ] && [ "$attempt" -eq 1 ]; then
+                log_warn "Command 'stdbuf' not found. SSH output will be buffered, not line-by-line."
+            fi
+        fi
         
         output_buffer=$({
             if [ -n "$COMMAND" ]; then
-                # Use stdbuf to make output line-buffered
-                stdbuf -oL -eL $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
+                # Use stdbuf if available for line-buffered output, otherwise just run the command
+                $SSH_CMD_PREFIX $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
             elif [ -n "$SCRIPT_PATH" ]; then
-                # The script execution part is more complex to buffer line by line.
-                # It's better to capture its full output at once.
                 (
                   scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
                   ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
@@ -357,15 +375,17 @@ run_task() {
         fi
     fi
     
-    # Track failures for the final exit code
-    if [ $rc -ne 0 ]; then
-        # This is safe for both parallel and sequential mode.
-        # In parallel mode, it's a file. In sequential, it's an array.
-        # The lock makes appending to the file safe.
-        (
-            flock 200
+    # Track failures for the final exit code in parallel mode.
+    if [ $rc -ne 0 ] && [ "$PARALLEL" = true ]; then
+        if command -v flock &> /dev/null; then
+            (
+                flock 200
+                echo "$node" >> "failed_nodes.$$"
+            ) 200>failed_nodes.lock
+        else
+            # Fallback for when flock isn't available. Not atomic, but better than nothing.
             echo "$node" >> "failed_nodes.$$"
-        ) 200>failed_nodes.lock
+        fi
     fi
     # The return code of this function is the return code of the command
     return $rc
@@ -374,9 +394,15 @@ run_task() {
 if [ "$PARALLEL" = true ]; then
     # Create a temporary file for tracking failed nodes in parallel mode.
     touch "failed_nodes.$$"
-    # Create a lock file for safe appends
-    touch "failed_nodes.lock"
-    trap 'rm -f "failed_nodes.$$" "failed_nodes.lock"' EXIT
+    # Create a lock file for safe appends if flock is available
+    if command -v flock &> /dev/null; then
+        touch "failed_nodes.lock"
+        trap 'rm -f "failed_nodes.$$" "failed_nodes.lock"' EXIT
+    else
+        log_warn "Command 'flock' not found. Parallel failure tracking will not be atomic, which may be an issue with high concurrency."
+        trap 'rm -f "failed_nodes.$$"' EXIT
+    fi
+
 
     if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
         # --- Worker Pool Parallel Execution ---
@@ -422,7 +448,7 @@ else
         log_info "\n--- Executing on [${BOLD}$node${NC}] ---"
         if ! run_task "$node"; then
             log_error "Task failed on node ${node}. Aborting rolling execution."
-            # The failed node is already added to the list by run_task
+            failed_nodes+=("$node") # Explicitly add to array for sequential mode
             break
         fi
 
@@ -451,7 +477,8 @@ fi
 # --- Collect Parallel Failures ---
 if [ "$PARALLEL" = true ]; then
     if [ -f "failed_nodes.$$" ]; then
-        mapfile -t failed_nodes < "failed_nodes.$$"
+        # The temp file might have duplicate entries if flock wasn't available, so sort -u
+        mapfile -t failed_nodes < <(sort -u "failed_nodes.$$")
     fi
 fi
 
