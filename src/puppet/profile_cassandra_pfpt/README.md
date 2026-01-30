@@ -34,7 +34,7 @@
 
 ## Description
 
-This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` wrapper script, installed in `/usr/local/sbin`.
+This profile includes the `cassandra_pfpt` component module and provides it with a rich set of operational capabilities through Hiera-driven configuration and a suite of robust management scripts. The primary entry point for all operations is the `cass-ops` wrapper script, installed in `/usr/local/bin`.
 
 ## Setup
 
@@ -145,12 +145,12 @@ profile_cassandra_pfpt::schema_tables:
 
 ## Operator's Quick Reference: The `cass-ops` Command
 
-This profile installs a unified administrative wrapper script, `cass-ops`, at `/usr/local/sbin`. This is your primary entry point for all manual and automated operational tasks. It simplifies management by providing a single, memorable command with clear, grouped sub-commands.
+This profile installs a unified administrative wrapper script, `cass-ops`, at `/usr/local/bin`. This is your primary entry point for all manual and automated operational tasks. It simplifies management by providing a single, memorable command with clear, grouped sub-commands.
 
 To see all available commands, simply run `cass-ops` with no arguments or with `-h`.
 
 ```bash
-$ sudo /usr/local/sbin/cass-ops -h
+$ sudo cass-ops -h
 
 usage: cass-ops [-h] <command> ...
 
@@ -204,9 +204,9 @@ This section provides a practical guide for common operational tasks.
 
 > Before performing any maintenance, always check the health of the node and cluster.
 
-*   **Check the Local Node:** Run `sudo /usr/local/sbin/cass-ops health`. This script is your first stop. It checks disk space, node status (UN), gossip state, active streams, and recent log exceptions, giving you a quick "go/no-go" for maintenance.
-*   **Check Cluster Connectivity:** Run `sudo /usr/local/sbin/cass-ops cluster-health`. This verifies that the node can communicate with the cluster and that the CQL port is open.
-*   **Check Disk Space Manually:** Run `sudo /usr/local/sbin/cass-ops disk-health` to see the current free space percentage on the data volume.
+*   **Check the Local Node:** Run `sudo cass-ops health`. This script is your first stop. It checks disk space, node status (UN), gossip state, active streams, and recent log exceptions, giving you a quick "go/no-go" for maintenance.
+*   **Check Cluster Connectivity:** Run `sudo cass-ops cluster-health`. This verifies that the node can communicate with the cluster and that the CQL port is open.
+*   **Check Disk Space Manually:** Run `sudo cass-ops disk-health` to see the current free space percentage on the data volume.
 
 ### Node Lifecycle Management
 
@@ -214,14 +214,14 @@ This section provides a practical guide for common operational tasks.
 To apply configuration changes or for other maintenance, always use the provided script for a safe restart.
 
 1.  SSH into the node you wish to restart.
-2.  Execute `sudo /usr/local/sbin/cass-ops restart`.
+2.  Execute `sudo cass-ops restart`.
 3.  The script will automatically drain the node, stop the service, start it again, and wait until it verifies the node has successfully rejoined the cluster in `UN` state.
 
 #### Decommissioning a Node
 When you need to permanently remove a node from the cluster:
 
 1.  SSH into the node you want to remove.
-2.  Run `sudo /usr/local/sbin/cass-ops decommission`.
+2.  Run `sudo cass-ops decommission`.
 3.  The script will ask for confirmation, then run `nodetool decommission`. After it completes successfully, it is safe to shut down and terminate the instance.
 
 #### Replacing a Failed Node
@@ -231,7 +231,7 @@ If a node has failed permanently and cannot be recovered, you must replace it wi
 2.  SSH into the **new, stopped** node.
 3.  Execute the `replace` command, providing the IP of the dead node it is replacing:
     ```bash
-    sudo /usr/local/sbin/cass-ops replace <ip_of_dead_node>
+    sudo cass-ops replace <ip_of_dead_node>
     ```
 4.  The script will configure the necessary JVM flag (`-Dcassandra.replace_address_first_boot`).
 5.  You can now **start the Cassandra service** on the new node. It will automatically bootstrap into the cluster, assuming the identity and token ranges of the dead node.
@@ -243,11 +243,11 @@ This is the primary script for running manual repairs. It intelligently breaks t
 
 *   **To repair all keyspaces (most common):**
     ```bash
-    sudo /usr/local/sbin/cass-ops repair
+    sudo cass-ops repair
     ```
 *   **To repair a specific keyspace:**
     ```bash
-    sudo /usr/local/sbin/cass-ops repair my_keyspace
+    sudo cass-ops repair my_keyspace
     ```
 > Run this sequentially on each node in the cluster for a full, safe, rolling repair.
 
@@ -256,31 +256,31 @@ To manually trigger compaction while safely monitoring disk space:
 
 ```bash
 # Compact a specific table
-sudo /usr/local/sbin/cass-ops compact -- -k my_keyspace -t my_table
+sudo cass-ops compact -- -k my_keyspace -t my_table
 
 # Compact an entire keyspace
-sudo /usr/local/sbin/cass-ops compact -- -k my_keyspace
+sudo cass-ops compact -- -k my_keyspace
 ```
 
 #### Garbage Collection
 To manually remove droppable tombstones with pre-flight safety checks:
 
 ```bash
-sudo /usr/local/sbin/cass-ops garbage-collect -- -k my_keyspace -t users
+sudo cass-ops garbage-collect -- -k my_keyspace -t users
 ```
 
 #### SSTable Upgrades
 After a major Cassandra version upgrade, run this on each node sequentially:
 
 ```bash
-sudo /usr/local/sbin/cass-ops upgrade-sstables
+sudo cass-ops upgrade-sstables
 ```
 
 #### Node Cleanup
 After adding a new node to the cluster, run `cleanup` on the existing nodes in the same DC to remove data that no longer belongs to them.
 
 ```bash
-sudo /usr/local/sbin/cass-ops cleanup
+sudo cass-ops cleanup
 ```
 
 ---
@@ -486,7 +486,7 @@ This section documents every available Hiera key for this profile.
       - 'user_data.profiles'
       - 'user_data.settings'
     ```
-*   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/sbin/stress-test.sh` wrapper script. Default: `false`.
+*   `profile_cassandra_pfpt::manage_stress_test` (Boolean): Set to `true` to install the `cassandra-stress` tools and the `/usr/local/bin/stress-test.sh` wrapper script. Default: `false`.
 
 ### Monitoring & Agent Integrations
 *   `profile_cassandra_pfpt::manage_node_exporter` (Boolean): Set to `true` to install and enable the Prometheus Node Exporter for system-level metrics. Default: `false`.
@@ -524,5 +524,6 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
     
 
     
+
 
 
