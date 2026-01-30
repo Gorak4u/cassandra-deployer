@@ -24,6 +24,7 @@ POST_EXEC_CHECK=""
 INTER_NODE_CHECK_SCRIPT=""
 ROLLING_OP=""
 INTER_NODE_HEALTH_CHECK=false
+CONTINUE_ON_ERROR=false
 
 # --- Color Codes ---
 RED=$'\033[0;31m'
@@ -94,6 +95,7 @@ usage() {
     printf "$format_string" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
     printf "$format_string" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
     printf "$format_string" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
+    printf "$format_string" "${BLUE}--continue-on-error${NC}" "In sequential mode, do not abort if a node fails."
     echo
     
     echo -e "${BOLD}Safety & Rolling Operations:${NC}"
@@ -179,6 +181,7 @@ while [[ "$#" -gt 0 ]]; do
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
         --inter-node-check) INTER_NODE_CHECK_SCRIPT="$2"; shift ;;
+        --continue-on-error) CONTINUE_ON_ERROR=true ;;
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
@@ -230,6 +233,10 @@ if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
 if { [ -n "$INTER_NODE_CHECK_SCRIPT" ] || [ "$INTER_NODE_HEALTH_CHECK" = true ]; } && [ "$PARALLEL" = true ]; then
     log_error "Inter-node checks can only be used in sequential mode (without --parallel)."
+    usage; exit 1;
+fi
+if [ "$CONTINUE_ON_ERROR" = true ] && [ "$PARALLEL" = true ]; then
+    log_error "--continue-on-error can only be used in sequential mode (without --parallel)."
     usage; exit 1;
 fi
 
@@ -497,9 +504,14 @@ else
     for node in "${NODES[@]}"; do
         log_info "\n--- Executing on [${BOLD}$node${NC}] ---"
         if ! run_task "$node"; then
-            log_error "Task failed on node ${node}. Aborting rolling execution."
-            failed_nodes+=("$node") # Explicitly add to array for sequential mode
-            break
+            failed_nodes+=("$node")
+            if [ "$CONTINUE_ON_ERROR" = true ]; then
+                log_warn "Task failed on node ${node}, but --continue-on-error is set. Proceeding to next node."
+                continue
+            else
+                log_error "Task failed on node ${node}. Aborting rolling execution."
+                break
+            fi
         fi
 
         # If this is a Cassandra rolling operation, run the internal health check.
@@ -574,6 +586,7 @@ fi
     
 
     
+
 
 
 
