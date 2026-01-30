@@ -12,11 +12,34 @@ A standalone orchestration script is available at `scripts/cassy.sh`. This scrip
 
 ### Prerequisites
 
-The machine running the script must have **passwordless SSH access** (e.g., via SSH keys) to all target Cassandra nodes for the specified user.
+The machine running the script must have:
+*   **Passwordless SSH access** (e.g., via SSH keys) to all target Cassandra nodes for the specified user.
+*   The `jq` utility installed if using the `--json` output format.
+*   The `timeout` utility (part of `coreutils`) if using the `--timeout` feature.
 
 ### Usage
 
-The script can run any command or execute a local script file on your cluster nodes, either sequentially (default) or in parallel. Nodes can be specified statically or discovered dynamically using the `qv` inventory tool.
+The script can run any command or execute a local script file on your cluster nodes. Nodes can be specified statically or discovered dynamically using the `qv` inventory tool.
+
+### Options
+
+| Flag | Argument | Description |
+|---|---|---|
+| `-n`, `--nodes` | `<list>` | A comma-separated list of target node hostnames or IPs. |
+| `-f`, `--nodes-file` | `<path>` | A file containing a list of target nodes, one per line. |
+| `--node` | `<host>` | Specify a single target node. |
+| `--qv-query` | `"<query>"` | A quoted string of 'qv' flags to dynamically fetch a node list. |
+| `-c`, `--command` | `<command>` | The shell command to execute on each node. |
+| `-s`, `--script` | `<path>` | The path to a local script to copy and execute on each node. |
+| `-l`, `--user` | `<user>` | The SSH user to connect as. Defaults to the current user. |
+| `-P`, `--parallel` | | Execute on all nodes in parallel instead of sequentially. |
+| `--ssh-options` | `<opts>` | Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem"). |
+| `--dry-run` | | Show which nodes would be targeted and what command would run, without executing. |
+| `--json` | | Output results in a machine-readable JSON format. |
+| `--timeout` | `<seconds>` | Set a timeout in seconds for the command on each node. `0` for no timeout. |
+| `--output-dir`| `<path>` | Save the output from each node to a separate file in the specified directory. |
+| `-h`, `--help` | | Show the help message. |
+
 
 ### Examples
 
@@ -41,6 +64,21 @@ If your management node has the `qv` inventory tool, you can use it to fetch the
 
 # Run a cluster health check on all Cassandra nodes in the AWSLAB datacenter in parallel
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" -P -c "sudo cass-ops cluster-health"
+```
+
+**Advanced Usage:**
+```bash
+# Dry run: see what would happen without executing
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt" --dry-run -c "sudo reboot"
+
+# JSON output: get machine-readable results for automation
+./scripts/cassy.sh --nodes "node1,node2" --json -c "sudo cass-ops health"
+
+# Save output: log the output of each node to a separate file in the 'logs' directory
+./scripts/cassy.sh --nodes "node1,node2" --output-dir ./logs -c "cat /var/log/cassandra/system.log"
+
+# Timeout: run a command but kill it if it takes longer than 5 minutes
+./scripts/cassy.sh --node "node1" --timeout 300 -c "sudo cass-ops repair -k my_large_keyspace"
 ```
 
 For all options, run the script with the `--help` flag:
