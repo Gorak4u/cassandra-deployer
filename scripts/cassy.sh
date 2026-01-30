@@ -21,7 +21,7 @@ TIMEOUT=0 # 0 for no timeout
 RETRIES=0
 PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
-INTER_NODE_CHECK="" # Kept for backward compatibility but hidden
+PERFORM_INTER_NODE_CHECK=false
 ROLLING_OP=""
 
 # --- Color Codes ---
@@ -74,6 +74,7 @@ usage() {
     echo
     echo -e "${BOLD}Automation & Advanced Safety:${NC}"
     echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with an internal health check between each node."
+    echo -e "  --inter-node-check        In sequential mode, performs the built-in health check after each node. Essential for safe, custom rolling operations."
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
@@ -83,19 +84,23 @@ usage() {
     echo -e "--------------------------------------------------------------------------------"
     echo -e "${YELLOW}Robust Usage Examples:${NC}"
     echo
-    echo -e "${BOLD}1. Safe Rolling Restart of a Datacenter${NC}"
-    echo -e "   # Uses the built-in rolling operation with an internal, multi-step health check."
+    echo -e "${BOLD}1. Safe Rolling Restart of a Datacenter (Predefined Op)${NC}"
+    echo -e "   # Uses the --rolling-op shortcut with an internal health check."
     echo -e "   $0 --rolling-op restart --qv-query \"-r role_cassandra_pfpt -d AWSLAB\""
     echo
-    echo -e "${BOLD}2. Parallel Cluster-Wide Repair${NC}"
+    echo -e "${BOLD}2. Safe Rolling Operation for a Custom Command${NC}"
+    echo -e "   # Use --inter-node-check to apply the same safety to any command."
+    echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --inter-node-check -c \"sudo cass-ops cleanup\""
+    echo
+    echo -e "${BOLD}3. Parallel Cluster-Wide Repair${NC}"
     echo -e "   # Run repair on all Cassandra nodes in the SC4 datacenter in batches of 5."
     echo -e "   $0 --qv-query \"-r role_cassandra_pfpt -d SC4\" --parallel 5 -c \"sudo cass-ops repair\""
     echo
-    echo -e "${BOLD}3. Programmatic Health Auditing${NC}"
+    echo -e "${BOLD}4. Programmatic Health Auditing${NC}"
     echo -e "   # Get health from all nodes in JSON and use 'jq' to find failures."
     echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --json -c \"sudo cass-ops health --json\" | jq '.results[] | select(.status == \"FAILED\")'"
     echo
-    echo -e "${BOLD}4. Dry-Run Before a Destructive Operation${NC}"
+    echo -e "${BOLD}5. Dry-Run Before a Destructive Operation${NC}"
     echo -e "   # Always check which nodes you are about to decommission before running the command for real."
     echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --dry-run -c \"sudo cass-ops decommission\""
     echo
@@ -132,7 +137,7 @@ while [[ "$#" -gt 0 ]]; do
         --rolling-op) ROLLING_OP="$2"; shift ;;
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
-        --inter-node-check) INTER_NODE_CHECK="$2"; shift ;; # Hidden/deprecated flag
+        --inter-node-check) PERFORM_INTER_NODE_CHECK=true ;;
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
@@ -175,7 +180,10 @@ if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either 
 if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; exit 1; fi
 if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; exit 1; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
-if [ "$PARALLEL" = true ] && [ -n "$INTER_NODE_CHECK" ]; then log_error "--inter-node-check can only be used in sequential mode (without --parallel)."; exit 1; fi
+if [ "$PERFORM_INTER_NODE_CHECK" = true ] && [ "$PARALLEL" = true ]; then
+    log_error "--inter-node-check can only be used in sequential mode (without --parallel)."
+    usage; exit 1;
+fi
 
 
 if [ -n "$OUTPUT_DIR" ]; then
@@ -190,7 +198,6 @@ fi
 if [[ ! "$RETRIES" =~ ^[0-9]+$ ]]; then log_error "Retries must be a non-negative integer."; exit 1; fi
 if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-execution check script is not executable: $PRE_EXEC_CHECK"; exit 1; fi
 if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
-if [ -n "$INTER_NODE_CHECK" ] && [ ! -x "$INTER_NODE_CHECK" ]; then log_error "Inter-node check script is not executable: $INTER_NODE_CHECK"; exit 1; fi
 
 # --- Node Discovery ---
 if [ -n "$QV_QUERY" ]; then
@@ -255,7 +262,7 @@ if [ -n "$PRE_EXEC_CHECK" ]; then
 fi
 
 # Pre-flight health check for rolling operations
-if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
+if { [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; } && [ "$DRY_RUN" = false ]; then
     log_info "--- Running Pre-Rolling Operation Master Health Check ---"
     if ! _run_health_check "${NODES[0]}"; then
         log_error "Initial health check on node ${NODES[0]} failed. Aborting rolling operation before it starts."
@@ -452,23 +459,14 @@ else
             break
         fi
 
-        # If this is a rolling operation, run the internal health check.
-        if [ -n "$ROLLING_OP" ]; then
+        # If this is a rolling operation OR the user requested an inter-node check, run the internal health check.
+        if [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; then
             if ! _run_health_check "$node"; then
                 log_error "Inter-node health check failed after operating on node ${node}. Aborting rolling execution."
                 # The task itself succeeded, but the check failed. Manually add the node to the failure list.
                 failed_nodes+=("$node")
                 break
             fi
-        # This is for backward compatibility with the now-hidden --inter-node-check flag
-        elif [ -n "$INTER_NODE_CHECK" ]; then
-            log_info "--- Running external Inter-Node Check after operating on ${node} ---"
-            if ! "$INTER_NODE_CHECK" "$node"; then
-                log_error "External inter-node check failed after node ${node}. Aborting rolling execution."
-                failed_nodes+=("$node")
-                break
-            fi
-            log_success "External inter-node check passed."
         fi
     done
 fi
@@ -512,3 +510,5 @@ else
     done
     exit 1
 fi
+
+    
