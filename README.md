@@ -41,6 +41,7 @@ The script can run any command or execute a local script file on your cluster no
 | `--retries` | `<N>` | Number of times to retry a failed command on a node. Default: 0. |
 | `--pre-exec-check` | `<path>` | A local script to run before executing. If it fails, cassy.sh aborts. |
 | `--post-exec-check`| `<path>` | A local script to run after executing on all nodes. |
+| `--inter-node-check`| `<path>` | In sequential mode, a local script to run after each node. If it fails, the rolling execution stops. |
 | `-h`, `--help` | | Show the help message. |
 
 
@@ -49,21 +50,36 @@ The script can run any command or execute a local script file on your cluster no
 This section provides recipes for common, production-level Cassandra maintenance tasks using `cassy.sh`.
 
 #### **Pattern 1: Safe Rolling Restart of a Datacenter**
-A rolling restart is a common maintenance task. It must be done sequentially to ensure the cluster remains available. `cassy.sh`'s default sequential mode is perfect for this, as the on-node `cass-ops restart` script waits for the node to become healthy before exiting.
+A rolling restart is a common maintenance task. It must be done sequentially to ensure the cluster remains available. The `--inter-node-check` flag is critical for ensuring the cluster is healthy before moving to the next node.
 
+First, create a simple health check script, for example `check_cluster.sh`:
 ```bash
-# Restart all Cassandra nodes in the AWSLAB datacenter, one by one.
-./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" -c "sudo cass-ops restart"
+#!/bin/bash
+# check_cluster.sh
+echo "Running health check against cluster..."
+# Use cassy.sh to run a health check on a *single* known-good node.
+# If this fails, the whole rolling restart will stop.
+./scripts/cassy.sh --node cassandra-seed-1.example.com -c "sudo cass-ops cluster-health --silent"
+```
+*Make sure this script is executable (`chmod +x check_cluster.sh`)*.
+
+Now, use it in your rolling restart command:
+```bash
+# Restart all Cassandra nodes in the AWSLAB datacenter, one by one,
+# running a health check after each node restart.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" \
+  -c "sudo cass-ops restart" \
+  --inter-node-check ./check_cluster.sh
 ```
 
 #### **Pattern 2: Parallel Cluster-Wide Repair**
-Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster. For very large clusters, it's best practice to run it per-datacenter to control cross-datacenter network traffic. You can also use batch-mode parallel execution to limit the impact.
+Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster. For very large clusters, it's best practice to run it per-datacenter to control cross-datacenter network traffic. You can also use the managed parallel execution to limit the impact.
 
 ```bash
 # Run repair on all Cassandra nodes in the SC4 datacenter simultaneously.
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel -c "sudo cass-ops repair"
 
-# Run repair in batches of 5 nodes at a time.
+# Run repair in batches of 5 nodes at a time, using the efficient worker pool model.
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel 5 -c "sudo cass-ops repair"
 ```
 
@@ -87,7 +103,7 @@ The `--parallel` (`-P`) flag is powerful but potentially dangerous. Running an o
     *   `cass-ops repair` (though consider DC-by-DC or batching for large clusters)
     *   `cass-ops cleanup`
 
-*   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`):**
+*   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`), ideally with `--inter-node-check`:**
     *   `cass-ops restart`
     *   `cass-ops reboot`
     *   `cass-ops decommission`

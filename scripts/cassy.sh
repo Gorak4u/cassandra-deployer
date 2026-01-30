@@ -21,6 +21,7 @@ TIMEOUT=0 # 0 for no timeout
 RETRIES=0
 PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
+INTER_NODE_CHECK=""
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -72,6 +73,7 @@ usage() {
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
+    echo -e "  --inter-node-check <path> A local script to run after each node in sequential mode. If it fails, the rolling execution stops."
     echo
     echo -e "  -h, --help                Show this help message."
     exit 1
@@ -83,10 +85,7 @@ while [[ "$#" -gt 0 ]]; do
         -n|--nodes) IFS=',' read -r -a NODES <<< "$2"; shift ;;
         -f|--nodes-file)
             if [ ! -f "$2" ]; then log_error "Node file not found: $2"; exit 1; fi
-            NODES=()
-            while IFS= read -r line; do
-                if [ -n "$line" ]; then NODES+=("$line"); fi
-            done < "$2"
+            mapfile -t NODES < "$2"
             shift ;;
         --node) NODES=("$2"); shift ;;
         --qv-query) QV_QUERY="$2"; shift ;;
@@ -109,6 +108,7 @@ while [[ "$#" -gt 0 ]]; do
         --retries) RETRIES="$2"; shift ;;
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
+        --inter-node-check) INTER_NODE_CHECK="$2"; shift ;;
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage ;;
     esac
@@ -121,6 +121,8 @@ if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either 
 if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command or --script."; usage; fi
 if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
+if [ "$PARALLEL" = true ] && [ -n "$INTER_NODE_CHECK" ]; then log_error "--inter-node-check can only be used in sequential mode (without --parallel)."; exit 1; fi
+
 
 if [ -n "$OUTPUT_DIR" ]; then
     if ! mkdir -p "$OUTPUT_DIR"; then log_error "Cannot create or write to output directory: $OUTPUT_DIR"; exit 1; fi
@@ -134,6 +136,7 @@ fi
 if [[ ! "$RETRIES" =~ ^[0-9]+$ ]]; then log_error "Retries must be a non-negative integer."; exit 1; fi
 if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-execution check script is not executable: $PRE_EXEC_CHECK"; exit 1; fi
 if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
+if [ -n "$INTER_NODE_CHECK" ] && [ ! -x "$INTER_NODE_CHECK" ]; then log_error "Inter-node check script is not executable: $INTER_NODE_CHECK"; exit 1; fi
 
 # --- Node Discovery ---
 if [ -n "$QV_QUERY" ]; then
@@ -141,11 +144,7 @@ if [ -n "$QV_QUERY" ]; then
     if ! command -v qv &> /dev/null; then log_error "'qv' command not found. Cannot fetch inventory."; exit 1; fi
     
     log_info "Running query: qv -t ${QV_QUERY}"
-    # Using a while-read loop for better portability than mapfile
-    NODES=()
-    while IFS= read -r line; do
-        if [ -n "$line" ]; then NODES+=("$line"); fi
-    done < <(eval "qv -t $QV_QUERY" 2>/dev/null)
+    mapfile -t NODES < <(eval "qv -t $QV_QUERY" 2>/dev/null)
 
     if [ ${#NODES[@]} -eq 0 ]; then log_error "The qv query returned no hosts. Aborting."; exit 1; fi
 fi
@@ -205,9 +204,10 @@ log_info "Executing $ACTION_DESC"
 
 run_task() {
     local node="$1"
-    local output
+    local output_buffer=""
     local rc=0
     local attempt
+    local REMOTE_SCRIPT_PATH
     
     for attempt in $(seq 1 $((RETRIES + 1))); do
         # Only log retry attempts, not the first one.
@@ -216,21 +216,21 @@ run_task() {
             sleep 3 # Brief pause before retry
         fi
         
-        local REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$_${attempt}"
+        REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$_${attempt}"
         
         local TIMEOUT_CMD=""
         if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
         
-        local NODE_LOG_FILE=""
-        if [ -n "$OUTPUT_DIR" ]; then NODE_LOG_FILE="${OUTPUT_DIR}/${node}.log"; fi
-        
-        output=$({
+        output_buffer=$({
             if [ -n "$COMMAND" ]; then
-                exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
+                # Use stdbuf to make output line-buffered
+                stdbuf -oL -eL $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
             elif [ -n "$SCRIPT_PATH" ]; then
+                # The script execution part is more complex to buffer line by line.
+                # It's better to capture its full output at once.
                 (
-                  exec $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
-                  exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
+                  scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
+                  ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
                 )
             fi
         } 2>&1)
@@ -243,78 +243,72 @@ run_task() {
     done
 
     # The final status is based on the last attempt.
-    if [ -n "$NODE_LOG_FILE" ]; then echo "$output" > "$NODE_LOG_FILE"; fi
+    if [ -n "$OUTPUT_DIR" ]; then echo "$output_buffer" > "${OUTPUT_DIR}/${node}.log"; fi
 
     if [ "$JSON_OUTPUT" = true ]; then
         local status_text="SUCCESS"; if [ $rc -ne 0 ]; then status_text="FAILED"; fi
         jq -n --arg node "$node" \
               --arg status "$status_text" \
               --argjson rc "$rc" \
-              --arg output "$output" \
+              --arg output "$output_buffer" \
               '{node: $node, status: $status, exit_code: $rc, output: $output}' > "${JSON_TEMP_DIR}/${node}.json"
     else
+        # Print the buffered output all at once
         echo -e "--- [${BOLD}$node${NC}] START ---"
-        echo "$output"
+        echo "$output_buffer"
         if [ $rc -ne 0 ]; then
             echo -e "--- [${BOLD}$node${NC}] ${RED}FAILED (Exit Code: $rc)${NC} ---"
         else
             echo -e "--- [${BOLD}$node${NC}] ${GREEN}OK${NC} ---"
         fi
     fi
-
+    
     # Track failures for the final exit code
     if [ $rc -ne 0 ]; then
-        if [ "$PARALLEL" = true ]; then
+        # This is safe for both parallel and sequential mode.
+        # In parallel mode, it's a file. In sequential, it's an array.
+        # The lock makes appending to the file safe.
+        (
+            flock 200
             echo "$node" >> "failed_nodes.$$"
-        else
-            failed_nodes+=("$node")
-        fi
+        ) 200>failed_nodes.lock
     fi
+    # The return code of this function is the return code of the command
+    return $rc
 }
 
 if [ "$PARALLEL" = true ]; then
     # Create a temporary file for tracking failed nodes in parallel mode.
-    # This will be cleaned up by the trap at the end.
     touch "failed_nodes.$$"
-    trap 'rm -f "failed_nodes.$$";' EXIT
+    # Create a lock file for safe appends
+    touch "failed_nodes.lock"
+    trap 'rm -f "failed_nodes.$$" "failed_nodes.lock"' EXIT
 
     if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
         # --- Worker Pool Parallel Execution ---
         log_info "--- Executing with a maximum of ${PARALLEL_BATCH_SIZE} concurrent jobs ---"
 
-        # Create a named pipe (FIFO) to manage concurrency.
         fifo=$(mktemp -u)
-        mkfifo "$fifo" || { log_error "Failed to create FIFO for concurrency management."; exit 1; }
-        
-        # Open the FIFO on a file descriptor (3). This prevents blocking and race conditions.
+        mkfifo "$fifo"
         exec 3<>"$fifo"
-        
-        # The file can be deleted now; the descriptor will persist for the life of this shell.
         rm "$fifo"
 
-        # "Prime" the FIFO with a number of "tokens" equal to the parallel batch size.
         for (( i=0; i<PARALLEL_BATCH_SIZE; i++ )); do
             printf '\n' >&3
         done
 
         all_pids=()
         for node in "${NODES[@]}"; do
-            # "Acquire" a token by reading one line from the FIFO. This blocks if no tokens are available.
             read -r -u 3
-
-            # Once a token is acquired, run the task in a background subshell.
             (
                 run_task "$node"
-                # When the task is done, write a token back to the FIFO, allowing another job to start.
                 printf '\n' >&3
             ) &
-            all_pids+=($!) # Store the PID of the subshell.
+            all_pids+=($!)
         done
 
         log_info "All jobs started. Waiting for the last running jobs to finish..."
         wait "${all_pids[@]}"
-
-        # Close the file descriptor.
         exec 3>&-
     else
         # --- Full Parallel Execution (All nodes at once) ---
@@ -325,14 +319,31 @@ if [ "$PARALLEL" = true ]; then
         done
         log_info "Waiting for all parallel jobs to complete..."
         for pid in "${pids[@]}"; do
-            wait "$pid"
+            wait "$pid" || true # a failed command should not stop the wait
         done
     fi
 else
     # --- Sequential Execution Logic ---
     for node in "${NODES[@]}"; do
         log_info "\n--- Executing on [${BOLD}$node${NC}] ---"
-        run_task "$node"
+        if ! run_task "$node"; then
+            log_error "Task failed on node ${node}. Aborting rolling execution."
+            # The failed node is already added to the list by run_task
+            break
+        fi
+
+        # If an inter-node check is specified, run it.
+        if [ -n "$INTER_NODE_CHECK" ]; then
+            log_info "--- Running Inter-Node Check after operating on ${node} ---"
+            # Pass the hostname of the node that was just operated on to the check script
+            if ! "$INTER_NODE_CHECK" "$node"; then
+                log_error "Inter-node check failed after node ${node}. Aborting rolling execution."
+                # Manually add the node that caused the failure, as the task itself succeeded.
+                failed_nodes+=("$node")
+                break
+            fi
+            log_success "Inter-node check passed."
+        fi
     fi
 fi
 
@@ -340,10 +351,7 @@ fi
 # --- Collect Parallel Failures ---
 if [ "$PARALLEL" = true ]; then
     if [ -f "failed_nodes.$$" ]; then
-        while IFS= read -r line; do
-            if [ -n "$line" ]; then failed_nodes+=("$line"); fi
-        done < "failed_nodes.$$"
-        rm "failed_nodes.$$"
+        mapfile -t failed_nodes < "failed_nodes.$$"
     fi
 fi
 
