@@ -20,13 +20,6 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
     }
   }
 
-  # Construct the throttle flag if the rate is defined
-  $throttle_flag = if $backup_throttle_rate and $backup_throttle_rate != '' {
-    " --throttle ${backup_throttle_rate}"
-  } else {
-    ''
-  }
-
   if $manage_full_backups {
     $full_schedule_parts = split($full_backup_schedule, ' ')
     if size($full_schedule_parts) != 5 {
@@ -35,7 +28,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
 
     cron { 'cassandra-full-backup':
       ensure   => 'present',
-      command  => "${manage_bin_dir}/cass-ops backup${throttle_flag} >> ${full_backup_log_file} 2>&1",
+      command  => "${manage_bin_dir}/cass-ops backup >> ${full_backup_log_file} 2>&1",
       user     => 'root',
       minute   => $full_schedule_parts[0],
       hour     => $full_schedule_parts[1],
@@ -57,7 +50,7 @@ class cassandra_pfpt::backup inherits cassandra_pfpt {
 
     cron { 'cassandra-incremental-backup':
       ensure   => 'present',
-      command  => "${manage_bin_dir}/cass-ops incremental-backup${throttle_flag} >> ${incremental_backup_log_file} 2>&1",
+      command  => "${manage_bin_dir}/cass-ops incremental-backup >> ${incremental_backup_log_file} 2>&1",
       user     => 'root',
       minute   => $inc_schedule_parts[0],
       hour     => $inc_schedule_parts[1],

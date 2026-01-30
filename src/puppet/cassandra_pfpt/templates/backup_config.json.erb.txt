@@ -13,6 +13,7 @@
     "upload_streaming": <%= @backup_upload_streaming %>,
     "parallelism": <%= @backup_parallelism %>,
     "s3_retention_period": <%= @s3_retention_period %>,
+    "throttle_rate": "<%= @backup_throttle_rate %>",
     "encryption_key": "<%= @backup_encryption_key.unwrap %>",
     "backup_exclude_keyspaces": <%= @backup_exclude_keyspaces.to_json %>,
     "backup_exclude_tables": <%= @backup_exclude_tables.to_json %>,

@@ -26,18 +26,10 @@ log_message() {
   echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-log_info() {
-    log_message "${BLUE}$1${NC}"
-}
-log_success() {
-    log_message "${GREEN}$1${NC}"
-}
-log_warn() {
-    log_message "${YELLOW}$1${NC}"
-}
-log_error() {
-    log_message "${RED}$1${NC}"
-}
+log_info() { log_message "${BLUE}$1${NC}"; }
+log_success() { log_message "${GREEN}$1${NC}"; }
+log_warn() { log_message "${YELLOW}$1${NC}"; }
+log_error() { log_message "${RED}$1${NC}"; }
 
 # --- Pre-flight Checks ---
 # Check for required tools first, so we can log errors if they are missing.
@@ -75,16 +67,23 @@ BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_
 S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
-THROTTLE_RATE=""
 
 # --- Argument Parsing ---
+THROTTLE_OVERRIDE=""
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --throttle) THROTTLE_RATE="$2"; shift ;;
+        --throttle) THROTTLE_OVERRIDE="$2"; shift ;;
         *) log_error "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
 done
+
+# If a throttle override is provided via command line, it wins. Otherwise, use the config file value.
+if [ -n "$THROTTLE_OVERRIDE" ]; then
+    THROTTLE_RATE="$THROTTLE_OVERRIDE"
+else
+    THROTTLE_RATE=$(jq -r '.throttle_rate // ""' "$CONFIG_FILE")
+fi
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -447,7 +446,7 @@ process_table_backup() {
     S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
     S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
     S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
-    THROTTLE_PREFIX=""
+    local THROTTLE_PREFIX=""
     if [ -n "$THROTTLE_RATE" ]; then
         THROTTLE_PREFIX="AWS_MAX_BANDWIDTH=$THROTTLE_RATE"
     fi

@@ -31,7 +31,7 @@ log_error() { log_message "${RED}$1${NC}"; }
 # --- Argument Parsing ---
 MODE="default"
 BACKUP_TAG_OVERRIDE=""
-THROTTLE_RATE=""
+THROTTLE_OVERRIDE=""
 
 usage() {
     log_message "${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}"
@@ -44,7 +44,7 @@ usage() {
     log_message ""
     log_message "Options:"
     log_message "  --tag <timestamp>           The timestamp tag (YYYY-MM-DD-HH-MM) of the backup set to upload. Required for --upload-only."
-    log_message "  --throttle <rate>           Throttle S3 upload speed (e.g., 50M/s, 1G/s). Uses AWS_MAX_BANDWIDTH."
+    log_message "  --throttle <rate>           Throttle S3 upload speed (e.g., 50M/s, 1G/s). Overrides the default from config."
     log_message "  -h, --help                  Show this help message."
     exit 1
 }
@@ -55,7 +55,7 @@ while [[ "$#" -gt 0 ]]; do
         --local-only) MODE="local_only" ;;
         --upload-only) MODE="upload_only" ;;
         --tag) BACKUP_TAG_OVERRIDE="$2"; shift ;;
-        --throttle) THROTTLE_RATE="$2"; shift ;;
+        --throttle) THROTTLE_OVERRIDE="$2"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
@@ -84,6 +84,10 @@ CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
+THROTTLE_RATE_FROM_CONFIG=$(jq -r '.throttle_rate // ""' "$CONFIG_FILE")
+
+# Use CLI override if present, otherwise use the config file's value
+THROTTLE_RATE="${THROTTLE_OVERRIDE:-$THROTTLE_RATE_FROM_CONFIG}"
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then

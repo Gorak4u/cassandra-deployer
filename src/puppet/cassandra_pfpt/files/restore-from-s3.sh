@@ -30,6 +30,7 @@ MODE=""
 AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
 SOURCE_HOST_OVERRIDE=""
+THROTTLE_OVERRIDE=""
 THROTTLE_RATE=""
 EFFECTIVE_S3_BUCKET=""
 EFFECTIVE_SOURCE_HOST=""
@@ -93,7 +94,7 @@ Options:
   --table <table>               Optional. Narrows the granular restore to a single table.
   --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname.
   --s3-bucket <name>            Override the S3 bucket from config.json.
-  --throttle <rate>             Throttle S3 download speed (e.g., 50M/s, 1G/s). Uses AWS_MAX_BANDWIDTH.
+  --throttle <rate>             Throttle S3 download speed (e.g., 50M/s, 1G/s). Overrides the default from config.
   --yes                         Skips all interactive confirmation prompts. Use with caution.
 EOF
     exit 1
@@ -872,6 +873,7 @@ SSL_TRUSTSTORE_PATH=$(jq -r '.ssl_truststore_path // "null"' "$CONFIG_FILE")
 SSL_TRUSTSTORE_PASSWORD=$(jq -r '.ssl_truststore_password // "null"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
+THROTTLE_RATE_FROM_CONFIG=$(jq -r '.throttle_rate // ""' "$CONFIG_FILE")
 
 # Validate essential configuration
 if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_error "'cassandra_conf_dir' is not set or invalid in $CONFIG_FILE."; exit 1; fi
@@ -911,7 +913,7 @@ while [[ "$#" -gt 0 ]]; do
         --table) TABLE_NAME="$2"; shift ;;
         --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
         --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
-        --throttle) THROTTLE_RATE="$2"; shift ;;
+        --throttle) THROTTLE_OVERRIDE="$2"; shift ;;
         --full-restore) MODE="full" ;;
         --download-only) MODE="download_only" ;;
         --download-and-restore) MODE="download_and_restore" ;;
@@ -927,6 +929,8 @@ done
 # Redefine effective variables after parsing args
 EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$S3_BUCKET_NAME}
 EFFECTIVE_SOURCE_HOST=${SOURCE_HOST_OVERRIDE:-$HOSTNAME}
+THROTTLE_RATE="${THROTTLE_OVERRIDE:-$THROTTLE_RATE_FROM_CONFIG}"
+export THROTTLE_RATE # Make available to sub-shells spawned by xargs
 
 # Validate arguments
 if [ -z "$MODE" ]; then

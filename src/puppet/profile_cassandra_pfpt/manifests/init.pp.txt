@@ -171,7 +171,7 @@ class profile_cassandra_pfpt {
   $backup_upload_streaming          = lookup('profile_cassandra_pfpt::backup_upload_streaming', { 'default_value' => false })
   $backup_parallelism               = lookup('profile_cassandra_pfpt::backup_parallelism', { 'default_value' => 4 })
   $s3_retention_period              = lookup('profile_cassandra_pfpt::s3_retention_period', { 'default_value' => 15 })
-  $backup_throttle_rate             = lookup('profile_cassandra_pfpt::backup_throttle_rate', { 'default_value' => undef })
+  $backup_throttle_rate             = lookup('profile_cassandra_pfpt::backup_throttle_rate', { 'default_value' => '50M/s' })
   $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
   $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
