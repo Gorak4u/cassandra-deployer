@@ -69,13 +69,17 @@ usage() {
 
 # --- Function to run cassy.sh commands ---
 run_cassy() {
-    local cmd_string="$CASSY_SCRIPT_PATH $*"
-    log_info "Executing: ${CYAN}${cmd_string}${NC}"
+    # This function logs the command and executes it, respecting DRY_RUN.
+    # It passes all its arguments directly to the cassy.sh script.
+    local args=("$@")
+    log_info "Preparing to execute: ${CYAN}${CASSY_SCRIPT_PATH} ${args[*]}${NC}"
+    
     if [ "$DRY_RUN" = true ]; then
+        log_warn "DRY RUN: Command not executed."
         return 0
     fi
-    # Execute the command
-    eval "$cmd_string"
+    # Execute the command directly, which is safer than using eval.
+    "$CASSY_SCRIPT_PATH" "${args[@]}"
 }
 
 # --- Argument Parsing ---
@@ -99,8 +103,8 @@ if [ -z "$OLD_DC_QUERY" ] || [ -z "$NEW_DC_QUERY" ] || [ -z "$OLD_DC_NAME" ] || 
     usage
     exit 1
 fi
-if [ ! -f "$CASSY_SCRIPT_PATH" ]; then
-    log_error "cassy.sh script not found at: $CASSY_SCRIPT_PATH"
+if [ ! -x "$CASSY_SCRIPT_PATH" ]; then
+    log_error "cassy.sh script not found or not executable at: $CASSY_SCRIPT_PATH"
     exit 1
 fi
 if ! command -v qv &> /dev/null; then
@@ -129,8 +133,8 @@ NEW_DC_RUN_NODE=${NEW_NODES[0]}
 log_info "Performing validation checks..."
 # Check Cluster Name
 log_info "Checking cluster names match..."
-CLUSTER_OLD_NAME=$(run_cassy --node "$OLD_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name==\"schema_agreement\") | .details' | grep 'Name:' | awk '{print $2}')
-CLUSTER_NEW_NAME=$(run_cassy --node "$NEW_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name==\"schema_agreement\") | .details' | grep 'Name:' | awk '{print $2}')
+CLUSTER_OLD_NAME=$("$CASSY_SCRIPT_PATH" --node "$OLD_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
+CLUSTER_NEW_NAME=$("$CASSY_SCRIPT_PATH" --node "$NEW_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
 
 if [ "$CLUSTER_OLD_NAME" != "$CLUSTER_NEW_NAME" ]; then
     log_error "Cluster names do not match! Old DC: '$CLUSTER_OLD_NAME', New DC: '$CLUSTER_NEW_NAME'. Aborting."
@@ -142,6 +146,7 @@ log_success "Cluster names match: $CLUSTER_OLD_NAME"
 log_info "--- Phase 2: Alter System Keyspace Topology ---"
 log_warn "This step will alter system keyspaces on the OLD datacenter to include the NEW datacenter."
 
+# The RF of 3 is hardcoded as a sensible production default.
 ALTER_AUTH_CMD="ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', '$OLD_DC_NAME': 3, '$NEW_DC_NAME': 3};"
 ALTER_DIST_CMD="ALTER KEYSPACE system_distributed WITH replication = {'class': 'NetworkTopologyStrategy', '$OLD_DC_NAME': 3, '$NEW_DC_NAME': 3};"
 
@@ -155,7 +160,8 @@ log_info "--- Phase 3: Rolling Restart of New Datacenter ---"
 log_warn "This will perform a rolling restart of all nodes in the new DC (${NEW_DC_NAME}) to pick up the new topology."
 log_warn "This assumes cassandra.yaml on the new nodes has been updated (via Puppet/Hiera) to include seeds from the old DC."
 
-run_cassy --rolling-op restart --qv-query "\"$NEW_DC_QUERY\""
+# Pass the qv query with internal quotes escaped for correct execution
+run_cassy --rolling-op restart --qv-query "$NEW_DC_QUERY"
 
 log_success "Rolling restart of new datacenter completed."
 
@@ -163,14 +169,13 @@ log_success "Rolling restart of new datacenter completed."
 log_info "--- Phase 4: Data Rebuild ---"
 log_warn "This will run 'nodetool rebuild' sequentially on each node in the new DC to stream data from the old DC."
 
-# Construct the command to run on each node of the new DC
 REBUILD_CMD="sudo /usr/local/bin/cass-ops rebuild $OLD_DC_NAME"
 
 # Use cassy.sh to run the rebuild command sequentially across the new DC
-run_cassy --qv-query "\"$NEW_DC_QUERY\"" -c "\"$REBUILD_CMD\""
+run_cassy --qv-query "$NEW_DC_QUERY" -c "$REBUILD_CMD"
 
 log_success "Data rebuild process completed for the new datacenter."
 log_info "--- Multi-DC Join Process Finished ---"
-log_info "Run 'cassy --qv-query \"$OLD_DC_QUERY\" -c \"nodetool status\"' to verify cluster state."
+log_info "Run '$CASSY_SCRIPT_PATH --qv-query \"$OLD_DC_QUERY\" -c \"nodetool status\"' to verify cluster state."
 
 exit 0

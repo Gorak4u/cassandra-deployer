@@ -67,13 +67,17 @@ usage() {
 
 # --- Function to run cassy.sh commands ---
 run_cassy() {
-    local cmd_string="$CASSY_SCRIPT_PATH $*"
-    log_info "Executing: ${CYAN}${cmd_string}${NC}"
+    # This function logs the command and executes it, respecting DRY_RUN.
+    # It passes all its arguments directly to the cassy.sh script.
+    local args=("$@")
+    log_info "Preparing to execute: ${CYAN}${CASSY_SCRIPT_PATH} ${args[*]}${NC}"
+    
     if [ "$DRY_RUN" = true ]; then
+        log_warn "DRY RUN: Command not executed."
         return 0
     fi
-    # Execute the command
-    eval "$cmd_string"
+    # Execute the command directly, which is safer than using eval.
+    "$CASSY_SCRIPT_PATH" "${args[@]}"
 }
 
 # --- Argument Parsing ---
@@ -97,8 +101,8 @@ if [ -z "$DC1_QUERY" ] || [ -z "$DC2_QUERY" ] || [ -z "$DC1_NAME" ] || [ -z "$DC
     usage
     exit 1
 fi
-if [ ! -f "$CASSY_SCRIPT_PATH" ]; then
-    log_error "cassy.sh script not found at: $CASSY_SCRIPT_PATH"
+if [ ! -x "$CASSY_SCRIPT_PATH" ]; then
+    log_error "cassy.sh script not found or not executable at: $CASSY_SCRIPT_PATH"
     exit 1
 fi
 if ! command -v qv &> /dev/null; then
@@ -129,6 +133,7 @@ DC2_RUN_NODE=${DC2_NODES[0]}
 log_info "--- Phase 2: Isolate $DC1_NAME by Altering its System Keyspace Topology ---"
 log_warn "This step will alter system keyspaces on $DC1_NAME to remove $DC2_NAME from replication."
 
+# The RF of 3 is hardcoded as a sensible production default.
 ALTER_AUTH_CMD="ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', '$DC1_NAME': 3};"
 ALTER_DIST_CMD="ALTER KEYSPACE system_distributed WITH replication = {'class': 'NetworkTopologyStrategy', '$DC1_NAME': 3};"
 
@@ -140,7 +145,7 @@ log_success "System keyspace replication updated on $DC1_NAME."
 # --- Phase 3: Rolling Restart of DC1 ---
 log_info "--- Phase 3: Rolling Restart of $DC1_NAME ---"
 log_warn "This will perform a rolling restart of all nodes in $DC1_NAME to pick up the new isolated topology."
-run_cassy --rolling-op restart --qv-query "\"$DC1_QUERY\""
+run_cassy --rolling-op restart --qv-query "$DC1_QUERY"
 log_success "Rolling restart of $DC1_NAME completed."
 
 # --- Phase 4: Alter Topology on DC2 ---
@@ -158,14 +163,12 @@ log_success "System keyspace replication updated on $DC2_NAME."
 # --- Phase 5: Rolling Restart of DC2 ---
 log_info "--- Phase 5: Rolling Restart of $DC2_NAME ---"
 log_warn "This will perform a rolling restart of all nodes in $DC2_NAME to pick up its new isolated topology."
-run_cassy --rolling-op restart --qv-query "\"$DC2_QUERY\""
+run_cassy --rolling-op restart --qv-query "$DC2_QUERY"
 log_success "Rolling restart of $DC2_NAME completed."
 
 log_info "--- Multi-DC Split Process Finished ---"
 log_warn "IMPORTANT: The final step is to apply firewall rules to prevent network traffic between the two datacenters."
 log_info "The two datacenters should now be operating as independent clusters."
-log_info "Run 'cassy.sh --qv-query \"$DC1_QUERY\" -c \"nodetool status\"' and 'cassy.sh --qv-query \"$DC2_QUERY\" -c \"nodetool status\"' to verify each cluster's state."
+log_info "Run '$CASSY_SCRIPT_PATH --qv-query \"$DC1_QUERY\" -c \"nodetool status\"' and '$CASSY_SCRIPT_PATH --qv-query \"$DC2_QUERY\" -c \"nodetool status\"' to verify each cluster's state."
 
 exit 0
-
-    

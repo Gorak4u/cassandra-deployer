@@ -60,12 +60,17 @@ usage() {
 
 # --- Function to run cassy.sh commands ---
 run_cassy() {
-    local cmd_string="$CASSY_SCRIPT_PATH $*"
-    log_info "Executing: ${CYAN}${cmd_string}${NC}"
+    # This function logs the command and executes it, respecting DRY_RUN.
+    # It passes all its arguments directly to the cassy.sh script.
+    local args=("$@")
+    log_info "Preparing to execute: ${CYAN}${CASSY_SCRIPT_PATH} ${args[*]}${NC}"
+    
     if [ "$DRY_RUN" = true ]; then
+        log_warn "DRY RUN: Command not executed."
         return 0
     fi
-    eval "$cmd_string"
+    # Execute the command directly, which is safer than using eval.
+    "$CASSY_SCRIPT_PATH" "${args[@]}"
 }
 
 # --- Argument Parsing ---
@@ -88,8 +93,8 @@ if [ -z "$QV_QUERY" ] || [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ]; then
     usage
     exit 1
 fi
-if [ ! -f "$CASSY_SCRIPT_PATH" ]; then
-    log_error "cassy.sh script not found at: $CASSY_SCRIPT_PATH"
+if [ ! -x "$CASSY_SCRIPT_PATH" ]; then
+    log_error "cassy.sh script not found or not executable at: $CASSY_SCRIPT_PATH"
     exit 1
 fi
 if ! command -v qv &> /dev/null; then
@@ -112,7 +117,8 @@ RUN_NODE=${NODES[0]}
 log_info "Discovered ${#NODES[@]} nodes in the cluster."
 
 log_info "Validating current cluster name on node '$RUN_NODE'..."
-CURRENT_NAME=$(run_cassy --node "$RUN_NODE" --json -c "cqlsh -e \"SELECT cluster_name FROM system.local;\"" | jq -r '.results[0].output | split("\n")[2] | trim')
+# The parsing here is brittle, but reflects the line-based output of cqlsh.
+CURRENT_NAME=$("$CASSY_SCRIPT_PATH" --node "$RUN_NODE" --json -c "cqlsh -e \"SELECT cluster_name FROM system.local;\"" | jq -r '.results[0].output | split("\n")[2] | trim')
 
 if [ "$CURRENT_NAME" != "$OLD_NAME" ]; then
     log_error "Validation failed! The cluster's current name is '$CURRENT_NAME', not '$OLD_NAME' as specified."
@@ -133,23 +139,23 @@ fi
 # --- Phase 2: Live Update of system.local ---
 log_info "--- Phase 2: Updating cluster name in system.local (live) ---"
 UPDATE_CQL_CMD="cqlsh -e \"UPDATE system.local SET cluster_name = '${NEW_NAME}' WHERE key='local';\""
-run_cassy --qv-query "\"$QV_QUERY\"" -P -c "\"$UPDATE_CQL_CMD\""
+run_cassy --qv-query "$QV_QUERY" -P -c "$UPDATE_CQL_CMD"
 log_success "system.local updated on all nodes."
 
 # --- Phase 3: Stop Cluster ---
 log_info "--- Phase 3: Stopping all Cassandra nodes ---"
-run_cassy --qv-query "\"$QV_QUERY\"" -P -c "'sudo /usr/local/bin/cass-ops stop'"
+run_cassy --qv-query "$QV_QUERY" -P -c 'sudo /usr/local/bin/cass-ops stop'
 log_success "All Cassandra services stopped."
 
 # --- Phase 4: Update Config Files ---
 log_info "--- Phase 4: Updating cassandra.yaml on all nodes ---"
 SED_CMD="sudo sed -i -e \"s/cluster_name: '${OLD_NAME}'/cluster_name: '${NEW_NAME}'/g\" /etc/cassandra/conf/cassandra.yaml"
-run_cassy --qv-query "\"$QV_QUERY\"" -P -c "\"$SED_CMD\""
+run_cassy --qv-query "$QV_QUERY" -P -c "$SED_CMD"
 log_success "cassandra.yaml updated on all nodes."
 
 # --- Phase 5: Start Cluster ---
 log_info "--- Phase 5: Starting all Cassandra nodes ---"
-run_cassy --qv-query "\"$QV_QUERY\"" -P -c "'sudo systemctl start cassandra'"
+run_cassy --qv-query "$QV_QUERY" -P -c 'sudo systemctl start cassandra'
 log_success "Start command issued to all nodes."
 
 # --- Final Instructions ---
