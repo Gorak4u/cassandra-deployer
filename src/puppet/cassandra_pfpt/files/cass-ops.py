@@ -34,6 +34,7 @@ COMMAND_CATEGORIES = {
         'backup-verify': ('Verify the integrity and restorability of the latest backup set.', 'verify-backup.sh', 'readonly'),
         'upgrade-check': ('Run pre-flight checks before a major version upgrade.', 'cassandra-upgrade-precheck.sh', 'readonly'),
         'tombstone-scan': ('Scan tables for high tombstone counts.', 'tombstone-scan.sh', 'readonly'),
+        'sstabledump': ('Inspect the content of SSTables for a given table.', 'sstabledump.sh', 'readonly'),
     },
     "Node Lifecycle (High-Impact / Destructive)": {
         'stop': ('Safely drain and stop the Cassandra service.', 'stop-node.sh', 'destructive'),
