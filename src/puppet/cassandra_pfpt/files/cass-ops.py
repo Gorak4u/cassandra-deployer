@@ -33,6 +33,7 @@ COMMAND_CATEGORIES = {
         'backup-status': ('Check the status of the last completed backup for a node.', 'backup-status.sh', 'readonly'),
         'backup-verify': ('Verify the integrity and restorability of the latest backup set.', 'verify-backup.sh', 'readonly'),
         'upgrade-check': ('Run pre-flight checks before a major version upgrade.', 'cassandra-upgrade-precheck.sh', 'readonly'),
+        'tombstone-scan': ('Scan tables for high tombstone counts.', 'tombstone-scan.sh', 'readonly'),
     },
     "Node Lifecycle (High-Impact / Destructive)": {
         'stop': ('Safely drain and stop the Cassandra service.', 'stop-node.sh', 'destructive'),
@@ -160,5 +161,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-    
