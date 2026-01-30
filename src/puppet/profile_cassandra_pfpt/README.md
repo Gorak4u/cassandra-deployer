@@ -16,6 +16,7 @@
     1.  [Node and Cluster Health Checks](#node-and-cluster-health-checks)
     2.  [Node Lifecycle Management](#node-lifecycle-management)
     3.  [Data and Maintenance Operations](#data-and-maintenance-operations)
+    4.  [Cluster-Wide Operations (Advanced)](#cluster-wide-operations-advanced)
 6.  [Automated Maintenance Guide](#automated-maintenance-guide)
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
@@ -157,8 +158,9 @@ usage: cass-ops [-h] <command> ...
 Unified operations script for Cassandra.
 
 Available Commands:
-  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,backup-verify,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
+  {run-on-cluster,health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,backup-verify,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
 
+  run-on-cluster      Run a command on all nodes in the cluster via SSH. Assumes passwordless SSH.
   health              Run a comprehensive health check on the local node.
   cluster-health      Quickly check cluster connectivity and nodetool status.
   disk-health         Check disk usage against warning/critical thresholds.
@@ -282,6 +284,33 @@ After adding a new node to the cluster, run `cleanup` on the existing nodes in t
 ```bash
 sudo /usr/local/sbin/cass-ops cleanup
 ```
+
+### Cluster-Wide Operations (Advanced)
+
+A new orchestration script, `run-on-cluster.sh`, has been added to facilitate running commands across all nodes in the cluster. This is an advanced tool that uses SSH and should be used with caution. It is accessible via the `cass-ops` wrapper.
+
+**This script requires passwordless SSH access (e.g., using SSH keys) from the node where you run the command to all other nodes in the cluster.**
+
+**Usage:**
+```bash
+sudo cass-ops run-on-cluster [OPTIONS] -- <command to run>
+```
+
+**Key Options:**
+*   `--sequential`: (Default) Runs the command on one node at a time. This is the safest option for operations like rolling restarts or repairs.
+*   `--parallel`: Runs the command on all nodes at the same time. Useful for read-only checks like `cass-ops health`.
+*   `--dc <datacenter>`: Limits the execution to nodes within a specific datacenter.
+
+**Examples:**
+
+*   **Perform a rolling repair across the entire cluster:**
+    ```bash
+    sudo cass-ops run-on-cluster --sequential -- cass-ops repair
+    ```
+*   **Check the health of all nodes simultaneously:**
+    ```bash
+    sudo cass-ops run-on-cluster --parallel -- cass-ops health
+    ```
 
 ---
 
@@ -524,4 +553,3 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
     
 
     
-

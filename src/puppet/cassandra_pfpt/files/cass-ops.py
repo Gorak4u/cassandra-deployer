@@ -25,6 +25,9 @@ class Colors:
 # (description, script_name, safety_level)
 # Safety levels: readonly, modify, destructive, info
 COMMAND_CATEGORIES = {
+    "Cluster Orchestration (Advanced)": {
+        'run-on-cluster': ('Run a command on all nodes in the cluster via SSH. Assumes passwordless SSH.', 'run-on-cluster.sh', 'destructive'),
+    },
     "Health & Status (Read-Only)": {
         'health': ('Run a comprehensive health check on the local node.', 'node_health_check.sh', 'readonly'),
         'cluster-health': ('Quickly check cluster connectivity and nodetool status.', 'cluster-health.sh', 'readonly'),
