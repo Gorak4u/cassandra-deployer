@@ -157,6 +157,37 @@ To see all options, run the script with the `--help` flag:
 ./scripts/join-cassandra-dcs.sh --help
 ```
 
+#### **Pattern 6: Splitting a Multi-DC Cluster**
+
+The reverse of joining datacenters is splitting them into two independent clusters. This is a complex and potentially destructive operation. The `scripts/split-cassandra-dcs.sh` script is designed to orchestrate this process safely.
+
+**Prerequisites:**
+
+1.  **Full Backup:** Before starting, ensure you have a complete, verified backup of all your data.
+2.  **Network Isolation:** Plan for network rule changes that will eventually prevent communication between the two datacenters after the split is complete.
+
+**Usage Example:**
+
+```bash
+./scripts/split-cassandra-dcs.sh \
+  --dc1-query "-r role_cassandra_pfpt -d us-east-1" \
+  --dc2-query "-r role_cassandra_pfpt -d eu-west-1" \
+  --dc1-name "us-east-1" \
+  --dc2-name "eu-west-1"
+```
+
+**What the script does:**
+
+1.  **Isolates Topologies:** It alters the `system_auth` and `system_distributed` keyspaces on each datacenter to remove the other from its replication strategy.
+2.  **Rolling Restarts:** It performs a safe rolling restart of each datacenter sequentially to ensure the new, isolated topologies are loaded.
+3.  **Cleans Gossip State:** It runs `nodetool decommission` from each datacenter against the nodes of the other, cleaning up the gossip state and finalizing the separation.
+
+To see all options, run the script with the `--help` flag:
+```bash
+./scripts/split-cassandra-dcs.sh --help
+```
+
+
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 
 The `--parallel` (`-P`) flag is powerful but potentially dangerous. Running an operation on all nodes at once can lead to a cluster-wide outage if used incorrectly.
@@ -185,3 +216,4 @@ For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
 ```
+
