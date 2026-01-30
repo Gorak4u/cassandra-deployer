@@ -17,6 +17,8 @@ CRITICAL_THRESHOLD=85
 LOG_FILE="/var/log/cassandra/repair.log"
 LOCK_FILE="/run/cassandra/repair.lock"
 PAUSE_FILE="/var/lib/repairpaused"
+JVM_OPTS_FILE="/etc/cassandra/conf/jvm-server.options"
+JMX_PASS_FILE="/etc/cassandra/jmxremote.password"
 
 # The new python script will log to stdout, which will be captured by systemd's journal.
 # We will still use this log file for the shell wrapper's messages.
@@ -111,6 +113,21 @@ log_message "${GREEN}Disk usage OK. Proceeding with repair.${NC}"
 # Build the command to execute
 PYTHON_CMD_ARRAY=("/usr/local/sbin/cassandra_range_repair.py")
 PYTHON_CMD_ARRAY+=("--local-ip" "$LISTEN_ADDRESS")
+
+# Add JMX credentials if needed
+JMX_USER=""
+JMX_PASS=""
+if [ -f "$JVM_OPTS_FILE" ] && grep -q -- '-Dcom.sun.management.jmxremote.authenticate=true' "$JVM_OPTS_FILE"; then
+    if [ -f "$JMX_PASS_FILE" ]; then
+        JMX_USER=$(awk '/controlRole/ {print $1}' "$JMX_PASS_FILE")
+        JMX_PASS=$(awk '/controlRole/ {print $2}' "$JMX_PASS_FILE")
+        if [ -n "$JMX_USER" ] && [ -n "$JMX_PASS" ]; then
+            log_message "${BLUE}JMX authentication detected. Passing credentials to repair script.${NC}"
+            PYTHON_CMD_ARRAY+=("--jmx-user" "$JMX_USER" "--jmx-pass" "$JMX_PASS")
+        fi
+    fi
+fi
+
 
 if [ "$HOURS" != "0" ]; then
     PYTHON_CMD_ARRAY+=("--hours" "$HOURS")

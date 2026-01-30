@@ -6,6 +6,7 @@
 # - Timed repair duration to spread load over a number of hours.
 # - A pause/resume mechanism via a file flag.
 # - A status file for external monitoring.
+# - JMX authentication support.
 
 import subprocess
 import sys
@@ -20,6 +21,10 @@ from datetime import datetime
 PAUSE_FILE = '/var/lib/repairpaused'
 STATUS_DIR = '/var/lib/repair'
 STATUS_FILE = os.path.join(STATUS_DIR, 'status.txt')
+
+# --- Global Nodetool Command ---
+# This will be populated by command-line args
+nodetool_base_command = ['nodetool']
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -65,7 +70,7 @@ def check_for_pause():
 def get_local_ip():
     """Gets the primary IP address of the local node from nodetool."""
     try:
-        status_output = subprocess.check_output(['nodetool', 'status'], text=True)
+        status_output = subprocess.check_output(nodetool_base_command + ['status'], text=True)
         for line in status_output.splitlines():
             if len(line) > 0 and (line.startswith('UN') or line.startswith('DN')):
                  parts = line.strip().split()
@@ -81,7 +86,7 @@ def get_token_ranges(local_ip):
     """Gets the token ranges owned by the local node."""
     logging.info("Fetching token ranges for local node: %s", local_ip)
     try:
-        ring_output = subprocess.check_output(['nodetool', 'ring'], text=True)
+        ring_output = subprocess.check_output(nodetool_base_command + ['ring'], text=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         logging.error("Failed to run 'nodetool ring'. Is Cassandra running? Error: %s", e)
         return None
@@ -124,8 +129,8 @@ def get_token_ranges(local_ip):
 def run_repair_for_range(keyspace, start_token, end_token):
     """Runs nodetool repair for a specific keyspace and token range."""
     # The '-pr' (primary range) flag is essential for this strategy
-    command = [
-        'nodetool', 'repair', '-pr',
+    command = nodetool_base_command + [
+        'repair', '-pr',
         '-st', str(start_token),
         '-et', str(end_token),
         '--', keyspace
@@ -152,7 +157,7 @@ def get_keyspaces():
     """Gets a list of all non-system keyspaces."""
     logging.info("Fetching all non-system keyspaces...")
     try:
-        keyspace_output = subprocess.check_output(['nodetool', 'keyspaces'], text=True)
+        keyspace_output = subprocess.check_output(nodetool_base_command + ['keyspaces'], text=True)
         keyspaces = []
         system_keyspaces = ['system', 'system_auth', 'system_distributed', 'system_schema', 'system_traces', 'system_views', 'system_virtual_schema', 'dse_system', 'dse_perf', 'dse_security', 'solr_admin']
         for ks in keyspace_output.splitlines():
@@ -166,6 +171,8 @@ def get_keyspaces():
         return None
 
 def main():
+    global nodetool_base_command
+
     parser = argparse.ArgumentParser(
         description="""A script to perform Cassandra repair on a node by iterating through its primary token ranges.
                        This breaks the repair into smaller chunks to reduce performance impact, with options for timed duration and pausing."""
@@ -173,8 +180,14 @@ def main():
     parser.add_argument('keyspace', nargs='?', default=None, help='Optional: The name of the keyspace to repair. If not provided, all non-system keyspaces will be repaired one by one.')
     parser.add_argument('--hours', type=float, default=0, help='Optional: The total time in hours the entire repair job should take. If > 0, the script will pause between steps to meet the duration.')
     parser.add_argument('--local-ip', help='The listen_address of this Cassandra node. If not provided, it will be auto-detected.')
+    parser.add_argument('--jmx-user', help='JMX username for nodetool authentication.')
+    parser.add_argument('--jmx-pass', help='JMX password for nodetool authentication.')
     
     args = parser.parse_args()
+
+    # Build the base nodetool command with auth if provided
+    if args.jmx_user and args.jmx_pass:
+        nodetool_base_command.extend(['-u', args.jmx_user, '-pw', args.jmx_pass])
 
     ensure_status_dir()
     update_status_file("Repair process starting.")
