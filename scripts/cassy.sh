@@ -29,6 +29,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
@@ -41,48 +42,57 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 # --- Usage ---
 usage() {
     # This function prints to stdout, as is standard for help text.
-    echo -e "${BOLD}Cluster Orchestration Tool${NC}"
-    echo
+    echo -e "${BOLD}Cluster Orchestration Tool (cassy.sh)${NC}"
     echo -e "A wrapper to execute commands or scripts on multiple remote nodes via SSH."
-    echo -e "Supports static node lists, dynamic inventory fetching, parallel execution, and safe rolling operations."
+    echo -e "Supports static/dynamic node lists, parallel execution, and safe rolling operations."
     echo
     echo -e "${YELLOW}Usage:${NC}"
     echo -e "  $0 [OPTIONS]"
     echo
-    echo -e "${YELLOW}Options:${NC}"
-    echo
+    echo -e "${YELLOW}OPTIONS${NC}"
+    
+    # Using printf for aligned columns
+    # Format: printf "  %-40s %s\n" "<flags>" "<description>"
+    
     echo -e "${BOLD}Node Selection (choose one method):${NC}"
-    echo -e "  -n, --nodes <list>        A comma-separated list of target node hostnames or IPs."
-    echo -e "  -f, --nodes-file <path>   A file containing a list of target nodes, one per line."
-    echo -e "  --node <host>             Specify a single target node."
-    echo -e "  --qv-query \"<query>\"      A quoted string of 'qv' flags to dynamically fetch a node list."
+    printf "  %-40s %s\n" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
+    printf "  %-40s %s\n" "${BLUE}-f, --nodes-file ${CYAN}<path>${NC}" "A file containing a list of target nodes, one per line."
+    printf "  %-40s %s\n" "${BLUE}--node ${CYAN}<host>${NC}" "Specify a single target node."
+    printf "  %-40s %s\n" "${BLUE}--qv-query ${CYAN}\"<query>\"${NC}" "A quoted 'qv' query to dynamically fetch a node list."
     echo
+
     echo -e "${BOLD}Action (choose one):${NC}"
-    echo -e "  -c, --command <command>   The shell command to execute on each node."
-    echo -e "  -s, --script <path>       The path to a local script to copy and execute on each node."
+    printf "  %-40s %s\n" "${BLUE}-c, --command ${CYAN}<command>${NC}" "The shell command to execute on each node."
+    printf "  %-40s %s\n" "${BLUE}-s, --script ${CYAN}<path>${NC}" "A local script to copy and execute on each node."
     echo
+
     echo -e "${BOLD}Execution Control:${NC}"
-    echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
-    echo -e "  -P, --parallel [N]        Execute in parallel. Uses a worker pool model with a concurrency of N. Defaults to all nodes at once if N is omitted."
-    echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
+    printf "  %-40s %s\n" "${BLUE}-l, --user ${CYAN}<user>${NC}" "The SSH user to connect as. Defaults to current user."
+    printf "  %-40s %s\n" "${BLUE}-P, --parallel ${CYAN}[N]${NC}" "Execute in parallel. Optional N for batch size."
+    printf "  %-40s %s\n" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
+    printf "  %-40s %s\n" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
+    printf "  %-40s %s\n" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
     echo
-    echo -e "${BOLD}Output & Safety:${NC}"
-    echo -e "  --dry-run                 Show which nodes would be targeted and what command would run, without executing."
-    echo -e "  --json                    Output results in a machine-readable JSON format. Suppresses normal logging on stdout."
-    echo -e "  --timeout <seconds>       Set a timeout in seconds for the command on each node. \`0\` means no timeout. (Requires 'timeout' command)."
-    echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
+    
+    echo -e "${BOLD}Safety & Rolling Operations:${NC}"
+    printf "  %-40s %s\n" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
+    printf "  %-40s %s\n" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
+    printf "  %-40s %s\n" "" "  ${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
+    printf "  %-40s %s\n" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For custom rolling ops, run a local check script after each node."
+    printf "  %-40s %s\n" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
+    printf "  %-40s %s\n" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
     echo
-    echo -e "${BOLD}Automation & Advanced Safety:${NC}"
-    echo -e "  --rolling-op <type>       Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with a built-in health check."
-    echo -e "  --inter-node-check <path> In sequential mode, run a custom local script after each node. If it fails, the rolling execution stops. Cannot be used with --rolling-op."
-    echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
-    echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
-    echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
+    
+    echo -e "${BOLD}Output Formatting:${NC}"
+    printf "  %-40s %s\n" "${BLUE}--json${NC}" "Output results in machine-readable JSON format."
+    printf "  %-40s %s\n" "${BLUE}--output-dir ${CYAN}<path>${NC}" "Save the output from each node to a separate file."
     echo
-    echo -e "  -h, --help                Show this help message."
+    
+    printf "  %-40s %s\n" "${BLUE}-h, --help${NC}" "Show this help message."
     echo
+    
     echo -e "--------------------------------------------------------------------------------"
-    echo -e "${YELLOW}Robust Usage Examples:${NC}"
+    echo -e "${YELLOW}ROBUST USAGE EXAMPLES${NC}"
     echo
     echo -e "${BOLD}1. Safe Rolling Restart of a Cassandra Datacenter (Predefined Op)${NC}"
     echo -e "   # Uses the --rolling-op shortcut with a built-in, Cassandra-specific health check."
@@ -538,4 +548,5 @@ fi
     
 
     
+
 
