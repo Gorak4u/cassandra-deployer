@@ -84,7 +84,7 @@ Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel 5 -c "sudo cass-ops repair"
 ```
 
-#### **Pattern 3: Cluster-Wide Health Auditing**
+#### **Pattern 3: Programmatic Health Auditing**
 You can use `cassy.sh` with the `--json` flag to programmatically audit your cluster's health and parse the results, which is ideal for automation.
 
 ```bash
@@ -119,6 +119,43 @@ To perform a rolling Puppet run on the same set of nodes:
 This feature provides a single, robust way to orchestrate complex operations, node by node, with health checks at every step.
 
 > **Note:** The older `rolling_restart.sh`, `rolling_reboot.sh`, and `rolling_puppet_run.sh` scripts are now simple wrappers around this new functionality for backward compatibility.
+
+#### **Pattern 5: Joining Two Datacenters for Multi-DC Replication**
+
+A common advanced scenario is joining a new, standalone Cassandra cluster (e.g., in a new region) to an existing one to form a single, multi-datacenter cluster. The project includes an orchestrator script, `scripts/join-cassandra-dcs.sh`, designed for this purpose.
+
+This script uses `cassy.sh` as its engine to safely perform the required steps from a central management node.
+
+**Prerequisites:**
+
+1.  **Cluster Name Match:** Both clusters MUST have the exact same `cluster_name` in their `cassandra.yaml`.
+2.  **Version Match:** Both clusters MUST be running the same major versions of Cassandra and Java.
+3.  **Network Connectivity:** Firewall rules must be in place to allow bi-directional communication on the Cassandra storage ports (default 7000/7001) between **all nodes** in both datacenters.
+4.  **Configuration Management:** Before running the script, your Puppet/Hiera configuration must be updated. Specifically, the `seeds` list in your `cassandra.yaml` for nodes in the *new* datacenter should be updated to include at least one seed from the *old* datacenter. This change should be applied via a rolling restart (`cassy.sh --rolling-op puppet`) before proceeding.
+
+**Usage Example:**
+
+The script requires `qv` queries to identify the nodes in each datacenter and the names of the datacenters as they are known to Cassandra.
+
+```bash
+./scripts/join-cassandra-dcs.sh \
+  --old-dc-query "-r role_cassandra_pfpt -d us-east-1" \
+  --new-dc-query "-r role_cassandra_pfpt -d eu-west-1" \
+  --old-dc-name "us-east-1" \
+  --new-dc-name "eu-west-1"
+```
+
+**What the script does:**
+
+1.  **Validation:** Fetches node lists and validates that the cluster names match.
+2.  **Alter Topology:** Connects to a node in the old datacenter and executes the necessary `ALTER KEYSPACE` commands on `system_auth` and `system_distributed` to make them aware of the new datacenter's replication factor.
+3.  **Rolling Restart:** Performs a safe, rolling restart of all nodes in the **new** datacenter. This forces them to pick up the updated gossip information and see the nodes from the old datacenter.
+4.  **Data Rebuild:** Executes `nodetool rebuild <old_dc_name>` sequentially on each node in the **new** datacenter. This is the final step, where data is streamed from the existing datacenter to populate the new one.
+
+To see all options, run the script with the `--help` flag:
+```bash
+./scripts/join-cassandra-dcs.sh --help
+```
 
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 
