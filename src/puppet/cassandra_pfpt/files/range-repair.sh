@@ -63,6 +63,10 @@ done
 if [ ! -f "$CONFIG_FILE" ]; then log_message "${RED}Backup configuration file not found at $CONFIG_FILE${NC}"; exit 1; fi
 
 LISTEN_ADDRESS=$(jq -r '.listen_address' "$CONFIG_FILE")
+CASSANDRA_USER=$(jq -r '.cassandra_user // "cassandra"' "$CONFIG_FILE")
+CASSANDRA_PASSWORD=$(jq -r '.cassandra_password // "null"' "$CONFIG_FILE")
+SSL_ENABLED=$(jq -r '.ssl_enabled // "false"' "$CONFIG_FILE")
+
 if [ -z "$LISTEN_ADDRESS" ] || [ "$LISTEN_ADDRESS" == "null" ]; then
     log_message "${RED}Could not determine listen_address from $CONFIG_FILE. Aborting repair.${NC}"
     exit 1
@@ -95,14 +99,14 @@ log_message "${BLUE}Lock file created at $LOCK_FILE with PID $$.${NC}"
 
 # 3. Pre-flight health checks
 log_message "${BLUE}Performing pre-flight cluster health check...${NC}"
-if ! /usr/local/bin/cluster-health.sh --silent; then
+if ! /usr/local/sbin/cluster-health.sh --silent; then
     log_message "${RED}ERROR: Cluster health check failed. Aborting repair to prevent running on an unstable cluster.${NC}"
     exit 1
 fi
 log_message "${GREEN}Cluster health OK.${NC}"
 
 log_message "${BLUE}Performing pre-flight disk usage check...${NC}"
-if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
+if ! /usr/local/sbin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
     log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting repair to prevent disk space issues.${NC}"
     exit 1 # trap will remove the lock file
 fi
@@ -114,7 +118,7 @@ log_message "${GREEN}Disk usage OK. Proceeding with repair.${NC}"
 PYTHON_CMD_ARRAY=("/usr/local/sbin/cassandra_range_repair.py")
 PYTHON_CMD_ARRAY+=("--local-ip" "$LISTEN_ADDRESS")
 
-# Add JMX credentials if needed
+# Add JMX credentials for nodetool commands
 JMX_USER=""
 JMX_PASS=""
 if [ -f "$JVM_OPTS_FILE" ] && grep -q -- '-Dcom.sun.management.jmxremote.authenticate=true' "$JVM_OPTS_FILE"; then
@@ -122,12 +126,21 @@ if [ -f "$JVM_OPTS_FILE" ] && grep -q -- '-Dcom.sun.management.jmxremote.authent
         JMX_USER=$(awk '/controlRole/ {print $1}' "$JMX_PASS_FILE")
         JMX_PASS=$(awk '/controlRole/ {print $2}' "$JMX_PASS_FILE")
         if [ -n "$JMX_USER" ] && [ -n "$JMX_PASS" ]; then
-            log_message "${BLUE}JMX authentication detected. Passing credentials to repair script.${NC}"
+            log_message "${BLUE}JMX authentication detected. Passing credentials to repair script for nodetool.${NC}"
             PYTHON_CMD_ARRAY+=("--jmx-user" "$JMX_USER" "--jmx-pass" "$JMX_PASS")
         fi
     fi
 fi
 
+# Add CQL credentials for cqlsh commands
+if [ "$CASSANDRA_USER" != "null" ] && [ "$CASSANDRA_PASSWORD" != "null" ]; then
+    log_message "${BLUE}Passing CQL credentials to repair script for cqlsh.${NC}"
+    PYTHON_CMD_ARRAY+=("--cql-user" "$CASSANDRA_USER" "--cql-pass" "$CASSANDRA_PASSWORD")
+fi
+if [ "$SSL_ENABLED" == "true" ]; then
+    log_message "${BLUE}SSL is enabled. Passing SSL flag to repair script for cqlsh.${NC}"
+    PYTHON_CMD_ARRAY+=("--ssl")
+fi
 
 if [ "$HOURS" != "0" ]; then
     PYTHON_CMD_ARRAY+=("--hours" "$HOURS")

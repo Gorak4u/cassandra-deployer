@@ -7,6 +7,7 @@
 # - A pause/resume mechanism via a file flag.
 # - A status file for external monitoring.
 # - JMX authentication support.
+# - Use of cqlsh for keyspace discovery for robustness.
 
 import subprocess
 import sys
@@ -153,21 +154,43 @@ def run_repair_for_range(keyspace, start_token, end_token):
         logging.error("An unexpected error occurred during repair: %s", e)
         return 1
 
-def get_keyspaces():
-    """Gets a list of all non-system keyspaces."""
-    logging.info("Fetching all non-system keyspaces...")
+def get_keyspaces(cql_user, cql_pass, ssl_opts):
+    """Gets a list of all non-system keyspaces using cqlsh."""
+    logging.info("Fetching all non-system keyspaces via cqlsh...")
+    
+    # Use /usr/bin/cqlsh if it exists, otherwise fall back to PATH
+    cqlsh_path = '/usr/bin/cqlsh'
+    if not os.path.exists(cqlsh_path):
+        cqlsh_path = 'cqlsh'
+
+    cqlsh_command = [cqlsh_path, '--request-timeout=20']
+    if cql_user and cql_pass:
+        cqlsh_command.extend(['-u', cql_user, '-p', cql_pass])
+    
+    cqlsh_command.extend(ssl_opts)
+    cqlsh_command.extend(['-e', 'DESCRIBE KEYSPACES'])
+
     try:
-        keyspace_output = subprocess.check_output(nodetool_base_command + ['keyspaces'], text=True)
+        keyspace_output = subprocess.check_output(cqlsh_command, text=True, stderr=subprocess.PIPE)
+
         keyspaces = []
         system_keyspaces = ['system', 'system_auth', 'system_distributed', 'system_schema', 'system_traces', 'system_views', 'system_virtual_schema', 'dse_system', 'dse_perf', 'dse_security', 'solr_admin']
-        for ks in keyspace_output.splitlines():
-            ks = ks.strip()
-            if ks and ks not in system_keyspaces:
-                keyspaces.append(ks)
+        
+        # The output of DESCRIBE KEYSPACES is space-separated, potentially with quotes
+        for ks in keyspace_output.split():
+            ks_clean = ks.strip().strip('"')
+            if ks_clean and ks_clean not in system_keyspaces:
+                keyspaces.append(ks_clean)
+
         logging.info("Found keyspaces to repair: %s", keyspaces)
         return keyspaces
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logging.error("Failed to get keyspaces from nodetool: %s", e)
+    except subprocess.CalledProcessError as e:
+        logging.error("Failed to get keyspaces from cqlsh. Exit code: %s", e.returncode)
+        logging.error("cqlsh stdout: %s", e.stdout)
+        logging.error("cqlsh stderr: %s", e.stderr)
+        return None
+    except FileNotFoundError:
+        logging.error("Failed to get keyspaces from cqlsh: command '%s' not found.", cqlsh_path)
         return None
 
 def main():
@@ -182,12 +205,20 @@ def main():
     parser.add_argument('--local-ip', help='The listen_address of this Cassandra node. If not provided, it will be auto-detected.')
     parser.add_argument('--jmx-user', help='JMX username for nodetool authentication.')
     parser.add_argument('--jmx-pass', help='JMX password for nodetool authentication.')
-    
+    parser.add_argument('--cql-user', help='CQL username for cqlsh authentication.')
+    parser.add_argument('--cql-pass', help='CQL password for cqlsh authentication.')
+    parser.add_argument('--ssl', action='store_true', help='Enable SSL for cqlsh.')
+
     args = parser.parse_args()
 
     # Build the base nodetool command with auth if provided
     if args.jmx_user and args.jmx_pass:
         nodetool_base_command.extend(['-u', args.jmx_user, '-pw', args.jmx_pass])
+
+    # Build cqlsh options
+    cqlsh_opts = []
+    if args.ssl:
+        cqlsh_opts.append('--ssl')
 
     ensure_status_dir()
     update_status_file("Repair process starting.")
@@ -204,7 +235,7 @@ def main():
         update_status_file("Failed: No token ranges found.")
         sys.exit(1)
         
-    keyspaces_to_repair = [args.keyspace] if args.keyspace else get_keyspaces()
+    keyspaces_to_repair = [args.keyspace] if args.keyspace else get_keyspaces(args.cql_user, args.cql_pass, cqlsh_opts)
     if not keyspaces_to_repair:
         logging.critical("Could not fetch list of keyspaces to repair. Aborting.")
         update_status_file("Failed: No keyspaces found to repair.")
