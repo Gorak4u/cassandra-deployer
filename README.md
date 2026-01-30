@@ -215,6 +215,50 @@ Renaming a Cassandra cluster is a rare but critical operation that requires a fu
 5.  **Full Start:** It issues a start command to all nodes.
 6.  **Final Instructions:** After the script completes, you **must** update your Hiera configuration (`profile_cassandra_pfpt::cluster_name`) to match the new name to make the change permanent against future Puppet runs.
 
+#### **Pattern 8: Performing a Zero-Downtime Rolling Upgrade**
+
+Upgrading Cassandra is a critical operation that must be done sequentially and with care. This procedure leverages Puppet as the source of truth for the target version and `cassy.sh` to orchestrate the rollout safely across the cluster.
+
+**Prerequisites:**
+
+*   Read the official Cassandra upgrade guide for the versions you are moving between. Pay close attention to any required configuration changes or pre-flight checks. The `cass-ops upgrade-check` command is a useful tool for this.
+
+**Step 1: Update the Target Version in Hiera**
+
+The first and most important step is to declare the new version in your configuration data. You should never upgrade packages manually; always let Puppet manage the versions.
+
+In your Hiera data (e.g., `common.yaml`), update the `cassandra_version` key:
+
+```yaml
+# BEFORE
+profile_cassandra_pfpt::cassandra_version: '4.0.10-1'
+
+# AFTER
+profile_cassandra_pfpt::cassandra_version: '4.1.3-1'
+```
+
+**Step 2: Orchestrate the Rolling Upgrade with Puppet**
+
+Now, use `cassy.sh`'s `--rolling-op puppet` feature. This will run `puppet agent -t` on each node in your cluster, one by one. The built-in health check will run between each node, ensuring that the cluster remains healthy and available as the new version is rolled out.
+
+```bash
+# This command tells cassy.sh to run Puppet on every node in the datacenter,
+# sequentially, with a full health check after each node finishes.
+./scripts/cassy.sh --rolling-op puppet --qv-query "-r role_cassandra_pfpt -d AWSLAB"
+```
+
+Puppet will automatically handle stopping the service, upgrading the package via the package manager, and restarting the service.
+
+**Step 3: Run `upgradesstables` on All Nodes**
+
+After the package upgrade is complete on all nodes, the final step is to rewrite the on-disk data files (SSTables) to the new version's format. This operation is safe to run in parallel on all nodes.
+
+```bash
+# Run upgradesstables in parallel on all nodes in the datacenter.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d AWSLAB" --parallel -c "sudo cass-ops upgradesstables"
+```
+
+Once this command completes, your upgrade is finished.
 
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 
@@ -227,12 +271,12 @@ The `--parallel` (`-P`) flag is powerful but potentially dangerous. Running an o
     *   `cass-ops backup-status`
     *   `cass-ops repair` (though consider DC-by-DC or batching for large clusters)
     *   `cass-ops cleanup`
+    *   `cass-ops upgradesstables`
 
-*   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`), ideally with `--inter-node-check`:**
+*   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`), ideally with `--inter-node-check` or as a `--rolling-op`:**
     *   `cass-ops restart`
     *   `cass-ops reboot`
     *   `cass-ops decommission`
-    *   `cass-ops upgrade-sstables`
     *   Any command that takes a node out of the gossip ring or stops the service.
 
 Always use `--dry-run` first if you are unsure.
@@ -244,5 +288,3 @@ For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
 ```
-
-    
