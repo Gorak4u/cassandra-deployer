@@ -117,7 +117,12 @@ while [[ "$#" -gt 0 ]]; do
         -n|--nodes) IFS=',' read -r -a NODES <<< "$2"; shift ;;
         -f|--nodes-file)
             if [ ! -f "$2" ]; then log_error "Node file not found: $2"; exit 1; fi
-            mapfile -t NODES < "$2"
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                # Ignore empty lines or lines with only whitespace
+                if [[ -n "${line// /}" ]]; then
+                    NODES+=("$line")
+                fi
+            done < "$2"
             shift ;;
         --node) NODES=("$2"); shift ;;
         --qv-query) QV_QUERY="$2"; shift ;;
@@ -208,7 +213,6 @@ if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-e
 if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
 if [ -n "$INTER_NODE_CHECK_SCRIPT" ] && [ ! -x "$INTER_NODE_CHECK_SCRIPT" ]; then log_error "Inter-node check script is not executable: $INTER_NODE_CHECK_SCRIPT"; exit 1; fi
 
-
 # --- Variable Initialization ---
 SSH_USER_ARG=""
 if [ -n "$SSH_USER" ]; then
@@ -222,7 +226,11 @@ if [ -n "$QV_QUERY" ]; then
     if ! command -v qv &> /dev/null; then log_error "'qv' command not found. Cannot fetch inventory."; exit 1; fi
     
     log_info "Running query: qv -t ${QV_QUERY}"
-    mapfile -t NODES < <(eval "qv -t $QV_QUERY" 2>/dev/null)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ -n "${line// /}" ]]; then
+            NODES+=("$line")
+        fi
+    done < <(eval "qv -t $QV_QUERY" 2>/dev/null)
 
     if [ ${#NODES[@]} -eq 0 ]; then log_error "The qv query returned no hosts. Aborting."; exit 1; fi
 fi
@@ -485,7 +493,12 @@ fi
 if [ "$PARALLEL" = true ]; then
     if [ -f "failed_nodes.$$" ]; then
         # The temp file might have duplicate entries if flock wasn't available, so sort -u
-        mapfile -t failed_nodes < <(sort -u "failed_nodes.$$")
+        # Use a while loop for portability instead of mapfile.
+        while IFS= read -r line || [[ -n "$line" ]]; do
+             if [[ -n "${line// /}" ]]; then
+                failed_nodes+=("$line")
+            fi
+        done < <(sort -u "failed_nodes.$$")
     fi
 fi
 
@@ -525,3 +538,4 @@ fi
     
 
     
+
