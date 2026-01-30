@@ -25,6 +25,7 @@ INTER_NODE_CHECK_SCRIPT=""
 ROLLING_OP=""
 INTER_NODE_HEALTH_CHECK=false
 CONTINUE_ON_ERROR=false
+INTERACTIVE_MODE=false
 
 # --- Color Codes ---
 RED=$'\033[0;31m'
@@ -102,6 +103,7 @@ usage() {
     
     echo -e "${BOLD}Safety & Rolling Operations:${NC}"
     printf "$fmt_short" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
+    printf "$fmt_short" "${BLUE}-i, --interactive${NC}" "Prompt for confirmation before executing on target nodes."
     printf "$fmt_long" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
     printf "$fmt_short" "" "${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
     printf "$fmt_long" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
@@ -175,6 +177,7 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --ssh-options) SSH_OPTIONS="$2"; shift ;;
         --dry-run) DRY_RUN=true ;;
+        -i|--interactive) INTERACTIVE_MODE=true ;;
         --json) JSON_OUTPUT=true ;;
         --timeout) TIMEOUT="$2"; shift ;;
         --output-dir) OUTPUT_DIR="$2"; shift ;;
@@ -278,6 +281,29 @@ if [ -n "$QV_QUERY" ]; then
     done < <(eval "qv -t $QV_QUERY" 2>/dev/null)
 
     if [ ${#NODES[@]} -eq 0 ]; then log_error "The qv query returned no hosts. Aborting."; exit 1; fi
+fi
+
+# --- Interactive Confirmation ---
+if [ "$INTERACTIVE_MODE" = true ] && [ "$DRY_RUN" = false ]; then
+    log_info "--- INTERACTIVE MODE ---"
+    log_info "The following action is about to be executed:"
+    log_info "--------------------------------------------------"
+    log_info "Target Nodes (${#NODES[@]}): ${CYAN}${NODES[*]}${NC}"
+    if [ -n "$COMMAND" ]; then
+        log_info "Command:        ${YELLOW}${COMMAND}${NC}"
+    elif [ -n "$SCRIPT_PATH" ]; then
+        log_info "Script:         ${YELLOW}${SCRIPT_PATH}${NC}"
+    fi
+    log_info "SSH User:       ${SSH_USER:-$(whoami)}"
+    log_info "--------------------------------------------------"
+    
+    read -p "${BOLD}Proceed with execution? (yes/no): ${NC}" confirmation
+    
+    if [[ "$confirmation" != "yes" ]]; then
+        log_warn "Execution aborted by user."
+        exit 0
+    fi
+    log_info "Confirmation received. Proceeding with execution..."
 fi
 
 # --- Internal Health Check Function (for rolling ops) ---
