@@ -146,7 +146,11 @@ class profile_cassandra_pfpt {
 
   # --- Advanced & Miscellaneous ---
   $replace_address                  = lookup('profile_cassandra_pfpt::replace_address', { 'default_value' => '' })
-  $system_keyspaces_replication     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { 'default_value' => {} })
+  # Set a sensible default for system keyspace replication in a single-DC setup.
+  # This defaults to replicating in the node's own datacenter with an RF of 3.
+  # For multi-DC, this MUST be overridden in Hiera.
+  $default_system_replication       = { $datacenter => 3 }
+  $system_keyspaces_replication     = lookup('profile_cassandra_pfpt::system_keyspaces_replication', { 'default_value' => $default_system_replication })
   $commitlog_sync                   = lookup('profile_cassandra_pfpt::commitlog_sync', { 'default_value' => 'periodic' })
   $commitlog_sync_period_in_ms      = lookup('profile_cassandra_pfpt::commitlog_sync_period_in_ms', { 'default_value' => 10000 })
   $max_hints_delivery_threads       = lookup('profile_cassandra_pfpt::max_hints_delivery_threads', { 'default_value' => 2 })
