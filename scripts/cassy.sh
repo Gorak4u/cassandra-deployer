@@ -23,6 +23,7 @@ PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
 INTER_NODE_CHECK_SCRIPT=""
 ROLLING_OP=""
+INTER_NODE_HEALTH_CHECK=false
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -38,6 +39,27 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# --- Wait Function ---
+_wait_with_dots() {
+    local duration=$1
+    local message="${2:-}"
+
+    # Don't show dots if JSON output is enabled
+    if [ "$JSON_OUTPUT" = true ]; then
+        sleep "$duration"
+        return
+    fi
+
+    # Using echo -ne to print without a newline
+    echo -ne "${YELLOW}${message}${NC}"
+    for ((i=0; i<duration; i++)); do
+        echo -ne "${YELLOW}.${NC}"
+        sleep 1
+    done
+    echo "" # Newline after dots are finished
+}
+
 
 # --- Usage ---
 usage() {
@@ -78,7 +100,7 @@ usage() {
     printf "  %-40s %s\n" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
     printf "  %-40s %s\n" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
     printf "  %-40s %s\n" "" "  ${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
-    printf "  %-40s %s\n" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For custom rolling ops, run a local check script after each node."
+    printf "  %-40s %s\n" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
     printf "  %-40s %s\n" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
     printf "  %-40s %s\n" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
     echo
@@ -180,6 +202,9 @@ if [ -n "$ROLLING_OP" ]; then
         usage; exit 1;
     fi
 
+    # This flag indicates the internal health check should be used
+    INTER_NODE_HEALTH_CHECK=true
+
     # Set command based on operation type
     case "$ROLLING_OP" in
         restart)
@@ -203,8 +228,8 @@ if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either 
 if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; exit 1; fi
 if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; exit 1; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
-if [ -n "$INTER_NODE_CHECK_SCRIPT" ] && [ "$PARALLEL" = true ]; then
-    log_error "--inter-node-check can only be used in sequential mode (without --parallel)."
+if { [ -n "$INTER_NODE_CHECK_SCRIPT" ] || [ "$INTER_NODE_HEALTH_CHECK" = true ]; } && [ "$PARALLEL" = true ]; then
+    log_error "Inter-node checks can only be used in sequential mode (without --parallel)."
     usage; exit 1;
 fi
 
@@ -236,6 +261,7 @@ if [ -n "$QV_QUERY" ]; then
     if ! command -v qv &> /dev/null; then log_error "'qv' command not found. Cannot fetch inventory."; exit 1; fi
     
     log_info "Running query: qv -t ${QV_QUERY}"
+    # Use a while loop for portability, as mapfile is not available in all bash versions.
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ -n "${line// /}" ]]; then
             NODES+=("$line")
@@ -258,8 +284,8 @@ _run_health_check() {
 
         # Check 1: SSH Connectivity
         if ! ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "echo 'SSH OK'" >/dev/null 2>&1; then
-            log_warn "    - FAIL: SSH connection failed. Node may not be reachable or SSH service is not ready. Will retry in ${retry_delay}s."
-            sleep $retry_delay
+            log_warn "    - FAIL: SSH connection failed. Node may not be reachable or SSH service is not ready."
+            _wait_with_dots "$retry_delay" "    Retrying in ${retry_delay}s "
             continue
         fi
         log_info "    - OK: SSH is responsive."
@@ -270,8 +296,8 @@ _run_health_check() {
             return 0 # Success
         fi
 
-        log_warn "    - FAIL: 'cass-ops cluster-health' failed on the node. Service may not be ready. Will retry in ${retry_delay}s."
-        sleep $retry_delay
+        log_warn "    - FAIL: 'cass-ops cluster-health' failed on the node. Service may not be ready."
+        _wait_with_dots "$retry_delay" "    Retrying in ${retry_delay}s "
     done
 
     log_error "--- [Health Check] CRITICAL: Node ${node_to_check} did not pass health check after ${max_retries} attempts. ---"
@@ -289,7 +315,7 @@ if [ -n "$PRE_EXEC_CHECK" ]; then
 fi
 
 # Pre-flight health check for rolling operations
-if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
+if [ "$INTER_NODE_HEALTH_CHECK" = true ] && [ "$DRY_RUN" = false ]; then
     log_info "--- Running Pre-Rolling Operation Master Health Check ---"
     if ! _run_health_check "${NODES[0]}"; then
         log_error "Initial health check on node ${NODES[0]} failed. Aborting rolling operation before it starts."
@@ -477,7 +503,7 @@ else
         fi
 
         # If this is a Cassandra rolling operation, run the internal health check.
-        if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
+        if [ "$INTER_NODE_HEALTH_CHECK" = true ] && [ "$DRY_RUN" = false ]; then
             if ! _run_health_check "$node"; then
                 log_error "Internal health check failed after operating on node ${node}. Aborting rolling execution."
                 failed_nodes+=("$node")
@@ -548,5 +574,6 @@ fi
     
 
     
+
 
 
