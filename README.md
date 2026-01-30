@@ -38,6 +38,9 @@ The script can run any command or execute a local script file on your cluster no
 | `--json` | | Output results in a machine-readable JSON format. |
 | `--timeout` | `<seconds>` | Set a timeout in seconds for the command on each node. `0` for no timeout. |
 | `--output-dir`| `<path>` | Save the output from each node to a separate file in the specified directory. |
+| `--retries` | `<N>` | Number of times to retry a failed command on a node. Default: 0. |
+| `--pre-exec-check` | `<path>` | A local script to run before executing. If it fails, cassy.sh aborts. |
+| `--post-exec-check`| `<path>` | A local script to run after executing on all nodes. |
 | `-h`, `--help` | | Show the help message. |
 
 

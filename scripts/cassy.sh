@@ -18,6 +18,9 @@ DRY_RUN=false
 JSON_OUTPUT=false
 OUTPUT_DIR=""
 TIMEOUT=0 # 0 for no timeout
+RETRIES=0
+PRE_EXEC_CHECK=""
+POST_EXEC_CHECK=""
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -62,8 +65,13 @@ usage() {
     echo -e "${YELLOW}Output & Safety:${NC}"
     echo -e "  --dry-run                 Show which nodes would be targeted and what command would run, without executing."
     echo -e "  --json                    Output results in a machine-readable JSON format. Suppresses normal logging on stdout."
-    echo -e "  --timeout <seconds>       Set a timeout in seconds for the command on each node. `0` means no timeout. (Requires 'timeout' command)."
+    echo -e "  --timeout <seconds>       Set a timeout in seconds for the command on each node. \`0\` means no timeout. (Requires 'timeout' command)."
     echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
+    echo
+    echo -e "${YELLOW}Automation & Safety:${NC}"
+    echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
+    echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
+    echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
     echo
     echo -e "  -h, --help                Show this help message."
     exit 1
@@ -98,6 +106,9 @@ while [[ "$#" -gt 0 ]]; do
         --json) JSON_OUTPUT=true ;;
         --timeout) TIMEOUT="$2"; shift ;;
         --output-dir) OUTPUT_DIR="$2"; shift ;;
+        --retries) RETRIES="$2"; shift ;;
+        --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
+        --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage ;;
     esac
@@ -120,6 +131,9 @@ if [ "$TIMEOUT" -gt 0 ] && ! command -v timeout &> /dev/null; then
     log_warn "'timeout' command not found, the --timeout flag will be ignored."
     TIMEOUT=0
 fi
+if [[ ! "$RETRIES" =~ ^[0-9]+$ ]]; then log_error "Retries must be a non-negative integer."; exit 1; fi
+if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-execution check script is not executable: $PRE_EXEC_CHECK"; exit 1; fi
+if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
 
 # --- Node Discovery ---
 if [ -n "$QV_QUERY" ]; then
@@ -134,6 +148,16 @@ if [ -n "$QV_QUERY" ]; then
     done < <(eval "qv -t $QV_QUERY" 2>/dev/null)
 
     if [ ${#NODES[@]} -eq 0 ]; then log_error "The qv query returned no hosts. Aborting."; exit 1; fi
+fi
+
+# --- Pre-Execution Hook ---
+if [ -n "$PRE_EXEC_CHECK" ]; then
+    log_info "--- Running Pre-Execution Check ---"
+    if ! "$PRE_EXEC_CHECK"; then
+        log_error "Pre-execution check failed. Aborting."
+        exit 3
+    fi
+    log_success "Pre-execution check passed."
 fi
 
 # --- Dry-Run ---
@@ -183,33 +207,46 @@ run_task() {
     local node="$1"
     local output
     local rc=0
-    local REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$"
+    local attempt
     
-    local TIMEOUT_CMD=""
-    if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
-    
-    local NODE_LOG_FILE=""
-    if [ -n "$OUTPUT_DIR" ]; then NODE_LOG_FILE="${OUTPUT_DIR}/${node}.log"; fi
-    
-    output=$({
-        if [ -n "$COMMAND" ]; then
-            # Using exec to ensure TIMEOUT_CMD works correctly on the ssh process
-            exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
-        elif [ -n "$SCRIPT_PATH" ]; then
-            # Using a subshell to group commands for timeout
-            (
-              exec $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
-              exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
-            )
+    for attempt in $(seq 1 $((RETRIES + 1))); do
+        # Only log retry attempts, not the first one.
+        if [ "$attempt" -gt 1 ]; then
+            log_warn "--- [${BOLD}$node${NC}] Retrying... (Attempt $attempt of $((RETRIES + 1))) ---"
+            sleep 3 # Brief pause before retry
         fi
-    } 2>&1)
-    rc=$?
+        
+        local REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$_${attempt}"
+        
+        local TIMEOUT_CMD=""
+        if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
+        
+        local NODE_LOG_FILE=""
+        if [ -n "$OUTPUT_DIR" ]; then NODE_LOG_FILE="${OUTPUT_DIR}/${node}.log"; fi
+        
+        output=$({
+            if [ -n "$COMMAND" ]; then
+                exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
+            elif [ -n "$SCRIPT_PATH" ]; then
+                (
+                  exec $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
+                  exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
+                )
+            fi
+        } 2>&1)
+        rc=$?
 
+        # If the command was successful, break out of the retry loop.
+        if [ "$rc" -eq 0 ]; then
+            break
+        fi
+    done
+
+    # The final status is based on the last attempt.
     if [ -n "$NODE_LOG_FILE" ]; then echo "$output" > "$NODE_LOG_FILE"; fi
 
     if [ "$JSON_OUTPUT" = true ]; then
         local status_text="SUCCESS"; if [ $rc -ne 0 ]; then status_text="FAILED"; fi
-        # Use jq to safely create a JSON object for this node's result
         jq -n --arg node "$node" \
               --arg status "$status_text" \
               --argjson rc "$rc" \
@@ -227,7 +264,6 @@ run_task() {
 
     # Track failures for the final exit code
     if [ $rc -ne 0 ]; then
-        # In parallel, this write must be atomic. Appending to a file is safe.
         if [ "$PARALLEL" = true ]; then
             echo "$node" >> "failed_nodes.$$"
         else
@@ -308,6 +344,17 @@ if [ "$PARALLEL" = true ]; then
             if [ -n "$line" ]; then failed_nodes+=("$line"); fi
         done < "failed_nodes.$$"
         rm "failed_nodes.$$"
+    fi
+fi
+
+# --- Post-Execution Hook ---
+if [ -n "$POST_EXEC_CHECK" ]; then
+    log_info "--- Running Post-Execution Check ---"
+    if ! "$POST_EXEC_CHECK"; then
+        # This is a warning, not a fatal error for the whole script run.
+        log_warn "Post-execution check failed."
+    else
+        log_success "Post-execution check passed."
     fi
 fi
 
