@@ -26,13 +26,13 @@ ROLLING_OP=""
 INTER_NODE_HEALTH_CHECK=false
 
 # --- Color Codes ---
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m' # No Color
 
 # --- Logging (always to stderr) ---
 log_info() { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -73,44 +73,44 @@ usage() {
     echo
     echo -e "${YELLOW}OPTIONS${NC}"
     
-    # Using printf for aligned columns
-    # Format: printf "  %-40s %s\n" "<flags>" "<description>"
+    # Using printf for aligned columns. Increased padding to handle color codes.
+    local format_string="  %-48s %s\n"
     
     echo -e "${BOLD}Node Selection (choose one method):${NC}"
-    printf "  %-40s %s\n" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
-    printf "  %-40s %s\n" "${BLUE}-f, --nodes-file ${CYAN}<path>${NC}" "A file containing a list of target nodes, one per line."
-    printf "  %-40s %s\n" "${BLUE}--node ${CYAN}<host>${NC}" "Specify a single target node."
-    printf "  %-40s %s\n" "${BLUE}--qv-query ${CYAN}\"<query>\"${NC}" "A quoted 'qv' query to dynamically fetch a node list."
+    printf "$format_string" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
+    printf "$format_string" "${BLUE}-f, --nodes-file ${CYAN}<path>${NC}" "A file containing a list of target nodes, one per line."
+    printf "$format_string" "${BLUE}--node ${CYAN}<host>${NC}" "Specify a single target node."
+    printf "$format_string" "${BLUE}--qv-query ${CYAN}\"<query>\"${NC}" "A quoted 'qv' query to dynamically fetch a node list."
     echo
 
     echo -e "${BOLD}Action (choose one):${NC}"
-    printf "  %-40s %s\n" "${BLUE}-c, --command ${CYAN}<command>${NC}" "The shell command to execute on each node."
-    printf "  %-40s %s\n" "${BLUE}-s, --script ${CYAN}<path>${NC}" "A local script to copy and execute on each node."
+    printf "$format_string" "${BLUE}-c, --command ${CYAN}<command>${NC}" "The shell command to execute on each node."
+    printf "$format_string" "${BLUE}-s, --script ${CYAN}<path>${NC}" "A local script to copy and execute on each node."
     echo
 
     echo -e "${BOLD}Execution Control:${NC}"
-    printf "  %-40s %s\n" "${BLUE}-l, --user ${CYAN}<user>${NC}" "The SSH user to connect as. Defaults to current user."
-    printf "  %-40s %s\n" "${BLUE}-P, --parallel ${CYAN}[N]${NC}" "Execute in parallel. Optional N for batch size."
-    printf "  %-40s %s\n" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
-    printf "  %-40s %s\n" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
-    printf "  %-40s %s\n" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
+    printf "$format_string" "${BLUE}-l, --user ${CYAN}<user>${NC}" "The SSH user to connect as. Defaults to current user."
+    printf "$format_string" "${BLUE}-P, --parallel ${CYAN}[N]${NC}" "Execute in parallel. Optional N for batch size."
+    printf "$format_string" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
+    printf "$format_string" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
+    printf "$format_string" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
     echo
     
     echo -e "${BOLD}Safety & Rolling Operations:${NC}"
-    printf "  %-40s %s\n" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
-    printf "  %-40s %s\n" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
-    printf "  %-40s %s\n" "" "  ${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
-    printf "  %-40s %s\n" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
-    printf "  %-40s %s\n" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
-    printf "  %-40s %s\n" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
+    printf "$format_string" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
+    printf "$format_string" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
+    printf "$format_string" "" "${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
+    printf "$format_string" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
+    printf "$format_string" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
+    printf "$format_string" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
     echo
     
     echo -e "${BOLD}Output Formatting:${NC}"
-    printf "  %-40s %s\n" "${BLUE}--json${NC}" "Output results in machine-readable JSON format."
-    printf "  %-40s %s\n" "${BLUE}--output-dir ${CYAN}<path>${NC}" "Save the output from each node to a separate file."
+    printf "$format_string" "${BLUE}--json${NC}" "Output results in machine-readable JSON format."
+    printf "$format_string" "${BLUE}--output-dir ${CYAN}<path>${NC}" "Save the output from each node to a separate file."
     echo
     
-    printf "  %-40s %s\n" "${BLUE}-h, --help${NC}" "Show this help message."
+    printf "$format_string" "${BLUE}-h, --help${NC}" "Show this help message."
     echo
     
     echo -e "--------------------------------------------------------------------------------"
@@ -574,6 +574,7 @@ fi
     
 
     
+
 
 
 
