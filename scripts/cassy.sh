@@ -44,40 +44,62 @@ usage() {
     echo -e "${BOLD}Cluster Orchestration Tool${NC}"
     echo
     echo -e "A wrapper to execute commands or scripts on multiple remote nodes via SSH."
-    echo -e "Supports both static node lists and dynamic inventory fetching via the 'qv' tool."
+    echo -e "Supports static node lists, dynamic inventory fetching, parallel execution, and safe rolling operations."
     echo
     echo -e "${YELLOW}Usage:${NC}"
     echo -e "  $0 [OPTIONS]"
     echo
-    echo -e "${YELLOW}Node Selection (choose one method):${NC}"
+    echo -e "${YELLOW}Options:${NC}"
+    echo
+    echo -e "${BOLD}Node Selection (choose one method):${NC}"
     echo -e "  -n, --nodes <list>        A comma-separated list of target node hostnames or IPs."
     echo -e "  -f, --nodes-file <path>   A file containing a list of target nodes, one per line."
     echo -e "  --node <host>             Specify a single target node."
     echo -e "  --qv-query \"<query>\"      A quoted string of 'qv' flags to dynamically fetch a node list."
     echo
-    echo -e "${YELLOW}Action (choose one):${NC}"
+    echo -e "${BOLD}Action (choose one):${NC}"
     echo -e "  -c, --command <command>   The shell command to execute on each node."
     echo -e "  -s, --script <path>       The path to a local script to copy and execute on each node."
     echo
-    echo -e "${YELLOW}Execution Options:${NC}"
+    echo -e "${BOLD}Execution Control:${NC}"
     echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
     echo -e "  -P, --parallel [N]        Execute in parallel. Uses a worker pool model with a concurrency of N. Defaults to all nodes at once if N is omitted."
     echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
     echo
-    echo -e "${YELLOW}Output & Safety:${NC}"
+    echo -e "${BOLD}Output & Safety:${NC}"
     echo -e "  --dry-run                 Show which nodes would be targeted and what command would run, without executing."
     echo -e "  --json                    Output results in a machine-readable JSON format. Suppresses normal logging on stdout."
     echo -e "  --timeout <seconds>       Set a timeout in seconds for the command on each node. \`0\` means no timeout. (Requires 'timeout' command)."
     echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
     echo
-    echo -e "${YELLOW}Automation & Safety:${NC}"
+    echo -e "${BOLD}Automation & Advanced Safety:${NC}"
     echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with an internal health check between each node."
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
     echo
     echo -e "  -h, --help                Show this help message."
-    exit 1
+    echo
+    echo -e "--------------------------------------------------------------------------------"
+    echo -e "${YELLOW}Robust Usage Examples:${NC}"
+    echo
+    echo -e "${BOLD}1. Safe Rolling Restart of a Datacenter${NC}"
+    echo -e "   # Uses the built-in rolling operation with an internal, multi-step health check."
+    echo -e "   $0 --rolling-op restart --qv-query \"-r role_cassandra_pfpt -d AWSLAB\""
+    echo
+    echo -e "${BOLD}2. Parallel Cluster-Wide Repair${NC}"
+    echo -e "   # Run repair on all Cassandra nodes in the SC4 datacenter in batches of 5."
+    echo -e "   $0 --qv-query \"-r role_cassandra_pfpt -d SC4\" --parallel 5 -c \"sudo cass-ops repair\""
+    echo
+    echo -e "${BOLD}3. Programmatic Health Auditing${NC}"
+    echo -e "   # Get health from all nodes in JSON and use 'jq' to find failures."
+    echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --json -c \"sudo cass-ops health --json\" | jq '.results[] | select(.status == \"FAILED\")'"
+    echo
+    echo -e "${BOLD}4. Dry-Run Before a Destructive Operation${NC}"
+    echo -e "   # Always check which nodes you are about to decommission before running the command for real."
+    echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --dry-run -c \"sudo cass-ops decommission\""
+    echo
+    exit 0
 }
 
 # --- Argument Parsing ---
@@ -112,7 +134,7 @@ while [[ "$#" -gt 0 ]]; do
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
         --inter-node-check) INTER_NODE_CHECK="$2"; shift ;; # Hidden/deprecated flag
         -h|--help) usage ;;
-        *) log_error "Unknown parameter passed: $1"; usage ;;
+        *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
     shift
 done
@@ -123,11 +145,11 @@ done
 if [ -n "$ROLLING_OP" ]; then
     if [ -n "$COMMAND" ] || [ -n "$SCRIPT_PATH" ]; then
         log_error "Cannot use --command or --script with the --rolling-op shortcut."
-        usage
+        usage; exit 1;
     fi
     if [ "$PARALLEL" = true ]; then
         log_error "--rolling-op can only be used in sequential mode (without --parallel)."
-        usage
+        usage; exit 1;
     fi
 
     # Set command based on operation type
@@ -143,15 +165,15 @@ if [ -n "$ROLLING_OP" ]; then
             ;;
         *)
             log_error "Unknown rolling operation: '$ROLLING_OP'. Use restart, reboot, or puppet."
-            usage
+            usage; exit 1;
             ;;
     esac
 fi
 
-if [ ${#NODES[@]} -eq 0 ] && [ -z "$QV_QUERY" ]; then log_error "No target nodes specified. Use --nodes, --nodes-file, --node, or --qv-query."; usage; fi
-if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either a static node source (--nodes, etc.) or --qv-query, but not both."; usage; fi
-if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; fi
-if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; fi
+if [ ${#NODES[@]} -eq 0 ] && [ -z "$QV_QUERY" ]; then log_error "No target nodes specified. Use --nodes, --nodes-file, --node, or --qv-query."; usage; exit 1; fi
+if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either a static node source (--nodes, etc.) or --qv-query, but not both."; usage; exit 1; fi
+if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; exit 1; fi
+if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; exit 1; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
 if [ "$PARALLEL" = true ] && [ -n "$INTER_NODE_CHECK" ]; then log_error "--inter-node-check can only be used in sequential mode (without --parallel)."; exit 1; fi
 
