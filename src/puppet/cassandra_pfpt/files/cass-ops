@@ -1,331 +1,192 @@
 #!/usr/bin/env bash
 # This file is managed by Puppet.
 #
-# cass-ops: A unified command-line interface for Cassandra operations.
-# This script acts as a safe and documented wrapper around various
-# underlying operational scripts.
+# cass-ops: A unified operational wrapper for Cassandra.
+# This script provides a single entry point for various management
+# tasks, adding safety checks and simplifying complex commands.
 
-# --- Color and Logging Setup ---
-RED='\e[0;31m'
-GREEN='\e[0;32m'
-YELLOW='\e[1;33m'
-BLUE='\e[0;34m'
-CYAN='\e[0;36m'
-BOLD='\e[1m'
-NC='\e[0m' # No Color
+set -euo pipefail
 
-log() {
-    echo -e "$1"
+# --- Color Codes ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# --- Base Directory for Scripts ---
+SCRIPT_DIR="/usr/local/bin"
+
+# --- Help Function ---
+show_help() {
+(
+cat <<EOF
+${BOLD}Usage: cass-ops <command> [options]${NC}
+
+Unified operations script for Cassandra.
+
+${YELLOW}Available Commands:${NC}
+  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,backup-verify,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
+
+${GREEN}Health & Status:${NC}
+  ${BOLD}health${NC}              Run a comprehensive health check on the local node.
+  ${BOLD}cluster-health${NC}      Quickly check cluster connectivity and nodetool status.
+  ${BOLD}disk-health${NC}         Check disk usage against warning/critical thresholds.
+  ${BOLD}version${NC}             Audit and print versions of key software (OS, Java, Cassandra).
+  ${BOLD}backup-status${NC}       Check the status of the last completed backup for a node.
+
+${GREEN}Node & Service Lifecycle:${NC}
+  ${BOLD}stop${NC}                Safely drain and stop the Cassandra service.
+  ${BOLD}restart${NC}             Perform a safe, rolling restart of the Cassandra service.
+  ${BOLD}reboot${NC}              Safely drain Cassandra and reboot the machine.
+  ${BOLD}drain${NC}               Drain the node, flushing memtables and stopping client traffic.
+  ${BOLD}decommission${NC}        Permanently remove this node from the cluster after streaming its data.
+  ${BOLD}replace${NC}             Configure this NEW, STOPPED node to replace a dead node.
+  ${BOLD}assassinate${NC}         Forcibly remove a dead node from the cluster's gossip ring.
+
+${GREEN}Data & Maintenance Operations:${NC}
+  ${BOLD}rebuild${NC}             Rebuild the data on this node by streaming from another datacenter.
+  ${BOLD}repair${NC}              Run a safe, manual full repair on the node. Can target a specific keyspace/table.
+  ${BOLD}cleanup${NC}             Run 'nodetool cleanup' with safety checks.
+  ${BOLD}compact${NC}             Run 'nodetool compact' with safety checks and advanced options.
+  ${BOLD}garbage-collect${NC}     Run 'nodetool garbagecollect' with safety checks.
+  ${BOLD}upgrade-sstables${NC}    Run 'nodetool upgradesstables' with safety checks.
+  ${BOLD}upgrade-check${NC}       Run pre-flight checks before a major version upgrade.
+
+${GREEN}Backup & Recovery:${NC}
+  ${BOLD}backup${NC}              Manually trigger a full, node-local backup to S3.
+  ${BOLD}incremental-backup${NC}  Manually trigger an incremental backup to S3.
+  ${BOLD}backup-verify${NC}       Verify the integrity and restorability of the latest backup set.
+  ${BOLD}snapshot${NC}            Take an ad-hoc snapshot with a generated tag.
+  ${BOLD}restore${NC}             Restore data from S3. Run without arguments for an interactive wizard.
+
+${GREEN}Tooling & Documentation:${NC}
+  ${BOLD}stress${NC}              Run 'cassandra-stress' via a robust wrapper.
+  ${BOLD}manual${NC}              Display the full operations manual in the terminal.
+  ${BOLD}backup-guide${NC}        Display the full backup and recovery guide.
+  ${BOLD}puppet-guide${NC}        Display the Puppet architecture guide.
+
+Run 'cass-ops <command> -h' for more information on a specific command.
+EOF
+) | less -R
 }
 
-log_arg() {
-    printf "    %-20s %s\n" "${CYAN}$1${NC}" "$2"
-}
-
-# --- Help Text Function ---
-usage() {
-  log "${BOLD}usage: ${0##*/} [-h] <command> ...${NC}"
-  log ""
-  log "Unified operations script for Cassandra."
-  log ""
-  log "${YELLOW}Available Commands:${NC}"
-
-  COMMANDS=(
-    "health"
-    "cluster-health"
-    "disk-health"
-    "version"
-    "stop"
-    "restart"
-    "reboot"
-    "drain"
-    "decommission"
-    "replace"
-    "rebuild"
-    "repair"
-    "cleanup"
-    "compact"
-    "garbage-collect"
-    "upgrade-sstables"
-    "backup"
-    "incremental-backup"
-    "backup-status"
-    "snapshot"
-    "restore"
-    "assassinate"
-    "stress"
-    "manual"
-    "upgrade-check"
-    "backup-guide"
-    "puppet-guide"
-  )
-
-  # Print commands in a formatted way
-  printf "  ${CYAN}{%s}${NC}\n\n" "$(IFS=,; echo "${COMMANDS[*]}")"
-
-  for cmd in "${COMMANDS[@]}"; do
-    case $cmd in
-      health)
-        log "${BLUE}  health${NC}"
-        log "    Run a comprehensive health check on the local node."
-        log_arg "--json" "Output results in machine-readable JSON format."
-        ;;
-      cluster-health)
-        log "${BLUE}  cluster-health${NC}"
-        log "    Quickly check cluster connectivity and nodetool status."
-        log_arg "--silent" "Suppress output, exit with status code only."
-        ;;
-      disk-health)
-        log "${BLUE}  disk-health${NC}"
-        log "    Check disk usage against warning/critical thresholds."
-        ;;
-      version)
-        log "${BLUE}  version${NC}"
-        log "    Audit and print versions of key software (OS, Java, Cassandra)."
-        ;;
-      stop)
-        log "${BLUE}  stop${NC}"
-        log "    Safely drain and stop the Cassandra service."
-        ;;
-      restart)
-        log "${BLUE}  restart${NC}"
-        log "    Perform a safe, rolling restart of the Cassandra service."
-        ;;
-      reboot)
-        log "${BLUE}  reboot${NC}"
-        log "    Safely drain Cassandra and reboot the machine."
-        ;;
-      drain)
-        log "${BLUE}  drain${NC}"
-        log "    Drain the node, flushing memtables and stopping client traffic."
-        ;;
-      decommission)
-        log "${BLUE}  decommission${NC}"
-        log "    Permanently remove this node from the cluster after streaming its data."
-        ;;
-      replace)
-        log "${BLUE}  replace <dead_node_ip>${NC}"
-        log "    Configure this NEW, STOPPED node to replace a dead node."
-        ;;
-      rebuild)
-        log "${BLUE}  rebuild <source_dc>${NC}"
-        log "    Rebuild the data on this node by streaming from another datacenter."
-        ;;
-      repair)
-        log "${BLUE}  repair [keyspace] [tables...]${NC}"
-        log "    Run a safe, manual full repair on the node. Can target a specific keyspace/table."
-        log_arg "-j, --jobs <num>" "Set number of parallel repair jobs."
-        ;;
-      cleanup)
-        log "${BLUE}  cleanup [options]${NC}"
-        log "    Run 'nodetool cleanup' with safety checks."
-        log_arg "-k, --keyspace <name>" "Specify keyspace."
-        log_arg "-t, --table <name>" "Specify table."
-        ;;
-      compact)
-        log "${BLUE}  compact [options]${NC}"
-        log "    Run 'nodetool compact' with safety checks and advanced options."
-        log_arg "-k, --keyspace <name>" "Specify keyspace."
-        log_arg "-t, --table <name>" "Specify table."
-        log_arg "--user-defined <file...>" "Compact a list of sstable files."
-        log_arg "-s, --split-output" "Split STCS output."
-        ;;
-      garbage-collect)
-        log "${BLUE}  garbage-collect [options]${NC}"
-        log "    Run 'nodetool garbagecollect' with safety checks."
-        log_arg "-k, --keyspace <name>" "Specify keyspace."
-        log_arg "-t, --table <name>" "Specify table."
-        log_arg "-g <CELL|ROW>" "Set tombstone granularity."
-        ;;
-      upgrade-sstables)
-        log "${BLUE}  upgrade-sstables [options]${NC}"
-        log "    Run 'nodetool upgradesstables' with safety checks."
-        log_arg "-k, --keyspace <name>" "Specify keyspace."
-        log_arg "-t, --table <name>" "Specify table."
-        ;;
-      backup)
-        log "${BLUE}  backup${NC}"
-        log "    Manually trigger a full, node-local backup to S3."
-        ;;
-      incremental-backup)
-        log "${BLUE}  incremental-backup${NC}"
-        log "    Manually trigger an incremental backup to S3."
-        ;;
-      backup-status)
-        log "${BLUE}  backup-status${NC}"
-        log "    Check the status of the last completed backup for a node."
-        log_arg "--source-host <host>" "Check status for a different host."
-        log_arg "--json" "Output results in machine-readable JSON format."
-        ;;
-      snapshot)
-        log "${BLUE}  snapshot [keyspaces]${NC}"
-        log "    Take an ad-hoc snapshot with a generated tag. Keyspaces are comma-separated."
-        ;;
-      restore)
-        log "${BLUE}  restore${NC}"
-        log "    Restore data from S3. Run without arguments for an interactive wizard."
-        ;;
-      assassinate)
-        log "${BLUE}  assassinate <dead_node_ip>${NC}"
-        log "    Forcibly remove a dead node from the cluster's gossip ring."
-        ;;
-      stress)
-        log "${BLUE}  stress [options]${NC}"
-        log "    Run 'cassandra-stress' via a robust wrapper."
-        log_arg "-w <count>" "Number of rows to write (e.g., 10M)."
-        log_arg "-r <count>" "Number of rows to read."
-        ;;
-      manual)
-        log "${BLUE}  manual${NC}"
-        log "    Display the full operations manual in the terminal."
-        ;;
-      upgrade-check)
-        log "${BLUE}  upgrade-check${NC}"
-        log "    Run pre-flight checks before a major version upgrade."
-        ;;
-      backup-guide)
-        log "${BLUE}  backup-guide${NC}"
-        log "    Display the full backup and recovery guide."
-        ;;
-      puppet-guide)
-        log "${BLUE}  puppet-guide${NC}"
-        log "    Display the Puppet architecture guide."
-        ;;
-    esac
-    log ""
-  done
-  log "${BOLD}optional arguments:${NC}"
-  log "  -h, --help            show this help message and exit"
-  log ""
-}
-
-
-# --- Main Script Logic ---
-if [[ "$#" -eq 0 || "$1" == "-h" || "$1" == "--help" ]]; then
-    usage
+# --- Main Command Router ---
+if [ "$#" -eq 0 ]; then
+    show_help
     exit 0
 fi
 
-# Ensure all operations are run with root privileges
-if [ "$(id -u)" -ne 0 ]; then
-  log "${RED}Error: This script must be run as root or with sudo.${NC}" >&2
-  exit 1
+# The main command is the first argument
+COMMAND=$1
+
+# Handle a global help request
+if [ "$COMMAND" = "-h" ] || [ "$COMMAND" = "--help" ]; then
+    show_help
+    exit 0
 fi
 
-COMMAND="$1"
-MANAGE_BIN_DIR="/usr/local/bin"
+# The script to execute, defaults to the command name with a .sh extension
+# This allows for commands like 'health' to map to 'node_health_check.sh'
+SCRIPT_NAME="${COMMAND}.sh"
 
 case "$COMMAND" in
     health)
-      shift
-      "$MANAGE_BIN_DIR/node_health_check.sh" "$@"
-      ;;
-    cluster-health)
-      shift
-      "$MANAGE_BIN_DIR/cluster-health.sh" "$@"
-      ;;
-    disk-health)
-      shift
-      "$MANAGE_BIN_DIR/disk-health-check.sh" "$@"
-      ;;
-    version)
-      shift
-      "$MANAGE_BIN_DIR/version-check.sh" "$@"
-      ;;
-    stop)
-      shift
-      "$MANAGE_BIN_DIR/stop-node.sh" "$@"
-      ;;
+        SCRIPT_NAME="node_health_check.sh"
+        ;;
     restart)
-      shift
-      "$MANAGE_BIN_DIR/rolling_restart.sh" "$@"
-      ;;
+        SCRIPT_NAME="rolling_restart.sh"
+        ;;
+    stop)
+        SCRIPT_NAME="stop-node.sh"
+        ;;
     reboot)
-      shift
-      "$MANAGE_BIN_DIR/reboot-node.sh" "$@"
-      ;;
-    drain)
-      shift
-      "$MANAGE_BIN_DIR/drain-node.sh" "$@"
-      ;;
-    decommission)
-      shift
-      "$MANAGE_BIN_DIR/decommission-node.sh" "$@"
-      ;;
+        SCRIPT_NAME="reboot-node.sh"
+        ;;
     replace)
-      shift
-      "$MANAGE_BIN_DIR/prepare-replacement.sh" "$@"
-      ;;
-    rebuild)
-      shift
-      "$MANAGE_BIN_DIR/rebuild-node.sh" "$@"
-      ;;
+        SCRIPT_NAME="prepare-replacement.sh"
+        ;;
     repair)
-      shift
-      "$MANAGE_BIN_DIR/full-repair.sh" "$@"
-      ;;
+        SCRIPT_NAME="full-repair.sh"
+        ;;
     cleanup)
-      shift
-      "$MANAGE_BIN_DIR/cleanup-node.sh" "$@"
-      ;;
+        SCRIPT_NAME="cleanup-node.sh"
+        ;;
     compact)
-      shift
-      "$MANAGE_BIN_DIR/compaction-manager.sh" "$@"
-      ;;
+        SCRIPT_NAME="compaction-manager.sh"
+        ;;
     garbage-collect)
-      shift
-      "$MANAGE_BIN_DIR/garbage-collect.sh" "$@"
-      ;;
+        SCRIPT_NAME="garbage-collect.sh"
+        ;;
     upgrade-sstables)
-      shift
-      "$MANAGE_BIN_DIR/upgrade-sstables.sh" "$@"
-      ;;
+        SCRIPT_NAME="upgrade-sstables.sh"
+        ;;
     backup)
-      shift
-      "$MANAGE_BIN_DIR/full-backup-to-s3.sh" "$@"
-      ;;
+        SCRIPT_NAME="full-backup-to-s3.sh"
+        ;;
     incremental-backup)
-      shift
-      "$MANAGE_BIN_DIR/incremental-backup-to-s3.sh" "$@"
-      ;;
+        SCRIPT_NAME="incremental-backup-to-s3.sh"
+        ;;
     backup-status)
-      shift
-      "$MANAGE_BIN_DIR/backup-status.sh" "$@"
-      ;;
-    snapshot)
-      shift
-      "$MANAGE_BIN_DIR/take-snapshot.sh" "$@"
-      ;;
+        SCRIPT_NAME="backup-status.sh"
+        ;;
+    backup-verify)
+        SCRIPT_NAME="verify-backup.sh"
+        ;;
     restore)
-      shift
-      "$MANAGE_BIN_DIR/restore-from-s3.sh" "$@"
-      ;;
+        SCRIPT_NAME="restore-from-s3.sh"
+        ;;
+    snapshot)
+        SCRIPT_NAME="take-snapshot.sh"
+        ;;
     assassinate)
-      shift
-      "$MANAGE_BIN_DIR/assassinate-node.sh" "$@"
-      ;;
+        SCRIPT_NAME="assassinate-node.sh"
+        ;;
     stress)
-      shift
-      "$MANAGE_BIN_DIR/stress-test.sh" "$@"
-      ;;
+        SCRIPT_NAME="stress-test.sh"
+        ;;
     manual)
-      "$MANAGE_BIN_DIR/cassandra-manual.sh"
-      ;;
+        SCRIPT_NAME="cassandra-manual.sh"
+        ;;
     upgrade-check)
-      shift
-      "$MANAGE_BIN_DIR/cassandra-upgrade-precheck.sh" "$@"
-      ;;
+        SCRIPT_NAME="cassandra-upgrade-precheck.sh"
+        ;;
     backup-guide)
-      less -R /usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md
-      ;;
+        less -R "/usr/share/doc/cassandra_pfpt/BACKUP_AND_RECOVERY_GUIDE.md"
+        exit 0
+        ;;
     puppet-guide)
-      less -R /usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md
-      ;;
+        less -R "/usr/share/doc/cassandra_pfpt/PUPPET_ARCHITECTURE_GUIDE.md"
+        exit 0
+        ;;
+    -h|--help)
+        show_help
+        exit 0
+        ;;
     *)
-      log "${RED}Error: Unknown command '$COMMAND'${NC}"
-      usage
-      exit 1
-      ;;
+        # Check if a script with that name exists. If so, we'll run it.
+        # If not, it's an unknown command.
+        if [ ! -f "${SCRIPT_DIR}/${SCRIPT_NAME}" ]; then
+            echo -e "${RED}Error: Unknown command '$COMMAND'${NC}" >&2
+            echo "Run 'cass-ops --help' for a list of available commands." >&2
+            exit 1
+        fi
+        ;;
 esac
 
-exit $?
+# The script to be executed is at SCRIPT_DIR/SCRIPT_NAME
+TARGET_SCRIPT="${SCRIPT_DIR}/${SCRIPT_NAME}"
+
+# Shift away the main command so the rest of the arguments are passed to the target script
+shift
+
+# Check if the target script exists and is executable
+if [ -x "$TARGET_SCRIPT" ]; then
+    # Pass all remaining arguments to the target script
+    "$TARGET_SCRIPT" "$@"
+else
+    echo -e "${RED}Error: Command script for '$COMMAND' not found or not executable at '$TARGET_SCRIPT'${NC}" >&2
+    exit 127
+fi

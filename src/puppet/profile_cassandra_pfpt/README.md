@@ -156,7 +156,7 @@ usage: cass-ops [-h] <command> ...
 Unified operations script for Cassandra.
 
 Available Commands:
-  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
+  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,backup-verify,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
 
   health              Run a comprehensive health check on the local node.
   cluster-health      Quickly check cluster connectivity and nodetool status.
@@ -177,6 +177,7 @@ Available Commands:
   backup              Manually trigger a full, node-local backup to S3.
   incremental-backup  Manually trigger an incremental backup to S3.
   backup-status       Check the status of the last completed backup for a node.
+  backup-verify       Verify the integrity and restorability of the latest backup set.
   snapshot            Take an ad-hoc snapshot with a generated tag.
   restore             Restore data from S3. Run without arguments for an interactive wizard.
   assassinate         Forcibly remove a dead node from the cluster's gossip ring.
