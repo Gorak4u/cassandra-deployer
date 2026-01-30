@@ -30,42 +30,40 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # --- Usage ---
 usage() {
-    cat <<EOF
-${BOLD}Cluster Orchestration Tool${NC}
-
-A wrapper to execute commands or scripts on multiple remote nodes via SSH.
-Supports both static node lists and dynamic inventory fetching via the 'qv' tool.
-
-${YELLOW}Usage:${NC}
-  $0 [OPTIONS]
-
-${YELLOW}Node Selection (choose one method):${NC}
-  -n, --nodes <list>        A comma-separated list of target node hostnames or IPs.
-  -f, --nodes-file <path>   A file containing a list of target nodes, one per line.
-  --node <host>             Specify a single target node.
-  --qv-query "<query>"      A quoted string of 'qv' flags to dynamically fetch a node list.
-
-${YELLOW}Action (choose one):${NC}
-  -c, --command <command>   The shell command to execute on each node.
-  -s, --script <path>       The path to a local script to copy and execute on each node.
-
-${YELLOW}Execution Options:${NC}
-  -l, --user <user>         The SSH user to connect as. Defaults to the current user.
-  -P, --parallel            Execute on all nodes in parallel instead of sequentially.
-  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem").
-
-  -h, --help                Show this help message.
-
-${YELLOW}Examples:${NC}
-  ${GREEN}# Run a health check on all nodes sequentially:${NC}
-  $0 -n "node1,node2,node3" -c "sudo cass-ops health"
-
-  ${GREEN}# Dynamically get all Cassandra nodes in the SC4 datacenter and run a repair in parallel:${NC}
-  $0 --qv-query "-r role_cassandra -d SC4" -P -c "sudo cass-ops repair"
-
-  ${GREEN}# Execute a local script on a single node as the 'admin' user:${NC}
-  $0 --node node1 -l admin -s ./local_script.sh
-EOF
+    echo -e "${BOLD}Cluster Orchestration Tool${NC}"
+    echo
+    echo -e "A wrapper to execute commands or scripts on multiple remote nodes via SSH."
+    echo -e "Supports both static node lists and dynamic inventory fetching via the 'qv' tool."
+    echo
+    echo -e "${YELLOW}Usage:${NC}"
+    echo -e "  $0 [OPTIONS]"
+    echo
+    echo -e "${YELLOW}Node Selection (choose one method):${NC}"
+    echo -e "  -n, --nodes <list>        A comma-separated list of target node hostnames or IPs."
+    echo -e "  -f, --nodes-file <path>   A file containing a list of target nodes, one per line."
+    echo -e "  --node <host>             Specify a single target node."
+    echo -e "  --qv-query \"<query>\"      A quoted string of 'qv' flags to dynamically fetch a node list."
+    echo
+    echo -e "${YELLOW}Action (choose one):${NC}"
+    echo -e "  -c, --command <command>   The shell command to execute on each node."
+    echo -e "  -s, --script <path>       The path to a local script to copy and execute on each node."
+    echo
+    echo -e "${YELLOW}Execution Options:${NC}"
+    echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
+    echo -e "  -P, --parallel            Execute on all nodes in parallel instead of sequentially."
+    echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
+    echo
+    echo -e "  -h, --help                Show this help message."
+    echo
+    echo -e "${YELLOW}Examples:${NC}"
+    echo -e "  ${GREEN}# Run a health check on all nodes sequentially:${NC}"
+    echo -e "  $0 -n \"node1,node2,node3\" -c \"sudo cass-ops health\""
+    echo
+    echo -e "  ${GREEN}# Dynamically get all Cassandra nodes in the SC4 datacenter and run a repair in parallel:${NC}"
+    echo -e "  $0 --qv-query \"-r role_cassandra -d SC4\" -P -c \"sudo cass-ops repair\""
+    echo
+    echo -e "  ${GREEN}# Execute a local script on a single node as the 'admin' user:${NC}"
+    echo -e "  $0 --node node1 -l admin -s ./local_script.sh"
     exit 1
 }
 
