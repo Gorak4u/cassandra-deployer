@@ -39,6 +39,7 @@ The script can run any command or execute a local script file on your cluster no
 | `--timeout` | `<seconds>` | Set a timeout in seconds for the command on each node. `0` for no timeout. |
 | `--output-dir`| `<path>` | Save the output from each node to a separate file in the specified directory. |
 | `--retries` | `<N>` | Number of times to retry a failed command on a node. Default: 0. |
+| `--rolling-op` | `<type>` | Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. This is a shortcut that enforces sequential execution and an inter-node health check. |
 | `--pre-exec-check` | `<path>` | A local script to run before executing. If it fails, cassy.sh aborts. |
 | `--post-exec-check`| `<path>` | A local script to run after executing on all nodes. |
 | `--inter-node-check`| `<path>` | In sequential mode, a local script to run after each node. If it fails, the rolling execution stops. |
@@ -92,23 +93,32 @@ You can use `cassy.sh` with the `--json` flag to programmatically audit your clu
 ```
 
 #### **Pattern 4: Fully Automated Rolling Operations**
-For the most critical operations, you need a higher level of automation. The repository now includes a set of pre-built scripts in the `scripts/` directory to handle safe, automated rolling operations.
+For the most critical operations, `cassy.sh` includes a powerful `--rolling-op` flag to handle safe, automated rolling operations. This is the recommended method for tasks like restarts, reboots, or Puppet runs.
 
-These scripts use a master health check script (`scripts/check_cluster_health.sh`) which has built-in retry logic. It runs between each node operation to ensure the cluster remains stable.
+This feature uses a master health check script (`scripts/check_cluster_health.sh`) which has built-in retry logic. It runs between each node operation to ensure the cluster remains stable. If the health check fails at any point, the entire rolling operation is halted to prevent cascading failures.
 
-*   `scripts/rolling_restart.sh "<qv_query>"`
-*   `scripts/rolling_reboot.sh "<qv_query>"`
-*   `scripts/rolling_puppet_run.sh "<qv_query>"`
+The `--rolling-op` flag takes one argument: the **operation** to perform.
+
+**Available Operations:**
+*   `restart`: Performs a safe rolling restart of the Cassandra service (`cass-ops restart`).
+*   `reboot`: Performs a safe rolling reboot of the nodes (`cass-ops reboot`).
+*   `puppet`: Performs a rolling Puppet agent run (`puppet agent -t`).
 
 **Usage Example:**
 
 To perform a safe rolling restart of all Cassandra nodes in the AWSLAB datacenter:
-
 ```bash
-./scripts/rolling_restart.sh "-r role_cassandra_pfpt -d AWSLAB"
+./scripts/cassy.sh --rolling-op restart --qv-query "-r role_cassandra_pfpt -d AWSLAB"
 ```
 
-This single command will orchestrate the entire process, node by node, with health checks at every step.
+To perform a rolling Puppet run on the same set of nodes:
+```bash
+./scripts/cassy.sh --rolling-op puppet --qv-query "-r role_cassandra_pfpt -d AWSLAB"
+```
+
+This feature provides a single, robust way to orchestrate complex operations, node by node, with health checks at every step.
+
+> **Note:** The older `rolling_restart.sh`, `rolling_reboot.sh`, and `rolling_puppet_run.sh` scripts are now simple wrappers around this new functionality for backward compatibility.
 
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 

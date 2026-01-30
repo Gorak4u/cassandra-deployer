@@ -22,6 +22,7 @@ RETRIES=0
 PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
 INTER_NODE_CHECK=""
+ROLLING_OP=""
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -70,6 +71,7 @@ usage() {
     echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
     echo
     echo -e "${YELLOW}Automation & Safety:${NC}"
+    echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. This is a shortcut that enforces sequential execution and an inter-node health check."
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
@@ -106,6 +108,7 @@ while [[ "$#" -gt 0 ]]; do
         --timeout) TIMEOUT="$2"; shift ;;
         --output-dir) OUTPUT_DIR="$2"; shift ;;
         --retries) RETRIES="$2"; shift ;;
+        --rolling-op) ROLLING_OP="$2"; shift ;;
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
         --inter-node-check) INTER_NODE_CHECK="$2"; shift ;;
@@ -116,9 +119,40 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # --- Validation ---
+
+# Rolling op is a shortcut that sets command, inter_node_check, and enforces sequential execution
+if [ -n "$ROLLING_OP" ]; then
+    if [ -n "$COMMAND" ] || [ -n "$SCRIPT_PATH" ]; then
+        log_error "Cannot use --command or --script with the --rolling-op shortcut."
+        usage
+    fi
+    if [ "$PARALLEL" = true ]; then
+        log_error "--rolling-op can only be used in sequential mode (without --parallel)."
+        usage
+    fi
+
+    # Set command and inter-node check based on operation type
+    INTER_NODE_CHECK="./scripts/check_cluster_health.sh"
+    case "$ROLLING_OP" in
+        restart)
+            COMMAND="sudo /usr/local/bin/cass-ops restart"
+            ;;
+        reboot)
+            COMMAND="sudo /usr/local/bin/cass-ops reboot"
+            ;;
+        puppet)
+            COMMAND="sudo puppet agent -t"
+            ;;
+        *)
+            log_error "Unknown rolling operation: '$ROLLING_OP'. Use restart, reboot, or puppet."
+            usage
+            ;;
+    esac
+fi
+
 if [ ${#NODES[@]} -eq 0 ] && [ -z "$QV_QUERY" ]; then log_error "No target nodes specified. Use --nodes, --nodes-file, --node, or --qv-query."; usage; fi
 if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either a static node source (--nodes, etc.) or --qv-query, but not both."; usage; fi
-if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command or --script."; usage; fi
+if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; fi
 if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
 if [ "$PARALLEL" = true ] && [ -n "$INTER_NODE_CHECK" ]; then log_error "--inter-node-check can only be used in sequential mode (without --parallel)."; exit 1; fi
