@@ -331,21 +331,15 @@ run_task() {
         local SSH_CMD_PREFIX=""
         if command -v stdbuf &> /dev/null; then
             SSH_CMD_PREFIX="stdbuf -oL -eL"
-        else
-            # Only warn once in sequential mode to avoid spamming logs
-            if [ "$PARALLEL" = false ] && [ "$attempt" -eq 1 ]; then
-                log_warn "Command 'stdbuf' not found. SSH output will be buffered, not line-by-line."
-            fi
         fi
         
         output_buffer=$({
             if [ -n "$COMMAND" ]; then
-                # Use stdbuf if available for line-buffered output, otherwise just run the command
                 $SSH_CMD_PREFIX $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
             elif [ -n "$SCRIPT_PATH" ]; then
                 (
                   scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
-                  ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
+                  $SSH_CMD_PREFIX ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
                 )
             fi
         } 2>&1)
@@ -402,7 +396,6 @@ if [ "$PARALLEL" = true ]; then
         touch "failed_nodes.lock"
         trap 'rm -f "failed_nodes.$$" "failed_nodes.lock"' EXIT
     else
-        log_warn "Command 'flock' not found. Parallel failure tracking will not be atomic, which may be an issue with high concurrency."
         trap 'rm -f "failed_nodes.$$"' EXIT
     fi
 
@@ -506,6 +499,8 @@ else
     done
     exit 1
 fi
+
+    
 
     
 
