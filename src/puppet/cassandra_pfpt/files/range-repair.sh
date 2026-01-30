@@ -82,7 +82,14 @@ trap 'rm -f "$LOCK_FILE"' EXIT
 log_message "${BLUE}--- Starting Granular Repair Manager ---${NC}"
 log_message "${BLUE}Lock file created at $LOCK_FILE with PID $$.${NC}"
 
-# 3. Pre-flight disk space check
+# 3. Pre-flight health checks
+log_message "${BLUE}Performing pre-flight cluster health check...${NC}"
+if ! /usr/local/bin/cluster-health.sh --silent; then
+    log_message "${RED}ERROR: Cluster health check failed. Aborting repair to prevent running on an unstable cluster.${NC}"
+    exit 1
+fi
+log_message "${GREEN}Cluster health OK.${NC}"
+
 log_message "${BLUE}Performing pre-flight disk usage check...${NC}"
 if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
     log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting repair to prevent disk space issues.${NC}"

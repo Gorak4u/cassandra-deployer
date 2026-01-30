@@ -21,6 +21,14 @@ if [ -z "$SOURCE_DC" ]; then
     exit 1
 fi
 
+log_message "${BLUE}--- Performing Pre-flight Cluster Health Check ---${NC}"
+if ! /usr/local/bin/cluster-health.sh --silent; then
+    log_message "${RED}Cluster health check failed. Aborting rebuild to prevent running on an unstable cluster.${NC}"
+    exit 1
+fi
+log_message "${GREEN}Cluster health check passed. Proceeding with rebuild.${NC}"
+
+
 log_message "${BLUE}--- Starting Node Rebuild from DC: $SOURCE_DC ---${NC}"
 log_message "${YELLOW}This will stream data from other replicas to this node.${NC}"
 log_message "${YELLOW}Ensure this node is stopped, its data directory is empty, and it has started up again before running this.${NC}"

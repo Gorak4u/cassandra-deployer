@@ -13,6 +13,13 @@ log_message() {
   echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
 
+log_message "${BLUE}--- Performing Pre-flight Cluster Health Check ---${NC}"
+if ! /usr/local/bin/cluster-health.sh --silent; then
+    log_message "${RED}Cluster health check failed. Aborting decommission to prevent running on an unstable cluster.${NC}"
+    exit 1
+fi
+log_message "${GREEN}Cluster health check passed. Proceeding with decommission.${NC}"
+
 log_message "${BLUE}INFO: This script will decommission the local Cassandra node.${NC}"
 log_message "${YELLOW}This process will stream all of its data to other nodes in the cluster.${NC}"
 log_message "${YELLOW}It cannot be undone.${NC}"

@@ -18,7 +18,7 @@ usage() {
     echo "  Checks Cassandra cluster health."
     echo ""
     echo "Options:"
-    echo "  -s, --silent      Enable silent mode. Only prints a final status message."
+    echo "  -s, --silent      Enable silent mode. Only prints a final status message on failure."
     echo "  -h, --help        Show this help message."
     exit 1
 }
@@ -81,7 +81,7 @@ run_checks() {
 
     # Grep for any nodes that are NOT Up/Normal (UN). This includes DN, UJ, UL, etc.
     # Exclude header and blank lines.
-    NON_UN_NODES=$(echo "$NODETOOL_STATUS" | tail -n +6 | head -n -1 | grep -v '^UN ' || true)
+    NON_UN_NODES=$(echo "$NODETOOL_STATUS" | tail -n +6 | head -n -1 | grep -Ev '^(UN|Address)' | grep -v '^\s*$' || true)
     
     if [ -n "$NON_UN_NODES" ]; then
         log_message "${RED}Nodetool status: FAILED - Not all nodes are in UN state.${NC}"
@@ -123,14 +123,14 @@ run_checks() {
 # --- Execution ---
 if run_checks; then
     log_message "${GREEN}Cluster health check completed successfully.${NC}"
-    if [ "$SILENT" = true ]; then
-        echo -e "${GREEN}SUCCESS: Cluster is healthy.${NC}"
-    fi
     exit 0
 else
     if [ "$SILENT" = true ]; then
-        echo -e "${RED}FAILED: $FAILURE_REASON${NC}"
+        # Print only the failure reason to stderr for scripting
+        echo -e "${RED}FAILED: $FAILURE_REASON${NC}" >&2
+    else
+        # The detailed error is already logged by `log_message` in non-silent mode.
+        log_message "${RED}Cluster health check FAILED.${NC}"
     fi
-    # The detailed error is already logged by `log_message` in non-silent mode.
     exit 1
 fi

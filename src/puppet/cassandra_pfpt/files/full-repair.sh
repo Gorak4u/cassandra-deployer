@@ -60,6 +60,22 @@ done
 # --- Main Logic ---
 log_message "${BLUE}--- Starting Manual Full Repair ---${NC}"
 
+# Pre-flight health checks
+log_message "${BLUE}Performing pre-flight cluster health check...${NC}"
+if ! /usr/local/bin/cluster-health.sh --silent; then
+    log_message "${RED}ERROR: Cluster health check failed. Aborting repair to prevent running on an unstable cluster.${NC}"
+    exit 1
+fi
+log_message "${GREEN}Cluster health OK.${NC}"
+
+log_message "${BLUE}Performing pre-flight disk space check...${NC}"
+if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
+    log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting repair.${NC}"
+    exit 1
+fi
+log_message "${GREEN}Disk usage OK. Proceeding with repair.${NC}"
+
+
 # Build the nodetool command
 CMD="nodetool repair"
 TARGET_DESC="all non-system keyspaces"
@@ -80,16 +96,8 @@ if [[ -n "$KEYSPACE" ]]; then
 fi
 
 log_message "${BLUE}Target: $TARGET_DESC${NC}"
-log_message "${BLUE}Disk path to check: $DISK_CHECK_PATH${NC}"
 log_message "Command to be executed: $CMD"
 
-# Pre-flight disk space check
-log_message "${BLUE}Performing pre-flight disk space check...${NC}"
-if ! /usr/local/bin/disk-health-check.sh -p "$DISK_CHECK_PATH" -w "$WARNING_THRESHOLD" -c "$CRITICAL_THRESHOLD"; then
-    log_message "${RED}ERROR: Pre-flight disk usage check failed. Aborting repair.${NC}"
-    exit 1
-fi
-log_message "${GREEN}Disk usage OK. Proceeding with repair.${NC}"
 
 # Execute the command
 if $CMD; then
