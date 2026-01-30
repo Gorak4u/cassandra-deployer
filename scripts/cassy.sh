@@ -21,7 +21,7 @@ TIMEOUT=0 # 0 for no timeout
 RETRIES=0
 PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
-INTER_NODE_CHECK=""
+INTER_NODE_CHECK="" # Kept for backward compatibility but hidden
 ROLLING_OP=""
 
 # --- Color Codes ---
@@ -71,11 +71,10 @@ usage() {
     echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
     echo
     echo -e "${YELLOW}Automation & Safety:${NC}"
-    echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. This is a shortcut that enforces sequential execution and an inter-node health check."
+    echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with an internal health check between each node."
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
-    echo -e "  --inter-node-check <path> A local script to run after each node in sequential mode. If it fails, the rolling execution stops."
     echo
     echo -e "  -h, --help                Show this help message."
     exit 1
@@ -111,7 +110,7 @@ while [[ "$#" -gt 0 ]]; do
         --rolling-op) ROLLING_OP="$2"; shift ;;
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
-        --inter-node-check) INTER_NODE_CHECK="$2"; shift ;;
+        --inter-node-check) INTER_NODE_CHECK="$2"; shift ;; # Hidden/deprecated flag
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage ;;
     esac
@@ -120,7 +119,7 @@ done
 
 # --- Validation ---
 
-# Rolling op is a shortcut that sets command, inter_node_check, and enforces sequential execution
+# Rolling op is a shortcut that sets command and enforces sequential execution
 if [ -n "$ROLLING_OP" ]; then
     if [ -n "$COMMAND" ] || [ -n "$SCRIPT_PATH" ]; then
         log_error "Cannot use --command or --script with the --rolling-op shortcut."
@@ -131,8 +130,7 @@ if [ -n "$ROLLING_OP" ]; then
         usage
     fi
 
-    # Set command and inter-node check based on operation type
-    INTER_NODE_CHECK="./scripts/check_cluster_health.sh"
+    # Set command based on operation type
     case "$ROLLING_OP" in
         restart)
             COMMAND="sudo /usr/local/bin/cass-ops restart"
@@ -235,6 +233,47 @@ if [ -n "$SSH_USER" ]; then SSH_USER_ARG="${SSH_USER}@"; fi
 ACTION_DESC=""
 if [ -n "$COMMAND" ]; then ACTION_DESC="command: $COMMAND"; else ACTION_DESC="script: $SCRIPT_PATH"; fi
 log_info "Executing $ACTION_DESC"
+
+_run_health_check() {
+    local node_to_check="$1"
+    local max_retries=12
+    local retry_delay=15
+
+    log_info "--- [Health Check] Verifying stability of ${node_to_check} ---"
+
+    for i in $(seq 1 $max_retries); do
+        log_info "  [Health Check] Cycle ${i}/${max_retries} for ${node_to_check}..."
+
+        # Check 1: Ping
+        if ! ping -c 3 "${node_to_check}" >/dev/null 2>&1; then
+            log_warn "    - FAIL: Node is not responding to ping. Will retry in ${retry_delay}s."
+            sleep $retry_delay
+            continue
+        fi
+        log_info "    - OK: Node is reachable via ping."
+
+        # Check 2: SSH
+        if ! ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "echo 'SSH OK'" >/dev/null 2>&1; then
+            log_warn "    - FAIL: SSH connection failed. Will retry in ${retry_delay}s."
+            sleep $retry_delay
+            continue
+        fi
+        log_info "    - OK: SSH is responsive."
+
+        # Check 3: Cluster Health from the node's perspective
+        if ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "sudo /usr/local/bin/cass-ops cluster-health --silent" >/dev/null 2>&1; then
+            log_success "--- [Health Check] SUCCESS: Node ${node_to_check} is healthy and cluster is stable. ---"
+            return 0 # Success
+        fi
+
+        log_warn "    - FAIL: 'cass-ops cluster-health' failed on the node. Service may not be ready. Will retry in ${retry_delay}s."
+        sleep $retry_delay
+    done
+
+    log_error "--- [Health Check] CRITICAL: Node ${node_to_check} did not pass health check after ${max_retries} attempts. ---"
+    return 1 # Failure
+}
+
 
 run_task() {
     local node="$1"
@@ -365,19 +404,25 @@ else
             break
         fi
 
-        # If an inter-node check is specified, run it.
-        if [ -n "$INTER_NODE_CHECK" ]; then
-            log_info "--- Running Inter-Node Check after operating on ${node} ---"
-            # Pass the hostname of the node that was just operated on to the check script
-            if ! "$INTER_NODE_CHECK" "$node"; then
-                log_error "Inter-node check failed after node ${node}. Aborting rolling execution."
-                # Manually add the node that caused the failure, as the task itself succeeded.
+        # If this is a rolling operation, run the internal health check.
+        if [ -n "$ROLLING_OP" ]; then
+            if ! _run_health_check "$node"; then
+                log_error "Inter-node health check failed after operating on node ${node}. Aborting rolling execution."
+                # The task itself succeeded, but the check failed. Manually add the node to the failure list.
                 failed_nodes+=("$node")
                 break
             fi
-            log_success "Inter-node check passed."
+        # This is for backward compatibility with the now-hidden --inter-node-check flag
+        elif [ -n "$INTER_NODE_CHECK" ]; then
+            log_info "--- Running external Inter-Node Check after operating on ${node} ---"
+            if ! "$INTER_NODE_CHECK" "$node"; then
+                log_error "External inter-node check failed after node ${node}. Aborting rolling execution."
+                failed_nodes+=("$node")
+                break
+            fi
+            log_success "External inter-node check passed."
         fi
-    fi
+    done
 fi
 
 
