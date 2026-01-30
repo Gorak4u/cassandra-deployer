@@ -433,7 +433,13 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::authenticator` (String): The authentication backend. Default: `'PasswordAuthenticator'`.
 *   `profile_cassandra_pfpt::authorizer` (String): The authorization backend. Default: `'CassandraAuthorizer'`.
 *   `profile_cassandra_pfpt::role_manager` (String): The role management backend. Default: `'CassandraRoleManager'`.
-*   `profile_cassandra_pfpt::system_keyspaces_replication` (Hash): Defines the replication factor for system keyspaces in a multi-DC setup. Example: `{ 'dc1' => 3, 'dc2' => 3 }`. Default: `{}`.
+*   `profile_cassandra_pfpt::system_keyspaces_replication` (Hash): Defines the replication strategy for system keyspaces (`system_auth`, `system_distributed`, `system_traces`). It safely defaults to `NetworkTopologyStrategy` with a replication factor of 3 in the node's own datacenter. **For multi-datacenter clusters, you MUST override this in Hiera.** Here is the required configuration for a two-datacenter setup:
+    ```yaml
+    # In your Hiera data (e.g., common.yaml)
+    profile_cassandra_pfpt::system_keyspaces_replication:
+      'dc1': 3
+      'dc2': 3
+    ```
 *   `profile_cassandra_pfpt::schema_users` (Hash): A hash defining user accounts. Default: `{}`.
 *   `profile_cassandra_pfpt::schema_keyspaces` (Hash): A hash defining keyspaces. Default: `{}`.
 *   `profile_cassandra_pfpt::schema_tables` (Hash): A hash defining tables. Default: `{}`.
@@ -524,6 +530,7 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
     
 
     
+
 
 
 
