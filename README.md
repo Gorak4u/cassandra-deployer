@@ -188,6 +188,33 @@ To see all options, run the script with the `--help` flag:
 ./scripts/split-cassandra-dcs.sh --help
 ```
 
+#### **Pattern 7: Renaming a Cluster (Downtime Required)**
+
+Renaming a Cassandra cluster is a rare but critical operation that requires a full cluster shutdown. The `scripts/rename-cassandra-cluster.sh` orchestrator automates this high-risk procedure.
+
+**Prerequisites:**
+
+1.  **Downtime:** Schedule a maintenance window. This is **not** a zero-downtime operation.
+2.  **Configuration Plan:** Know the old cluster name and the desired new name.
+
+**Usage Example:**
+
+```bash
+./scripts/rename-cassandra-cluster.sh \
+  --qv-query "-r role_cassandra_pfpt -d us-east-1" \
+  --old-name "MyProductionCluster" \
+  --new-name "MyPrimaryCluster"
+```
+
+**What the script does:**
+
+1.  **Validation:** Confirms that the current cluster name matches the provided old name.
+2.  **Live `system.local` Update:** While the cluster is still running, it updates the `system.local` table on all nodes with the new cluster name.
+3.  **Full Shutdown:** It safely stops the `cassandra` service on all nodes in the cluster.
+4.  **Config File Update:** It uses `sed` to update the `cluster_name` setting in `cassandra.yaml` on every node.
+5.  **Full Start:** It issues a start command to all nodes.
+6.  **Final Instructions:** After the script completes, you **must** update your Hiera configuration (`profile_cassandra_pfpt::cluster_name`) to match the new name to make the change permanent against future Puppet runs.
+
 
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 
