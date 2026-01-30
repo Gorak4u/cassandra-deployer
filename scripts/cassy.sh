@@ -246,7 +246,6 @@ if [ "$PARALLEL" = true ]; then
         log_info "--- Executing with a maximum of ${PARALLEL_BATCH_SIZE} concurrent jobs ---"
 
         # Create a named pipe (FIFO) to manage concurrency.
-        local fifo
         fifo=$(mktemp -u)
         mkfifo "$fifo" || { log_error "Failed to create FIFO for concurrency management."; exit 1; }
         
@@ -261,7 +260,7 @@ if [ "$PARALLEL" = true ]; then
             printf '\n' >&3
         done
 
-        local all_pids=()
+        all_pids=()
         for node in "${NODES[@]}"; do
             # "Acquire" a token by reading one line from the FIFO. This blocks if no tokens are available.
             read -r -u 3
