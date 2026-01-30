@@ -219,11 +219,22 @@ This is an advanced, coordinated, two-phase process.
 
 #### Phase 2: Restore Data (Rolling, Node by Node)
 
-Now, perform a **Full Node Restore (Scenario 2)** on each new machine, **one at a time**.
+Now, perform a **Full Node Restore (Scenario 2)** on each new machine.
 
-1.  **For the first node:** Run the Scenario 2 `full-restore` command. Wait for it to fully initialize and report `UN` in `nodetool status`. This node is now the seed for the new cluster.
-2.  **For all subsequent nodes:** Run the same `full-restore` command on each node, one by one. The script will restore its data and join the running seed. **Wait for each node to report `UN` before starting the next.**
-3.  Once all nodes are restored and online, the cluster recovery is complete.
+> **CRITICAL:** You must perform this process sequentially, **one node at a time**. Wiping and restoring all nodes simultaneously and attempting to start them all at once is a common anti-pattern that can lead to a "split-brain" cluster, gossip failures, and an unstable state. The rolling approach ensures a clean and predictable cluster formation.
+
+1.  **Restore the First Seed Node:**
+    *   Choose one of your new nodes (ideally one that was a seed in the old cluster) to be the first seed of the new cluster.
+    *   On this node, run the Scenario 2 `full-restore` command.
+    *   **Wait for it to fully initialize and report `UN` in `nodetool status`**. This node is now the healthy seed for the new cluster. This may take several minutes.
+
+2.  **Restore Remaining Nodes (Sequentially):**
+    *   Move to the *next* new node.
+    *   Run the same `full-restore` command on this node. It will restore its data and then use the first node as a seed to join the cluster.
+    *   **Wait for this node to also report `UN` in `nodetool status` before proceeding to the next one.**
+    *   Repeat this process for every remaining node in the cluster.
+
+3.  **Verification:** Once all nodes are restored and report `UN`, the cluster recovery is complete. Run `nodetool status` on any node to verify that all nodes are present and healthy.
 
 ---
 
