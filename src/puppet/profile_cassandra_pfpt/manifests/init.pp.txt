@@ -44,7 +44,7 @@ class profile_cassandra_pfpt {
   $saved_caches_dir                 = lookup('profile_cassandra_pfpt::saved_caches_dir', { 'default_value' => '/var/lib/cassandra/saved_caches' })
   $hints_directory                  = lookup('profile_cassandra_pfpt::hints_directory', { 'default_value' => '/var/lib/cassandra/hints' })
   $cdc_raw_directory                = lookup('profile_cassandra_pfpt::cdc_raw_directory', { 'default_value' => '/var/lib/cassandra/cdc_raw' })
-  $manage_bin_dir                   = lookup('profile_cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/bin' })
+  $manage_bin_dir                   = lookup('profile_cassandra_pfpt::manage_bin_dir', { 'default_value' => '/usr/local/sbin' })
 
   # --- JVM & Performance Tuning ---
   $max_heap_size                    = lookup('profile_cassandra_pfpt::max_heap_size', { 'default_value' => '3G' })
@@ -172,8 +172,8 @@ class profile_cassandra_pfpt {
   $backup_parallelism               = lookup('profile_cassandra_pfpt::backup_parallelism', { 'default_value' => 4 })
   $s3_retention_period              = lookup('profile_cassandra_pfpt::s3_retention_period', { 'default_value' => 15 })
   $backup_throttle_rate             = lookup('profile_cassandra_pfpt::backup_throttle_rate', { 'default_value' => '50M/s' })
-  $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/bin/full-backup-to-s3.sh' })
-  $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/bin/incremental-backup-to-s3.sh' })
+  $full_backup_script_path          = lookup('profile_cassandra_pfpt::full_backup_script_path', { 'default_value' => '/usr/local/sbin/full-backup-to-s3.sh' })
+  $incremental_backup_script_path   = lookup('profile_cassandra_pfpt::incremental_backup_script_path', { 'default_value' => '/usr/local/sbin/incremental-backup-to-s3.sh' })
   $full_backup_log_file             = lookup('profile_cassandra_pfpt::full_backup_log_file', { 'default_value' => '/var/log/cassandra/full_backup.log' })
   $incremental_backup_log_file      = lookup('profile_cassandra_pfpt::incremental_backup_log_file', { 'default_value' => '/var/log/cassandra/incremental_backup.log' })
   $backup_exclude_keyspaces         = lookup('profile_cassandra_pfpt::backup_exclude_keyspaces', { 'default_value' => [] })
@@ -228,7 +228,7 @@ class profile_cassandra_pfpt {
   $node_exporter_user               = lookup('profile_cassandra_pfpt::node_exporter_user', { 'default_value' => 'node_exporter' })
   $node_exporter_group              = lookup('profile_cassandra_pfpt::node_exporter_group', { 'default_value' => 'node_exporter' })
   $node_exporter_install_dir        = lookup('profile_cassandra_pfpt::node_exporter_install_dir', { 'default_value' => '/var/lib/node_exporter' })
-  $node_exporter_bin_dir            = lookup('profile_cassandra_pfpt::node_exporter_bin_dir', { 'default_value' => '/usr/local/bin' })
+  $node_exporter_bin_dir            = lookup('profile_cassandra_pfpt::node_exporter_bin_dir', { 'default_value' => '/usr/local/sbin' })
 
 
   # --- Stress Testing ---
