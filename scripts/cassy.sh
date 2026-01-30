@@ -51,13 +51,13 @@ _wait_with_dots() {
         return
     fi
 
-    # Using echo -ne to print without a newline
-    echo -ne "${YELLOW}${message}${NC}"
+    # Using printf for better portability than echo -ne
+    printf "%b" "${YELLOW}${message}${NC}"
     for ((i=0; i<duration; i++)); do
-        echo -ne "${YELLOW}.${NC}"
+        printf "%b" "${YELLOW}.${NC}"
         sleep 1
     done
-    echo "" # Newline after dots are finished
+    printf "\n" # Newline after dots are finished
 }
 
 
@@ -574,6 +574,7 @@ fi
     
 
     
+
 
 
 
