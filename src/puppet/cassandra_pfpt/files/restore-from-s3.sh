@@ -30,6 +30,7 @@ MODE=""
 AUTO_APPROVE=false
 S3_BUCKET_OVERRIDE=""
 SOURCE_HOST_OVERRIDE=""
+THROTTLE_RATE=""
 EFFECTIVE_S3_BUCKET=""
 EFFECTIVE_SOURCE_HOST=""
 BASE_FULL_BACKUP=""
@@ -92,6 +93,7 @@ Options:
   --table <table>               Optional. Narrows the granular restore to a single table.
   --source-host <hostname>      Specify the source host for the backup. Defaults to the current hostname.
   --s3-bucket <name>            Override the S3 bucket from config.json.
+  --throttle <rate>             Throttle S3 download speed (e.g., 50M/s, 1G/s). Uses AWS_MAX_BANDWIDTH.
   --yes                         Skips all interactive confirmation prompts. Use with caution.
 EOF
     exit 1
@@ -220,7 +222,8 @@ run_interactive_mode() {
         
         log_info "Downloading schema map from base backup '$BASE_FULL_BACKUP'..."
         local schema_map_content
-        schema_map_content=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+        local THROTTLE_PREFIX="" # No throttle for tiny metadata files
+        schema_map_content=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
         if ! echo "$schema_map_content" | jq -e . > /dev/null 2>&1; then
             log_error "Could not download or parse schema_mapping.json from base backup. Cannot list keyspaces."
             exit 1
@@ -330,7 +333,8 @@ find_backup_chain() {
     log_info "Analyzing backup manifests to build restore chain..."
     for backup_ts in "${sorted_backups[@]}"; do
         local manifest_content
-        manifest_content=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null)
+        local THROTTLE_PREFIX="" # No throttle for tiny metadata files
+        manifest_content=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null)
         
         # Check if manifest is empty or not valid JSON
         if ! echo "$manifest_content" | jq -e . > /dev/null 2>&1; then
@@ -365,6 +369,10 @@ download_and_extract_table() {
 
     # Required variables for the subshell
     EFFECTIVE_S3_BUCKET=${S3_BUCKET_OVERRIDE:-$(jq -r '.s3_bucket_name' "$CONFIG_FILE")}
+    local THROTTLE_PREFIX=""
+    if [ -n "$THROTTLE_RATE" ]; then
+        THROTTLE_PREFIX="AWS_MAX_BANDWIDTH=$THROTTLE_RATE"
+    fi
 
     # Safety check before downloading this table's data
     log_info "Checking disk usage on $check_path before downloading..."
@@ -382,7 +390,7 @@ download_and_extract_table() {
     local temp_enc_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz.enc"
     local temp_tar_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz"
 
-    if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
+    if ! eval "$THROTTLE_PREFIX" nice -n 19 ionice -c 3 aws s3 cp --quiet "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_error "Failed to download $archive_key."
         rm -f "$temp_enc_file" # Clean up partial download
         return 1
@@ -453,7 +461,8 @@ do_full_restore() {
     
     log_info "4. Downloading manifest from base full backup to extract tokens..."
     local base_manifest
-    base_manifest=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
+    local THROTTLE_PREFIX="" # No throttle for metadata files
+    base_manifest=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
     if ! echo "$base_manifest" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse manifest for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -480,7 +489,7 @@ do_full_restore() {
     log_success "Successfully configured node with $token_count tokens."
 
     log_info "6. Downloading and extracting all data from backup chain in parallel..."
-    SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    SCHEMA_MAP_JSON=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -489,7 +498,7 @@ do_full_restore() {
     log_info "Schema-to-directory mapping downloaded."
     
     export -f download_and_extract_table log_message log_info log_success log_warn log_error
-    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE TEMP_RESTORE_DIR RESTORE_BASE_PATH TMP_SCHEMA_MAP_FILE
+    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE TEMP_RESTORE_DIR RESTORE_BASE_PATH TMP_SCHEMA_MAP_FILE THROTTLE_RATE
     export RED GREEN YELLOW BLUE NC
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
@@ -594,7 +603,8 @@ do_granular_restore() {
     fi
     log_success "Disk usage is sufficient to begin."
 
-    SCHEMA_MAP_JSON=$(aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    local THROTTLE_PREFIX="" # No throttle for metadata
+    SCHEMA_MAP_JSON=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -603,7 +613,7 @@ do_granular_restore() {
     log_info "Schema-to-directory mapping downloaded."
 
     export -f download_and_extract_table log_message log_info log_success log_warn log_error
-    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE base_output_dir temp_download_dir check_path TMP_SCHEMA_MAP_FILE
+    export RESTORE_LOG_FILE CONFIG_FILE S3_BUCKET_OVERRIDE TMP_KEY_FILE base_output_dir temp_download_dir check_path TMP_SCHEMA_MAP_FILE THROTTLE_RATE
     export RED GREEN YELLOW BLUE NC
 
     for backup_ts in "${CHAIN_TO_RESTORE[@]}"; do
@@ -728,7 +738,8 @@ do_schema_only_restore() {
     local local_schema_path="/tmp/schema_restore.cql"
 
     log_info "Downloading schema from: $schema_s3_path"
-    if ! aws s3 cp --quiet "$schema_s3_path" "$local_schema_path"; then
+    local THROTTLE_PREFIX="" # No throttle for metadata
+    if ! eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$schema_s3_path" "$local_schema_path"; then
         log_error "Failed to download schema.cql."
         exit 1
     fi
@@ -900,6 +911,7 @@ while [[ "$#" -gt 0 ]]; do
         --table) TABLE_NAME="$2"; shift ;;
         --s3-bucket) S3_BUCKET_OVERRIDE="$2"; shift ;;
         --source-host) SOURCE_HOST_OVERRIDE="$2"; shift ;;
+        --throttle) THROTTLE_RATE="$2"; shift ;;
         --full-restore) MODE="full" ;;
         --download-only) MODE="download_only" ;;
         --download-and-restore) MODE="download_and_restore" ;;
@@ -957,6 +969,9 @@ log_info "Mode: $MODE"
 log_info "Target S3 Bucket: $EFFECTIVE_S3_BUCKET"
 log_info "Source Hostname for Restore: $EFFECTIVE_SOURCE_HOST"
 log_info "Parallelism: $PARALLELISM"
+if [ -n "$THROTTLE_RATE" ]; then
+    log_info "Bandwidth Throttling: $THROTTLE_RATE"
+fi
 
 if [ "$BACKUP_BACKEND" != "s3" ]; then
     log_error "This restore script only supports the 's3' backup backend."

@@ -75,6 +75,16 @@ BACKUP_INCLUDE_ONLY_TABLES=$(jq -r '.backup_include_only_tables // []' "$CONFIG_
 S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
 S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
+THROTTLE_RATE=""
+
+# --- Argument Parsing ---
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --throttle) THROTTLE_RATE="$2"; shift ;;
+        *) log_error "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
 
 # Validate sourced config
 if [ -z "$S3_BUCKET_NAME" ] || [ -z "$CASSANDRA_DATA_DIR" ] || [ -z "$LOG_FILE" ]; then
@@ -382,6 +392,9 @@ log_info "S3 Bucket: $S3_BUCKET_NAME"
 log_info "Backup Timestamp (Tag): $BACKUP_TAG"
 log_info "Streaming Mode: $UPLOAD_STREAMING"
 log_info "Parallelism: $PARALLELISM"
+if [ -n "$THROTTLE_RATE" ]; then
+    log_info "Bandwidth Throttling: $THROTTLE_RATE"
+fi
 
 # 1. Create temporary directories
 mkdir -p "$BACKUP_TEMP_DIR" || { log_error "Failed to create temp backup directory on data volume."; exit 1; }
@@ -434,6 +447,10 @@ process_table_backup() {
     S3_OBJECT_LOCK_ENABLED=$(jq -r '.s3_object_lock_enabled // "false"' "$CONFIG_FILE")
     S3_OBJECT_LOCK_MODE=$(jq -r '.s3_object_lock_mode // "GOVERNANCE"' "$CONFIG_FILE")
     S3_OBJECT_LOCK_RETENTION=$(jq -r '.s3_object_lock_retention // 0' "$CONFIG_FILE")
+    THROTTLE_PREFIX=""
+    if [ -n "$THROTTLE_RATE" ]; then
+        THROTTLE_PREFIX="AWS_MAX_BANDWIDTH=$THROTTLE_RATE"
+    fi
 
 
     local path_without_prefix=${snapshot_dir#"$CASSANDRA_DATA_DIR/"}
@@ -512,7 +529,7 @@ process_table_backup() {
             nice -n 19 ionice -c 3 tar -C "$snapshot_dir" -c . | \
             gzip | \
             openssl enc -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
-            nice -n 19 ionice -c 3 aws s3 cp --quiet - "$s3_path" "${object_lock_flags[@]}"
+            nice -n 19 ionice -c 3 eval "$THROTTLE_PREFIX" aws s3 cp --quiet - "$s3_path" "${object_lock_flags[@]}"
             
             local pipeline_status=("${PIPESTATUS[@]}")
             if [ ${pipeline_status[0]} -ne 0 ] || [ ${pipeline_status[1]} -ne 0 ] || [ ${pipeline_status[2]} -ne 0 ] || [ ${pipeline_status[3]} -ne 0 ]; then
@@ -536,7 +553,7 @@ process_table_backup() {
                 rm -f "$local_tar_file"
                 return 1
             fi
-            if ! nice -n 19 ionice -c 3 aws s3 cp --quiet "$local_enc_file" "$s3_path" "${object_lock_flags[@]}"; then
+            if ! nice -n 19 ionice -c 3 eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$local_enc_file" "$s3_path" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload backup for $ks_name.$table_name"
                 touch "$ERROR_DIR/$ks_name.$table_name"
             else
@@ -549,7 +566,7 @@ process_table_backup() {
     fi
 }
 export -f process_table_backup run_nodetool log_message log_info log_success log_warn log_error
-export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR CASSANDRA_USER
+export LOG_FILE CONFIG_FILE BACKUP_TEMP_DIR TMP_KEY_FILE INCLUDED_SYSTEM_KEYSPACES HOSTNAME BACKUP_TAG ERROR_DIR CASSANDRA_DATA_DIR CASSANDRA_USER THROTTLE_RATE
 export BACKUP_EXCLUDE_KEYSPACES BACKUP_EXCLUDE_TABLES BACKUP_INCLUDE_ONLY_KEYSPACES BACKUP_INCLUDE_ONLY_TABLES
 export RED GREEN YELLOW BLUE NC
 export S3_OBJECT_LOCK_APPLICABLE
@@ -676,10 +693,15 @@ else
         object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
     fi
     
+    THROTTLE_PREFIX=""
+    if [ -n "$THROTTLE_RATE" ]; then
+        THROTTLE_PREFIX="AWS_MAX_BANDWIDTH=$THROTTLE_RATE"
+    fi
+
     if [ "$BACKUP_BACKEND" == "s3" ]; then
         log_info "Uploading manifest file..."
         MANIFEST_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/backup_manifest.json"
-        if ! aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH" "${object_lock_flags[@]}"; then
+        if ! eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$MANIFEST_FILE" "$MANIFEST_S3_PATH" "${object_lock_flags[@]}"; then
           log_error "Failed to upload manifest to S3. The backup is not properly indexed."
           exit 1
         fi
@@ -687,7 +709,7 @@ else
         
         log_info "Uploading schema mapping file..."
         SCHEMA_MAP_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema_mapping.json"
-        if ! aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH" "${object_lock_flags[@]}"; then
+        if ! eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$SCHEMA_MAP_FILE" "$SCHEMA_MAP_S3_PATH" "${object_lock_flags[@]}"; then
             log_error "Failed to upload schema mapping file to S3."
         else
             log_success "Schema mapping file uploaded successfully."
@@ -696,7 +718,7 @@ else
         if [ -f "$SCHEMA_DUMP_FILE" ]; then
             log_info "Uploading schema dump..."
             SCHEMA_S3_PATH="s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/schema.cql"
-            if ! aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH" "${object_lock_flags[@]}"; then
+            if ! eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$SCHEMA_DUMP_FILE" "$SCHEMA_S3_PATH" "${object_lock_flags[@]}"; then
                 log_error "Failed to upload schema.cql to S3."
             else
                 log_success "Schema dump uploaded successfully."

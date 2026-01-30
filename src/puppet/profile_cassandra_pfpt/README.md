@@ -87,6 +87,7 @@ profile_cassandra_pfpt::backup_s3_bucket: 'my-prod-cassandra-backups'
 profile_cassandra_pfpt::clearsnapshot_keep_days: 7
 profile_cassandra_pfpt::s3_retention_period: 30 # Keep backups in S3 for 30 days
 profile_cassandra_pfpt::upload_streaming: false # Set to true to use faster but less-robust streaming uploads
+profile_cassandra_pfpt::backup_throttle_rate: '20M/s' # Throttle automated backups to 20MB/s
 
 # --- Automated Repair Configuration ---
 profile_cassandra_pfpt::manage_scheduled_repair: true
@@ -456,6 +457,7 @@ This section documents every available Hiera key for this profile.
 *   `profile_cassandra_pfpt::clearsnapshot_keep_days` (Integer): The number of days to keep local snapshots on the node before they are automatically deleted. Set to 0 to disable. Default: `3`.
 *   `profile_cassandra_pfpt::upload_streaming` (Boolean): Whether to use a direct streaming pipeline for backups (`true`) or a more robust method using temporary files (`false`). Streaming is faster but can hide errors. Default: `false`.
 *   `profile_cassandra_pfpt::backup_parallelism` (Integer): The number of concurrent tables to process during backup or restore operations. Default: `4`.
+*   `profile_cassandra_pfpt::backup_throttle_rate` (String): Throttles the network bandwidth for automated backup jobs. The value is passed to the AWS CLI (e.g., `'20M/s'`, `'1G/s'`). Default: `undef` (no throttling).
 *   `profile_cassandra_pfpt::backup_exclude_keyspaces` (Array[String]): A list of keyspace names to exclude from backups. Default: `[]`.
     ```yaml
     # Example:

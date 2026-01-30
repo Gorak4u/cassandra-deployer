@@ -31,6 +31,7 @@ log_error() { log_message "${RED}$1${NC}"; }
 # --- Argument Parsing ---
 MODE="default"
 BACKUP_TAG_OVERRIDE=""
+THROTTLE_RATE=""
 
 usage() {
     log_message "${YELLOW}Usage: $0 [MODE] [OPTIONS]${NC}"
@@ -43,6 +44,7 @@ usage() {
     log_message ""
     log_message "Options:"
     log_message "  --tag <timestamp>           The timestamp tag (YYYY-MM-DD-HH-MM) of the backup set to upload. Required for --upload-only."
+    log_message "  --throttle <rate>           Throttle S3 upload speed (e.g., 50M/s, 1G/s). Uses AWS_MAX_BANDWIDTH."
     log_message "  -h, --help                  Show this help message."
     exit 1
 }
@@ -53,6 +55,7 @@ while [[ "$#" -gt 0 ]]; do
         --local-only) MODE="local_only" ;;
         --upload-only) MODE="upload_only" ;;
         --tag) BACKUP_TAG_OVERRIDE="$2"; shift ;;
+        --throttle) THROTTLE_RATE="$2"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
@@ -223,9 +226,14 @@ do_upload() {
         retain_until_date=$(date -d "+$S3_OBJECT_LOCK_RETENTION days" -u --iso-8601=seconds)
         object_lock_flags+=("--object-lock-mode" "$S3_OBJECT_LOCK_MODE" "--object-lock-retain-until-date" "$retain_until_date")
     fi
+    
+    local THROTTLE_PREFIX=""
+    if [ -n "$THROTTLE_RATE" ]; then
+        THROTTLE_PREFIX="AWS_MAX_BANDWIDTH=$THROTTLE_RATE"
+    fi
 
     log_info "Uploading all backup files via aws s3 cp --recursive..."
-    if ! aws s3 cp --recursive --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/" "${object_lock_flags[@]}"; then
+    if ! eval "$THROTTLE_PREFIX" aws s3 cp --recursive --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/" "${object_lock_flags[@]}"; then
         log_error "aws s3 cp --recursive command failed. Upload is incomplete."
         return 1
     fi
@@ -297,6 +305,9 @@ echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 
 # --- Main Execution Flow ---
 log_info "--- Starting Incremental Backup Manager (Mode: $MODE) ---"
+if [ -n "$THROTTLE_RATE" ]; then
+    log_info "Bandwidth Throttling: $THROTTLE_RATE"
+fi
 check_bucket_lock_status
 
 case "$MODE" in
