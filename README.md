@@ -35,6 +35,7 @@ The script can run any command or execute a local script file on your cluster no
 | `-P`, `--parallel` | `[N]` | Execute in parallel. Uses a worker pool model with a concurrency of N. Defaults to all nodes at once if N is omitted. |
 | `--ssh-options` | `<opts>` | Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem"). |
 | `--dry-run` | | Show which nodes would be targeted and what command would run, without executing. |
+| `-i`, `--interactive` | | Prompt for confirmation before executing on target nodes. |
 | `--json` | | Output results in a machine-readable JSON format. |
 | `--timeout` | `<seconds>` | Set a timeout in seconds for the command on each node. `0` for no timeout. |
 | `--output-dir`| `<path>` | Save the output from each node to a separate file in the specified directory. |
@@ -180,7 +181,7 @@ The reverse of joining datacenters is splitting them into two independent cluste
 
 1.  **Isolates Topologies:** It alters the `system_auth` and `system_distributed` keyspaces on each datacenter to remove the other from its replication strategy.
 2.  **Rolling Restarts:** It performs a safe rolling restart of each datacenter sequentially to ensure the new, isolated topologies are loaded.
-3.  **Cleans Gossip State:** It runs `nodetool decommission` from each datacenter against the nodes of the other, cleaning up the gossip state and finalizing the separation.
+3.  **Finalizes Split:** After the script finishes, you must apply firewall rules to block traffic between the two former datacenters. The clusters are now fully independent.
 
 To see all options, run the script with the `--help` flag:
 ```bash
@@ -217,3 +218,4 @@ For all options, run the script with the `--help` flag:
 ./scripts/cassy.sh --help
 ```
 
+    
