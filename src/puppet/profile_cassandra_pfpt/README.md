@@ -20,6 +20,7 @@
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
 7.  [Backup & Recovery Guide](#backup--recovery-guide)
+    1.  [Interactive Restore Wizard](#interactive-restore-wizard)
 8.  [Puppet Architecture Guide](#puppet-architecture-guide)
 9.  [Production Readiness Guide](#production-readiness-guide)
     1.  [Automated Service Monitoring and Restart](#automated-service-monitoring-and-restart)
@@ -168,16 +169,16 @@ Available Commands:
   decommission        Permanently remove this node from the cluster after streaming its data.
   replace             Configure this NEW, STOPPED node to replace a dead node.
   rebuild             Rebuild the data on this node by streaming from another datacenter.
-  repair              Run a safe, granular repair on the node's token ranges. Can target a specific keyspace.
+  repair              Run a safe, manual full repair on the node. Can target a specific keyspace/table.
   cleanup             Run 'nodetool cleanup' with safety checks.
-  compact             Run 'nodetool compact' with safety checks.
+  compact             Run 'nodetool compact' with safety checks and advanced options.
   garbage-collect     Run 'nodetool garbagecollect' with safety checks.
   upgrade-sstables    Run 'nodetool upgradesstables' with safety checks.
   backup              Manually trigger a full, node-local backup to S3.
   incremental-backup  Manually trigger an incremental backup to S3.
   backup-status       Check the status of the last completed backup for a node.
   snapshot            Take an ad-hoc snapshot with a generated tag.
-  restore             Restore data from S3, list backups, or show restore chains.
+  restore             Restore data from S3. Run without arguments for an interactive wizard.
   assassinate         Forcibly remove a dead node from the cluster's gossip ring.
   stress              Run 'cassandra-stress' via a robust wrapper.
   manual              Display the full operations manual in the terminal.
@@ -325,6 +326,15 @@ The backup and recovery process for this Cassandra deployment is documented in a
 To view this guide, run the following command on any Cassandra node:
 ```bash
 sudo cass-ops backup-guide
+```
+
+### Interactive Restore Wizard
+
+To make the restore process safer and more user-friendly, an interactive wizard is available. It guides the operator step-by-step through selecting a restore type, source host, and point-in-time, reducing the chance of human error.
+
+To start the wizard, simply run the `restore` command with no arguments:
+```bash
+sudo cass-ops restore
 ```
 
 ---
@@ -507,5 +517,7 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
 *   **Scheduled Runs:** When enabled, the Puppet agent will run twice per hour at a staggered minute by default.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.
+
+    
 
     
