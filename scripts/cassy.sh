@@ -56,7 +56,7 @@ usage() {
     echo
     echo -e "${YELLOW}Execution Options:${NC}"
     echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
-    echo -e "  -P, --parallel [N]        Execute in parallel. By default on all nodes, or in batches of size N if provided."
+    echo -e "  -P, --parallel [N]        Execute in parallel. By default on all nodes, or with a concurrency of N if provided."
     echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
     echo
     echo -e "${YELLOW}Output & Safety:${NC}"
@@ -127,6 +127,7 @@ if [ -n "$QV_QUERY" ]; then
     if ! command -v qv &> /dev/null; then log_error "'qv' command not found. Cannot fetch inventory."; exit 1; fi
     
     log_info "Running query: qv -t ${QV_QUERY}"
+    # Using a while-read loop for better portability than mapfile
     NODES=()
     while IFS= read -r line; do
         if [ -n "$line" ]; then NODES+=("$line"); fi
@@ -163,7 +164,7 @@ log_info "Target nodes: ${NODES[*]}"
 PARALLEL_MODE="Sequential"
 if [ "$PARALLEL" = true ]; then
     if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
-        PARALLEL_MODE="Parallel (Batch Size: $PARALLEL_BATCH_SIZE)"
+        PARALLEL_MODE="Parallel (Concurrency: $PARALLEL_BATCH_SIZE)"
     else
         PARALLEL_MODE="Parallel (All Nodes)"
     fi
@@ -194,7 +195,6 @@ run_task() {
             # Using exec to ensure TIMEOUT_CMD works correctly on the ssh process
             exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
         elif [ -n "$SCRIPT_PATH" ]; then
-            local REMOTE_SCRIPT_PATH="/tmp/$(basename "$SCRIPT_PATH")"
             # Using a subshell to group commands for timeout
             (
               exec $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
@@ -236,28 +236,53 @@ run_task() {
 }
 
 if [ "$PARALLEL" = true ]; then
-    # --- Parallel Execution Logic ---
-    pids=()
-    node_count=${#NODES[@]}
-    
-    if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
-        # --- Batch Parallel Execution ---
-        for (( i=0; i<node_count; i+=PARALLEL_BATCH_SIZE )); do
-            batch_pids=()
-            current_batch=("${NODES[@]:i:PARALLEL_BATCH_SIZE}")
-            log_info "--- Executing on batch: [${BOLD}${current_batch[*]}${NC}] ---"
+    # Create a temporary file for tracking failed nodes in parallel mode.
+    # This will be cleaned up by the trap at the end.
+    touch "failed_nodes.$$"
+    trap 'rm -f "failed_nodes.$$";' EXIT
 
-            for node in "${current_batch[@]}"; do
-                run_task "$node" &
-                batch_pids+=($!)
-            done
-            # Wait for all PIDs in the current batch to complete
-            for pid in "${batch_pids[@]}"; do
-                wait "$pid"
-            done
+    if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
+        # --- Worker Pool Parallel Execution ---
+        log_info "--- Executing with a maximum of ${PARALLEL_BATCH_SIZE} concurrent jobs ---"
+
+        # Create a named pipe (FIFO) to manage concurrency.
+        local fifo
+        fifo=$(mktemp -u)
+        mkfifo "$fifo" || { log_error "Failed to create FIFO for concurrency management."; exit 1; }
+        
+        # Open the FIFO on a file descriptor (3). This prevents blocking and race conditions.
+        exec 3<>"$fifo"
+        
+        # The file can be deleted now; the descriptor will persist for the life of this shell.
+        rm "$fifo"
+
+        # "Prime" the FIFO with a number of "tokens" equal to the parallel batch size.
+        for (( i=0; i<PARALLEL_BATCH_SIZE; i++ )); do
+            printf '\n' >&3
         done
+
+        local all_pids=()
+        for node in "${NODES[@]}"; do
+            # "Acquire" a token by reading one line from the FIFO. This blocks if no tokens are available.
+            read -r -u 3
+
+            # Once a token is acquired, run the task in a background subshell.
+            (
+                run_task "$node"
+                # When the task is done, write a token back to the FIFO, allowing another job to start.
+                printf '\n' >&3
+            ) &
+            all_pids+=($!) # Store the PID of the subshell.
+        done
+
+        log_info "All jobs started. Waiting for the last running jobs to finish..."
+        wait "${all_pids[@]}"
+
+        # Close the file descriptor.
+        exec 3>&-
     else
-        # --- Full Parallel Execution ---
+        # --- Full Parallel Execution (All nodes at once) ---
+        pids=()
         for node in "${NODES[@]}"; do
             run_task "$node" &
             pids+=($!)
@@ -305,5 +330,3 @@ else
     done
     exit 1
 fi
-
-    

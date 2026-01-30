@@ -32,7 +32,7 @@ The script can run any command or execute a local script file on your cluster no
 | `-c`, `--command` | `<command>` | The shell command to execute on each node. |
 | `-s`, `--script` | `<path>` | The path to a local script to copy and execute on each node. |
 | `-l`, `--user` | `<user>` | The SSH user to connect as. Defaults to the current user. |
-| `-P`, `--parallel` | `[N]` | Execute in parallel. By default on all nodes, or in batches of size N if provided. |
+| `-P`, `--parallel` | `[N]` | Execute in parallel. By default on all nodes, or with a concurrency of N if provided. |
 | `--ssh-options` | `<opts>` | Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem"). |
 | `--dry-run` | | Show which nodes would be targeted and what command would run, without executing. |
 | `--json` | | Output results in a machine-readable JSON format. |
@@ -100,5 +100,3 @@ For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
 ```
-
-    
