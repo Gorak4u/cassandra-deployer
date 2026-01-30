@@ -31,6 +31,18 @@ log_success() { log_message "${GREEN}$1${NC}"; }
 log_warn() { log_message "${YELLOW}$1${NC}"; }
 log_error() { log_message "${RED}$1${NC}"; }
 
+# --- Usage Function ---
+usage() {
+    log_message "${YELLOW}Usage: $0 [OPTIONS]${NC}"
+    log_message "Performs a full, node-local snapshot and uploads all table data to S3."
+    log_message ""
+    log_message "Options:"
+    log_message "  --throttle <rate>    Throttle S3 upload speed (e.g., '50M/s', '1G/s')."
+    log_message "                       This overrides the 'throttle_rate' from config.json for this run."
+    log_message "  -h, --help           Show this help message."
+    exit 0
+}
+
 # --- Pre-flight Checks ---
 # Check for required tools first, so we can log errors if they are missing.
 for tool in jq aws openssl nodetool cqlsh xargs su find; do
@@ -73,7 +85,8 @@ THROTTLE_OVERRIDE=""
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --throttle) THROTTLE_OVERRIDE="$2"; shift ;;
-        *) log_error "Unknown parameter passed: $1"; exit 1 ;;
+        -h|--help) usage ;;
+        *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
     shift
 done
