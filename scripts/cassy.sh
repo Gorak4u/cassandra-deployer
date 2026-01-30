@@ -12,6 +12,7 @@ NODES=()
 COMMAND=""
 SCRIPT_PATH=""
 PARALLEL=false
+PARALLEL_BATCH_SIZE=0
 QV_QUERY=""
 DRY_RUN=false
 JSON_OUTPUT=false
@@ -55,7 +56,7 @@ usage() {
     echo
     echo -e "${YELLOW}Execution Options:${NC}"
     echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
-    echo -e "  -P, --parallel            Execute on all nodes in parallel instead of sequentially."
+    echo -e "  -P, --parallel [N]        Execute in parallel. By default on all nodes, or in batches of size N if provided."
     echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
     echo
     echo -e "${YELLOW}Output & Safety:${NC}"
@@ -84,7 +85,14 @@ while [[ "$#" -gt 0 ]]; do
         -c|--command) COMMAND="$2"; shift ;;
         -s|--script) SCRIPT_PATH="$2"; shift ;;
         -l|--user) SSH_USER="$2"; shift ;;
-        -P|--parallel) PARALLEL=true ;;
+        -P|--parallel)
+            PARALLEL=true
+            # Check if the next argument is a positive integer for batch size
+            if [[ -n "$2" && "$2" =~ ^[1-9][0-9]*$ ]]; then
+                PARALLEL_BATCH_SIZE="$2"
+                shift # consume the number
+            fi
+            ;;
         --ssh-options) SSH_OPTIONS="$2"; shift ;;
         --dry-run) DRY_RUN=true ;;
         --json) JSON_OUTPUT=true ;;
@@ -151,11 +159,18 @@ fi
 
 # --- Execution ---
 log_info "Target nodes: ${NODES[*]}"
-PARALLEL_MODE=$(if [ "$PARALLEL" = true ]; then echo "Parallel"; else echo "Sequential"; fi)
+
+PARALLEL_MODE="Sequential"
+if [ "$PARALLEL" = true ]; then
+    if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
+        PARALLEL_MODE="Parallel (Batch Size: $PARALLEL_BATCH_SIZE)"
+    else
+        PARALLEL_MODE="Parallel (All Nodes)"
+    fi
+fi
 log_info "Execution mode: ${PARALLEL_MODE}"
 log_info "SSH user: ${SSH_USER:-$(whoami)}"
 
-pids=()
 failed_nodes=()
 SSH_USER_ARG=""
 if [ -n "$SSH_USER" ]; then SSH_USER_ARG="${SSH_USER}@"; fi
@@ -163,75 +178,106 @@ ACTION_DESC=""
 if [ -n "$COMMAND" ]; then ACTION_DESC="command: $COMMAND"; else ACTION_DESC="script: $SCRIPT_PATH"; fi
 log_info "Executing $ACTION_DESC"
 
-for node in "${NODES[@]}"; do
-    TIMEOUT_CMD=""
+run_task() {
+    local node="$1"
+    local output
+    local rc=0
+    
+    local TIMEOUT_CMD=""
     if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
     
-    NODE_LOG_FILE=""
+    local NODE_LOG_FILE=""
     if [ -n "$OUTPUT_DIR" ]; then NODE_LOG_FILE="${OUTPUT_DIR}/${node}.log"; fi
-
-    run_task() {
-        local output
-        local rc=0
-        
-        output=$({
-            if [ -n "$COMMAND" ]; then
-                $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
-            elif [ -n "$SCRIPT_PATH" ]; then
-                REMOTE_SCRIPT_PATH="/tmp/$(basename "$SCRIPT_PATH")"
-                $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
-                $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
-            fi
-        } 2>&1)
-        rc=$?
-
-        if [ -n "$NODE_LOG_FILE" ]; then echo "$output" > "$NODE_LOG_FILE"; fi
-
-        if [ "$JSON_OUTPUT" = true ]; then
-            local status_text="SUCCESS"; if [ $rc -ne 0 ]; then status_text="FAILED"; fi
-            # Use jq to safely create a JSON object for this node's result
-            jq -n --arg node "$node" \
-                  --arg status "$status_text" \
-                  --argjson rc "$rc" \
-                  --arg output "$output" \
-                  '{node: $node, status: $status, exit_code: $rc, output: $output}' > "${JSON_TEMP_DIR}/${node}.json"
-        else
-            echo -e "--- [${BOLD}$node${NC}] START ---"
-            echo "$output"
-            if [ $rc -ne 0 ]; then
-                echo -e "--- [${BOLD}$node${NC}] ${RED}FAILED (Exit Code: $rc)${NC} ---"
-            else
-                echo -e "--- [${BOLD}$node${NC}] ${GREEN}OK${NC} ---"
-            fi
+    
+    output=$({
+        if [ -n "$COMMAND" ]; then
+            # Using exec to ensure TIMEOUT_CMD works correctly on the ssh process
+            exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
+        elif [ -n "$SCRIPT_PATH" ]; then
+            local REMOTE_SCRIPT_PATH="/tmp/$(basename "$SCRIPT_PATH")"
+            # Using a subshell to group commands for timeout
+            (
+              exec $TIMEOUT_CMD scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
+              exec $TIMEOUT_CMD ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
+            )
         fi
+    } 2>&1)
+    rc=$?
 
-        # Track failures for the final exit code
-        if [ $rc -ne 0 ]; then
-            # In parallel, this write must be atomic. Appending to a file is safe.
-            if [ "$PARALLEL" = true ]; then
-                echo "$node" >> "failed_nodes.$$"
-            else
-                failed_nodes+=("$node")
-            fi
-        fi
-    }
+    if [ -n "$NODE_LOG_FILE" ]; then echo "$output" > "$NODE_LOG_FILE"; fi
 
-    if [ "$PARALLEL" = true ]; then
-        run_task &
-        pids+=($!)
+    if [ "$JSON_OUTPUT" = true ]; then
+        local status_text="SUCCESS"; if [ $rc -ne 0 ]; then status_text="FAILED"; fi
+        # Use jq to safely create a JSON object for this node's result
+        jq -n --arg node "$node" \
+              --arg status "$status_text" \
+              --argjson rc "$rc" \
+              --arg output "$output" \
+              '{node: $node, status: $status, exit_code: $rc, output: $output}' > "${JSON_TEMP_DIR}/${node}.json"
     else
-        log_info "\n--- Executing on [${BOLD}$node${NC}] ---"
-        run_task
+        echo -e "--- [${BOLD}$node${NC}] START ---"
+        echo "$output"
+        if [ $rc -ne 0 ]; then
+            echo -e "--- [${BOLD}$node${NC}] ${RED}FAILED (Exit Code: $rc)${NC} ---"
+        else
+            echo -e "--- [${BOLD}$node${NC}] ${GREEN}OK${NC} ---"
+        fi
     fi
-done
 
-# --- Wait & Collect ---
+    # Track failures for the final exit code
+    if [ $rc -ne 0 ]; then
+        # In parallel, this write must be atomic. Appending to a file is safe.
+        if [ "$PARALLEL" = true ]; then
+            echo "$node" >> "failed_nodes.$$"
+        else
+            failed_nodes+=("$node")
+        fi
+    fi
+}
+
 if [ "$PARALLEL" = true ]; then
-    log_info "Waiting for all parallel jobs to complete..."
-    for pid in "${pids[@]}"; do
-        wait "$pid"
-    done
-    # Collect results from temp file
+    # --- Parallel Execution Logic ---
+    pids=()
+    node_count=${#NODES[@]}
+    
+    if [ "$PARALLEL_BATCH_SIZE" -gt 0 ]; then
+        # --- Batch Parallel Execution ---
+        for (( i=0; i<node_count; i+=PARALLEL_BATCH_SIZE )); do
+            batch_pids=()
+            current_batch=("${NODES[@]:i:PARALLEL_BATCH_SIZE}")
+            log_info "--- Executing on batch: [${BOLD}${current_batch[*]}${NC}] ---"
+
+            for node in "${current_batch[@]}"; do
+                run_task "$node" &
+                batch_pids+=($!)
+            done
+            # Wait for all PIDs in the current batch to complete
+            for pid in "${batch_pids[@]}"; do
+                wait "$pid"
+            done
+        done
+    else
+        # --- Full Parallel Execution ---
+        for node in "${NODES[@]}"; do
+            run_task "$node" &
+            pids+=($!)
+        done
+        log_info "Waiting for all parallel jobs to complete..."
+        for pid in "${pids[@]}"; do
+            wait "$pid"
+        done
+    fi
+else
+    # --- Sequential Execution Logic ---
+    for node in "${NODES[@]}"; do
+        log_info "\n--- Executing on [${BOLD}$node${NC}] ---"
+        run_task "$node"
+    fi
+fi
+
+
+# --- Collect Parallel Failures ---
+if [ "$PARALLEL" = true ]; then
     if [ -f "failed_nodes.$$" ]; then
         while IFS= read -r line; do
             if [ -n "$line" ]; then failed_nodes+=("$line"); fi
@@ -259,3 +305,5 @@ else
     done
     exit 1
 fi
+
+    

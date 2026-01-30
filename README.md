@@ -32,7 +32,7 @@ The script can run any command or execute a local script file on your cluster no
 | `-c`, `--command` | `<command>` | The shell command to execute on each node. |
 | `-s`, `--script` | `<path>` | The path to a local script to copy and execute on each node. |
 | `-l`, `--user` | `<user>` | The SSH user to connect as. Defaults to the current user. |
-| `-P`, `--parallel` | | Execute on all nodes in parallel instead of sequentially. |
+| `-P`, `--parallel` | `[N]` | Execute in parallel. By default on all nodes, or in batches of size N if provided. |
 | `--ssh-options` | `<opts>` | Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem"). |
 | `--dry-run` | | Show which nodes would be targeted and what command would run, without executing. |
 | `--json` | | Output results in a machine-readable JSON format. |
@@ -54,11 +54,14 @@ A rolling restart is a common maintenance task. It must be done sequentially to 
 ```
 
 #### **Pattern 2: Parallel Cluster-Wide Repair**
-Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster. For very large clusters, it's best practice to run it per-datacenter to control cross-datacenter network traffic.
+Unlike restarts, `nodetool repair` is safe to run in parallel across the cluster. For very large clusters, it's best practice to run it per-datacenter to control cross-datacenter network traffic. You can also use batch-mode parallel execution to limit the impact.
 
 ```bash
 # Run repair on all Cassandra nodes in the SC4 datacenter simultaneously.
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel -c "sudo cass-ops repair"
+
+# Run repair in batches of 5 nodes at a time.
+./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt -d SC4" --parallel 5 -c "sudo cass-ops repair"
 ```
 
 #### **Pattern 3: Cluster-Wide Health Auditing**
@@ -78,7 +81,7 @@ The `--parallel` (`-P`) flag is powerful but potentially dangerous. Running an o
     *   `cass-ops cluster-health`
     *   `cass-ops disk-health`
     *   `cass-ops backup-status`
-    *   `cass-ops repair` (though consider DC-by-DC for large clusters)
+    *   `cass-ops repair` (though consider DC-by-DC or batching for large clusters)
     *   `cass-ops cleanup`
 
 *   **Commands that should almost ALWAYS be run SEQUENTIALLY (without `-P`):**
@@ -97,3 +100,5 @@ For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
 ```
+
+    
