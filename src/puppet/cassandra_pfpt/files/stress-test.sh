@@ -10,6 +10,7 @@ LOG_FILE="/var/log/cassandra/stress-test.log"
 # --- Script Variables ---
 WRITE_COUNT=""
 READ_COUNT=""
+UPDATE_COUNT=""
 NODES=""
 AUTO_DETECTED_NODES=""
 RF_STRING=""
@@ -41,8 +42,10 @@ usage() {
     log_message "This script will dynamically create the keyspace and table if they do not exist."
     log_message ""
     log_message "Operations (at least one is required):"
-    log_message "  -w, --write <count>     Number of rows to write (e.g., 10M)."
-    log_message "  -r, --read <count>      Number of rows to read."
+    log_message "  -w, --write <count>     Number of inserts/writes to run."
+    log_message "  -u, --update <count>    Number of updates to run (note: this is an alias for write)."
+    log_message "  -r, --read <count>      Number of reads to run."
+    log_message "  Note: <count> must be a number (e.g., 1000000). Suffixes like M or K are not supported."
     log_message ""
     log_message "Configuration:"
     log_message "  -n, --nodes <list>      Comma-separated list of node IPs. Default: auto-detect from 'nodetool status'."
@@ -58,6 +61,7 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         -w|--write) WRITE_COUNT="$2"; shift ;;
         -r|--read) READ_COUNT="$2"; shift ;;
+        -u|--update) UPDATE_COUNT="$2"; shift ;;
         -n|--nodes) NODES="$2"; shift ;;
         --rf) RF_STRING="$2"; shift ;;
         -k|--keyspace) KEYSPACE_OVERRIDE="$2"; shift ;;
@@ -72,8 +76,8 @@ done
 log_message "--- Starting Cassandra Stress Test ---"
 
 # 1. Validate Inputs
-if [ -z "$WRITE_COUNT" ] && [ -z "$READ_COUNT" ]; then
-    log_message "ERROR: You must specify at least one operation (-w or -r)."
+if [ -z "$WRITE_COUNT" ] && [ -z "$READ_COUNT" ] && [ -z "$UPDATE_COUNT" ]; then
+    log_message "ERROR: You must specify at least one operation (-w, -r, or -u)."
     usage
 fi
 
@@ -141,71 +145,65 @@ sed -e "s/my_app/$EFFECTIVE_KEYSPACE/g" \
     "$PROFILE_TEMPLATE_PATH" > "$TEMP_PROFILE_PATH"
 
 
-# --- Function to run a stress operation ---
-run_stress() {
-    local op_type="$1"
-    local count="$2"
-    local ops_string=""
-
-    if [ "$op_type" == "write" ]; then
-        ops_string="ops(insert=1)"
-    elif [ "$op_type" == "read" ]; then
-        # Note: The query name 'read_one' is hardcoded in the YAML, so we use it here.
-        ops_string="ops(read_one=1)"
-    else
-        log_message "ERROR: Invalid operation type '$op_type'."
-        return 1
-    fi
-
-    # Build the command array
-    # The 'user' subcommand is required to use a YAML profile.
-    local CMD_ARRAY=(
-        "cassandra-stress"
-        "user"
-        "profile=$TEMP_PROFILE_PATH" # Use the dynamically generated profile
-        "n=$count"
-        "$ops_string"
-        "-node" "$NODES"
-    )
-
-    if [ "${USE_SSL:-false}" = true ]; then
-        CMD_ARRAY+=("-mode" "cql3" "native" "ssl")
-    else
-        CMD_ARRAY+=("-mode" "cql3" "native")
-    fi
-
-    # The user/password must be key=value, not flags, for the 'user' subcommand.
-    if [ -n "${CASSANDRA_USER:-}" ]; then
-        CMD_ARRAY+=("user=${CASSANDRA_USER}")
-    fi
-    
-    if [ -n "${CASSANDRA_PASS:-}" ]; then
-        CMD_ARRAY+=("password=${CASSANDRA_PASS}")
-    fi
-    
-    log_message "Executing $op_type operation with count: $count"
-    # Use printf for safe quoting of arguments
-    log_message "Command: $(printf '%q ' "${CMD_ARRAY[@]}")"
-
-    if ! "${CMD_ARRAY[@]}"; then
-        local EXIT_CODE=$?
-        log_message "ERROR: $op_type operation failed with exit code $EXIT_CODE."
-        return $EXIT_CODE
-    fi
-    return 0
-}
-
 # 5. Execute Operations
-if [ -n "$WRITE_COUNT" ]; then
-    if ! run_stress "write" "$WRITE_COUNT"; then
-        exit 1
-    fi
+write_num=${WRITE_COUNT:-0}
+update_num=${UPDATE_COUNT:-0}
+read_num=${READ_COUNT:-0}
+
+total_writes=$((write_num + update_num))
+total_reads=$read_num
+total_ops=$((total_writes + total_reads))
+
+if [ "$total_ops" -le 0 ]; then
+    log_message "ERROR: Total number of operations is zero. Nothing to do."
+    exit 1
 fi
 
-if [ -n "$READ_COUNT" ]; then
-    if ! run_stress "read" "$READ_COUNT"; then
-        exit 1
-    fi
+ops_string_parts=()
+if [ "$total_writes" -gt 0 ]; then
+    ops_string_parts+=("insert=${total_writes}")
+fi
+if [ "$total_reads" -gt 0 ]; then
+    # The query name 'read_one' is hardcoded in the YAML profile
+    ops_string_parts+=("read_one=${total_reads}")
+fi
+
+ops_string=$(IFS=,; echo "ops(${ops_string_parts[*]})")
+
+log_message "Preparing to run a mixed workload."
+log_message "Total operations: $total_ops"
+log_message "Operation mix: $ops_string"
+
+CMD_ARRAY=(
+    "cassandra-stress"
+    "user"
+    "profile=$TEMP_PROFILE_PATH"
+    "n=$total_ops"
+    "$ops_string"
+    "-node" "$NODES"
+)
+
+if [ "${USE_SSL:-false}" = true ]; then
+    CMD_ARRAY+=("-mode" "cql3" "native" "ssl")
+else
+    CMD_ARRAY+=("-mode" "cql3" "native")
+fi
+
+if [ -n "${CASSANDRA_USER:-}" ]; then
+    CMD_ARRAY+=("user=${CASSANDRA_USER}")
+fi
+
+if [ -n "${CASSANDRA_PASS:-}" ]; then
+    CMD_ARRAY+=("password=${CASSANDRA_PASS}")
+fi
+
+log_message "Executing stress command..."
+log_message "Command: $(printf '%q ' "${CMD_ARRAY[@]}")"
+
+if ! "${CMD_ARRAY[@]}"; then
+    EXIT_CODE=$?
+    log_message "ERROR: Stress test failed with exit code $EXIT_CODE."
+    exit $EXIT_CODE
 fi
 
 log_message "--- Cassandra Stress Test Finished Successfully ---"
