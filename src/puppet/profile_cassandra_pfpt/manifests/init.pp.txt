@@ -187,6 +187,7 @@ class profile_cassandra_pfpt {
   $manage_scheduled_repair          = lookup('profile_cassandra_pfpt::manage_scheduled_repair', { 'default_value' => false })
   $repair_schedule                  = lookup('profile_cassandra_pfpt::repair_schedule', { 'default_value' => '*-*-1/5 01:00:00' })
   $repair_keyspace                  = lookup('profile_cassandra_pfpt::repair_keyspace', { 'default_value' => undef })
+  $repair_duration_hours            = lookup('profile_cassandra_pfpt::repair_duration_hours', { 'default_value' => 0 })
 
   # --- Schema Management ---
   $schema_users                     = lookup('profile_cassandra_pfpt::schema_users', { 'default_value' => {} })
@@ -261,6 +262,7 @@ class profile_cassandra_pfpt {
     broadcast_rpc_address            => $broadcast_rpc_address,
     storage_port                     => $storage_port,
     ssl_storage_port                 => $ssl_storage_port,
+    native_transport_port            => $native_transport_port,
     rpc_port                         => $rpc_port,
     start_native_transport           => $start_native_transport,
     start_rpc                        => $start_rpc,
@@ -399,6 +401,7 @@ class profile_cassandra_pfpt {
     manage_scheduled_repair          => $manage_scheduled_repair,
     repair_schedule                  => $repair_schedule,
     repair_keyspace                  => $repair_keyspace,
+    repair_duration_hours            => $repair_duration_hours,
     # Monitoring & Agent Integrations
     manage_coralogix_agent           => $manage_coralogix_agent,
     coralogix_api_key                => $coralogix_api_key,
@@ -435,5 +438,3 @@ class profile_cassandra_pfpt {
     puppet_cron_schedule_string      => $puppet_cron_schedule_string,
   }
 }
-
-    

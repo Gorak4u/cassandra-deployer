@@ -160,6 +160,7 @@ class cassandra_pfpt (
   Boolean $manage_scheduled_repair = false,
   String $repair_schedule = '*-*-1/5 01:00:00',
   Optional[String] $repair_keyspace = undef,
+  Variant[Integer, Float] $repair_duration_hours = 0,
   Sensitive[String] $backup_encryption_key,
   Boolean $manage_stress_test = false,
   Boolean $manage_node_exporter = false,

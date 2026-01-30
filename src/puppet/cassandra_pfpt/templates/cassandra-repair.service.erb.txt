@@ -12,8 +12,14 @@ Type=oneshot
 User=root
 Group=root
 RuntimeDirectory=cassandra
-<% if @repair_keyspace and @repair_keyspace != '' -%>
-ExecStart=<%= @manage_bin_dir %>/cass-ops repair <%= @repair_keyspace %>
-<% else -%>
-ExecStart=<%= @manage_bin_dir %>/cass-ops repair
-<% end -%>
+<%
+  cmd_parts = [@manage_bin_dir + '/cass-ops', 'repair']
+  if @repair_duration_hours and @repair_duration_hours > 0
+    cmd_parts << '--hours'
+    cmd_parts << @repair_duration_hours
+  end
+  if @repair_keyspace and @repair_keyspace != ''
+    cmd_parts << @repair_keyspace
+  end
+%>
+ExecStart=<%= cmd_parts.join(' ') %>
