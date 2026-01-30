@@ -170,15 +170,25 @@ for node in "${NODES[@]}"; do
     if [ "$PARALLEL" = true ]; then
         # Run in background
         (
-            echo -e "--- [${BOLD}$node${NC}] START ---"
-            if [ -n "$COMMAND" ]; then
-                ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
-            elif [ -n "$SCRIPT_PATH" ]; then
-                REMOTE_SCRIPT_PATH="/tmp/$(basename "$SCRIPT_PATH")"
-                scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}"
-                ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
-            fi
+            # Capture all output from the command block into a variable.
+            # This prevents the output from multiple parallel jobs from interleaving.
+            output=$({
+                if [ -n "$COMMAND" ]; then
+                    ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "$COMMAND"
+                elif [ -n "$SCRIPT_PATH" ]; then
+                    REMOTE_SCRIPT_PATH="/tmp/$(basename "$SCRIPT_PATH")"
+                    # Use '&&' to chain commands. If any step fails, the chain stops
+                    # and the non-zero exit code is correctly captured.
+                    scp ${SSH_OPTIONS} "$SCRIPT_PATH" "${SSH_USER_ARG}${node}:${REMOTE_SCRIPT_PATH}" && \
+                    ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node}" "chmod +x ${REMOTE_SCRIPT_PATH} && ${REMOTE_SCRIPT_PATH} && rm -f ${REMOTE_SCRIPT_PATH}"
+                fi
+            } 2>&1)
             rc=$?
+
+            # Print the results in a clean block
+            echo -e "--- [${BOLD}$node${NC}] START ---"
+            echo "$output"
+
             if [ $rc -ne 0 ]; then
                 echo -e "--- [${BOLD}$node${NC}] ${RED}FAILED (Exit Code: $rc)${NC} ---"
                 # This requires careful handling in parallel, writing to a temp file is safest
