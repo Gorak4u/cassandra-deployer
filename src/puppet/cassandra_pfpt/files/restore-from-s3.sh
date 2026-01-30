@@ -224,7 +224,7 @@ run_interactive_mode() {
         log_info "Downloading schema map from base backup '$BASE_FULL_BACKUP'..."
         local schema_map_content
         local THROTTLE_PREFIX="" # No throttle for tiny metadata files
-        schema_map_content=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+        schema_map_content=$(env $THROTTLE_PREFIX aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
         if ! echo "$schema_map_content" | jq -e . > /dev/null 2>&1; then
             log_error "Could not download or parse schema_mapping.json from base backup. Cannot list keyspaces."
             exit 1
@@ -335,7 +335,7 @@ find_backup_chain() {
     for backup_ts in "${sorted_backups[@]}"; do
         local manifest_content
         local THROTTLE_PREFIX="" # No throttle for tiny metadata files
-        manifest_content=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null)
+        manifest_content=$(env $THROTTLE_PREFIX aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$backup_ts/backup_manifest.json" - 2>/dev/null)
         
         # Check if manifest is empty or not valid JSON
         if ! echo "$manifest_content" | jq -e . > /dev/null 2>&1; then
@@ -391,7 +391,7 @@ download_and_extract_table() {
     local temp_enc_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz.enc"
     local temp_tar_file="$temp_download_dir/temp_${pid}_${tid}.tar.gz"
 
-    if ! eval "$THROTTLE_PREFIX" nice -n 19 ionice -c 3 aws s3 cp --quiet "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
+    if ! nice -n 19 ionice -c 3 env $THROTTLE_PREFIX aws s3 cp --quiet "s3://$EFFECTIVE_S3_BUCKET/$archive_key" "$temp_enc_file"; then
         log_error "Failed to download $archive_key."
         rm -f "$temp_enc_file" # Clean up partial download
         return 1
@@ -463,7 +463,7 @@ do_full_restore() {
     log_info "4. Downloading manifest from base full backup to extract tokens..."
     local base_manifest
     local THROTTLE_PREFIX="" # No throttle for metadata files
-    base_manifest=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
+    base_manifest=$(env $THROTTLE_PREFIX aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/backup_manifest.json" - 2>/dev/null)
     if ! echo "$base_manifest" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse manifest for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -490,7 +490,7 @@ do_full_restore() {
     log_success "Successfully configured node with $token_count tokens."
 
     log_info "6. Downloading and extracting all data from backup chain in parallel..."
-    SCHEMA_MAP_JSON=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    SCHEMA_MAP_JSON=$(env $THROTTLE_PREFIX aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -605,7 +605,7 @@ do_granular_restore() {
     log_success "Disk usage is sufficient to begin."
 
     local THROTTLE_PREFIX="" # No throttle for metadata
-    SCHEMA_MAP_JSON=$(eval "$THROTTLE_PREFIX" aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
+    SCHEMA_MAP_JSON=$(env $THROTTLE_PREFIX aws s3 cp "s3://$EFFECTIVE_S3_BUCKET/$EFFECTIVE_SOURCE_HOST/$BASE_FULL_BACKUP/schema_mapping.json" - 2>/dev/null)
     if ! echo "$SCHEMA_MAP_JSON" | jq -e . > /dev/null 2>&1; then
         log_error "Cannot download or parse schema_mapping.json for base backup $BASE_FULL_BACKUP. Aborting."
         exit 1
@@ -740,7 +740,7 @@ do_schema_only_restore() {
 
     log_info "Downloading schema from: $schema_s3_path"
     local THROTTLE_PREFIX="" # No throttle for metadata
-    if ! eval "$THROTTLE_PREFIX" aws s3 cp --quiet "$schema_s3_path" "$local_schema_path"; then
+    if ! env $THROTTLE_PREFIX aws s3 cp --quiet "$schema_s3_path" "$local_schema_path"; then
         log_error "Failed to download schema.cql."
         exit 1
     fi

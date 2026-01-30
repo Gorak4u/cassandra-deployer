@@ -237,7 +237,7 @@ do_upload() {
     fi
 
     log_info "Uploading all backup files via aws s3 cp --recursive..."
-    if ! eval "$THROTTLE_PREFIX" aws s3 cp --recursive --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/" "${object_lock_flags[@]}"; then
+    if ! env $THROTTLE_PREFIX aws s3 cp --recursive --quiet "$LOCAL_BACKUP_DIR" "s3://$S3_BUCKET_NAME/$HOSTNAME/$BACKUP_TAG/" "${object_lock_flags[@]}"; then
         log_error "aws s3 cp --recursive command failed. Upload is incomplete."
         return 1
     fi
