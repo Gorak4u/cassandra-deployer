@@ -12,6 +12,7 @@ NODES=()
 COMMAND=""
 SCRIPT_PATH=""
 PARALLEL=false
+QV_QUERY=""
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -33,18 +34,22 @@ usage() {
 ${BOLD}Cluster Orchestration Tool${NC}
 
 A wrapper to execute commands or scripts on multiple remote nodes via SSH.
+Supports both static node lists and dynamic inventory fetching via the 'qv' tool.
 
 ${YELLOW}Usage:${NC}
   $0 [OPTIONS]
 
-${YELLOW}Options:${NC}
+${YELLOW}Node Selection (choose one method):${NC}
   -n, --nodes <list>        A comma-separated list of target node hostnames or IPs.
   -f, --nodes-file <path>   A file containing a list of target nodes, one per line.
   --node <host>             Specify a single target node.
+  --qv-query "<query>"      A quoted string of 'qv' flags to dynamically fetch a node list.
 
+${YELLOW}Action (choose one):${NC}
   -c, --command <command>   The shell command to execute on each node.
   -s, --script <path>       The path to a local script to copy and execute on each node.
 
+${YELLOW}Execution Options:${NC}
   -l, --user <user>         The SSH user to connect as. Defaults to the current user.
   -P, --parallel            Execute on all nodes in parallel instead of sequentially.
   --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem").
@@ -55,8 +60,8 @@ ${YELLOW}Examples:${NC}
   ${GREEN}# Run a health check on all nodes sequentially:${NC}
   $0 -n "node1,node2,node3" -c "sudo cass-ops health"
 
-  ${GREEN}# Run a repair on the cluster in parallel, using a node file:${NC}
-  $0 -f /path/to/nodes.txt -P -c "sudo cass-ops repair"
+  ${GREEN}# Dynamically get all Cassandra nodes in the SC4 datacenter and run a repair in parallel:${NC}
+  $0 --qv-query "-r role_cassandra -d SC4" -P -c "sudo cass-ops repair"
 
   ${GREEN}# Execute a local script on a single node as the 'admin' user:${NC}
   $0 --node node1 -l admin -s ./local_script.sh
@@ -73,6 +78,7 @@ while [[ "$#" -gt 0 ]]; do
             mapfile -t NODES < "$2"
             shift ;;
         --node) NODES=("$2"); shift ;;
+        --qv-query) QV_QUERY="$2"; shift ;;
         -c|--command) COMMAND="$2"; shift ;;
         -s|--script) SCRIPT_PATH="$2"; shift ;;
         -l|--user) SSH_USER="$2"; shift ;;
@@ -85,8 +91,12 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # --- Validation ---
-if [ ${#NODES[@]} -eq 0 ]; then
-    log_error "No target nodes specified. Use --nodes, --nodes-file, or --node."
+if [ ${#NODES[@]} -eq 0 ] && [ -z "$QV_QUERY" ]; then
+    log_error "No target nodes specified. Use --nodes, --nodes-file, --node, or --qv-query."
+    usage
+fi
+if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then
+    log_error "Specify either a static node source (--nodes, etc.) or --qv-query, but not both."
     usage
 fi
 if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then
@@ -102,9 +112,30 @@ if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then
     exit 1
 fi
 
+# --- Node Discovery ---
+if [ -n "$QV_QUERY" ]; then
+    log_info "Fetching node list from inventory tool (qv)..."
+    if ! command -v qv &> /dev/null; then
+        log_error "'qv' command not found. Cannot fetch inventory."
+        exit 1
+    fi
+    
+    # Use process substitution and mapfile to read nodes into an array.
+    # The '-t' flag provides one FQDN per line, which is ideal for this.
+    # The eval is used to correctly handle the quoted query string with its spaces.
+    log_info "Running query: qv -t ${QV_QUERY}"
+    mapfile -t NODES < <(eval "qv -t $QV_QUERY" 2>/dev/null)
+
+    if [ ${#NODES[@]} -eq 0 ]; then
+        log_error "The qv query returned no hosts. Aborting."
+        exit 1
+    fi
+fi
+
 # --- Execution ---
 log_info "Target nodes: ${NODES[*]}"
-log_info "Execution mode: ${PARALLEL_MODE:-Sequential}"
+PARALLEL_MODE=$(if [ "$PARALLEL" = true ]; then echo "Parallel"; else echo "Sequential"; fi)
+log_info "Execution mode: ${PARALLEL_MODE}"
 log_info "SSH user: ${SSH_USER:-$(whoami)}"
 
 pids=()
