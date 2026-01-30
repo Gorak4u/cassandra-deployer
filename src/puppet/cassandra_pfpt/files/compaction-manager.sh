@@ -12,6 +12,8 @@ DISK_CHECK_PATH="/var/lib/cassandra/data"
 CRITICAL_THRESHOLD=85 # Abort if disk usage rises above 85%
 CHECK_INTERVAL=30     # Check disk space every 30 seconds
 LOG_FILE="/var/log/cassandra/compaction_manager.log"
+USER_DEFINED_MODE=false
+USER_DEFINED_FILES=()
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -27,13 +29,20 @@ log_message() {
 
 # --- Usage ---
 usage() {
-    log_message "${YELLOW}Usage: $0 [OPTIONS]${NC}"
+    log_message "${YELLOW}Usage: $0 [OPTIONS] [--user-defined <file1> <file2>...]${NC}"
     log_message "Manages Cassandra compaction with disk space monitoring."
-    log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Required for -t)"
-    log_message "  -t, --table <name>       Specify the table to compact."
+    log_message ""
+    log_message "Modes:"
+    log_message "  Default:      Compact a keyspace, table, or the entire node."
+    log_message "  --user-defined: Compact a specific list of user-defined sstable files."
+    log_message ""
+    log_message "Options:"
+    log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Not for --user-defined mode)"
+    log_message "  -t, --table <name>       Specify the table to compact. (Not for --user-defined mode)"
     log_message "  -s, --split-output       Split output for STCS compaction."
     log_message "  -u, --username <user>    Remote JMX agent username."
     log_message "  -p, --password <pass>    Remote JMX agent password."
+    log_message "  --user-defined           Submit listed files for user-defined compaction. All following args are files."
     log_message "  -d, --disk-path <path>   Path to monitor for disk space. Default: $DISK_CHECK_PATH"
     log_message "  -c, --critical <%>       Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
     log_message "  -i, --interval <sec>     Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
@@ -43,7 +52,7 @@ usage() {
     log_message "  Full node compaction:       $0"
     log_message "  Keyspace compaction:        $0 -k my_keyspace"
     log_message "  Table compaction:           $0 -k my_keyspace -t my_table"
-    log_message "  With JMX auth:              $0 -k my_keyspace -u myjmxuser -p myjmxpass"
+    log_message "  User-defined compaction:    $0 --user-defined /path/to/data.db /path/to/other.db"
     exit 1
 }
 
@@ -58,21 +67,23 @@ while [[ "$#" -gt 0 ]]; do
         -d|--disk-path) DISK_CHECK_PATH="$2"; shift ;;
         -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
         -i|--interval) CHECK_INTERVAL="$2"; shift ;;
+        --user-defined) USER_DEFINED_MODE=true; shift; break ;; # Break and process rest as files
         -h|--help) usage ;;
         *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
     esac
     shift
 done
 
-if [[ -n "$TABLE" && -z "$KEYSPACE" ]]; then
-    log_message "${RED}ERROR: A keyspace (-k) must be specified when compacting a table (-t).${NC}"
-    exit 1
+# If user-defined mode is active, the rest of the arguments are files
+if [ "$USER_DEFINED_MODE" = true ]; then
+    USER_DEFINED_FILES=("$@")
 fi
+
 
 # --- Main Logic ---
 log_message "${BLUE}--- Starting Compaction Manager ---${NC}"
 
-# Build the nodetool command in parts to handle optional flags correctly
+# Build the nodetool command
 CMD_BASE="nodetool"
 if [[ -n "$JMX_USERNAME" ]]; then
     CMD_BASE+=" -u $JMX_USERNAME"
@@ -82,22 +93,45 @@ if [[ -n "$JMX_PASSWORD" ]]; then
 fi
 
 COMPACT_CMD="compact"
-if [ "$SPLIT_OUTPUT" = true ]; then
-    COMPACT_CMD+=" --split-output"
-fi
+TARGET_DESC=""
+CMD=""
 
-KEYSPACE_ARGS=""
-TARGET_DESC="full node"
-if [[ -n "$KEYSPACE" ]]; then
-    KEYSPACE_ARGS+=" $KEYSPACE"
-    TARGET_DESC="keyspace '$KEYSPACE'"
-    if [[ -n "$TABLE" ]]; then
-        KEYSPACE_ARGS+=" $TABLE"
-        TARGET_DESC="table '$TABLE'"
+if [ "$USER_DEFINED_MODE" = true ]; then
+    if [[ -n "$KEYSPACE" || -n "$TABLE" ]]; then
+        log_message "${RED}ERROR: Cannot use --keyspace (-k) or --table (-t) with --user-defined.${NC}"
+        exit 1
     fi
-fi
+    if [ ${#USER_DEFINED_FILES[@]} -eq 0 ]; then
+        log_message "${RED}ERROR: The --user-defined flag requires at least one sstable file path.${NC}"
+        exit 1
+    fi
+    
+    COMPACT_CMD+=" --user-defined"
+    # Safely quote file paths
+    QUOTED_FILES=()
+    for file in "${USER_DEFINED_FILES[@]}"; do
+        QUOTED_FILES+=("$(printf '%q' "$file")")
+    done
 
-CMD="$CMD_BASE $COMPACT_CMD$KEYSPACE_ARGS"
+    CMD="$CMD_BASE $COMPACT_CMD ${QUOTED_FILES[*]}"
+    TARGET_DESC="user-defined files"
+else
+    if [ "$SPLIT_OUTPUT" = true ]; then
+        COMPACT_CMD+=" --split-output"
+    fi
+
+    KEYSPACE_ARGS=""
+    TARGET_DESC="full node"
+    if [[ -n "$KEYSPACE" ]]; then
+        KEYSPACE_ARGS+=" $KEYSPACE"
+        TARGET_DESC="keyspace '$KEYSPACE'"
+        if [[ -n "$TABLE" ]]; then
+            KEYSPACE_ARGS+=" $TABLE"
+            TARGET_DESC="table '$TABLE'"
+        fi
+    fi
+    CMD="$CMD_BASE $COMPACT_CMD$KEYSPACE_ARGS"
+fi
 
 
 log_message "${BLUE}Target: $TARGET_DESC${NC}"
