@@ -6,11 +6,32 @@ To get started, take a look at src/app/page.tsx.
 
 ---
 
-Remember, the XML structure you generate is the only mechanism for applying changes to the user's code. Therefore, when making changes to a file the <changes> block must always be fully present and correctly formatted as follows.
+## External Cluster Orchestration
 
-```xml
-<changes>
-  <description>[Provide a concise summary of the overall changes being made]</description>
-  <change>
-    <file>[Provide the ABSOLUTE, FULL path to the file being modified]</file>
-    <content><![CDATA[Provide the ENTIRE, FINAL, intended content of the file here. Do NOT provide diffs or partial snippets. Ensure all code is properly escaped within the CDATA section.
+A standalone orchestration script is available at `scripts/cluster-run.sh`. This script is designed to be run from an external management node or CI/CD system like Jenkins to execute commands across the entire cluster.
+
+### Prerequisites
+
+The machine running the script must have **passwordless SSH access** (e.g., via SSH keys) to all Cassandra nodes in the cluster for the specified user.
+
+### Usage
+
+The script can run any command or execute a local script file on your cluster nodes, either sequentially (default) or in parallel.
+
+**Examples:**
+
+```bash
+# Get the status from all nodes, one by one
+./scripts/cluster-run.sh --nodes "node1.example.com,node2.example.com,node3.example.com" -c "sudo cass-ops health"
+
+# Run a full repair on the entire cluster in parallel, using a file for the node list
+./scripts/cluster-run.sh --nodes-file /path/to/my_nodes.txt --parallel -c "sudo cass-ops repair"
+
+# Execute a local diagnostic script on a single node
+./scripts/cluster-run.sh --node "node1.example.com" -s ./my_local_check.sh
+```
+
+For all options, run the script with the `--help` flag:
+```bash
+./scripts/cluster-run.sh --help
+```
