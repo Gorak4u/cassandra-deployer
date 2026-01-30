@@ -221,23 +221,15 @@ _run_health_check() {
     for i in $(seq 1 $max_retries); do
         log_info "  [Health Check] Cycle ${i}/${max_retries} for ${node_to_check}..."
 
-        # Check 1: Ping
-        if ! ping -c 3 "${node_to_check}" >/dev/null 2>&1; then
-            log_warn "    - FAIL: Node is not responding to ping. Will retry in ${retry_delay}s."
-            sleep $retry_delay
-            continue
-        fi
-        log_info "    - OK: Node is reachable via ping."
-
-        # Check 2: SSH
+        # Check 1: SSH Connectivity
         if ! ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "echo 'SSH OK'" >/dev/null 2>&1; then
-            log_warn "    - FAIL: SSH connection failed. Will retry in ${retry_delay}s."
+            log_warn "    - FAIL: SSH connection failed. Node may not be reachable or SSH service is not ready. Will retry in ${retry_delay}s."
             sleep $retry_delay
             continue
         fi
         log_info "    - OK: SSH is responsive."
 
-        # Check 3: Cluster Health from the node's perspective
+        # Check 2: Cluster Health from the node's perspective
         if ssh ${SSH_OPTIONS} "${SSH_USER_ARG}${node_to_check}" "sudo /usr/local/bin/cass-ops cluster-health --silent" >/dev/null 2>&1; then
             log_success "--- [Health Check] SUCCESS: Node ${node_to_check} is healthy and cluster is stable. ---"
             return 0 # Success
