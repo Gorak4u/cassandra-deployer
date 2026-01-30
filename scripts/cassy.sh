@@ -74,45 +74,47 @@ usage() {
     echo
     echo -e "${YELLOW}OPTIONS${NC}"
     
-    # Using printf for aligned columns. Increased padding to handle color codes.
-    local format_string="  %-50s %s\n"
+    # Define two format strings. The padding is calculated to align columns correctly,
+    # even with invisible ANSI color codes in the option string.
+    local fmt_long="  %-53s %s\n"
+    local fmt_short="  %-46s %s\n"
     
     echo -e "${BOLD}Node Selection (choose one method):${NC}"
-    printf "$format_string" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
-    printf "$format_string" "${BLUE}-f, --nodes-file ${CYAN}<path>${NC}" "A file containing a list of target nodes, one per line."
-    printf "$format_string" "${BLUE}--node ${CYAN}<host>${NC}" "Specify a single target node."
-    printf "$format_string" "${BLUE}--qv-query ${CYAN}\"<query>\"${NC}" "A quoted 'qv' query to dynamically fetch a node list."
+    printf "$fmt_long" "${BLUE}-n, --nodes ${CYAN}<list>${NC}" "A comma-separated list of target node hostnames or IPs."
+    printf "$fmt_long" "${BLUE}-f, --nodes-file ${CYAN}<path>${NC}" "A file containing a list of target nodes, one per line."
+    printf "$fmt_long" "${BLUE}--node ${CYAN}<host>${NC}" "Specify a single target node."
+    printf "$fmt_long" "${BLUE}--qv-query ${CYAN}\"<query>\"${NC}" "A quoted 'qv' query to dynamically fetch a node list."
     echo
 
     echo -e "${BOLD}Action (choose one):${NC}"
-    printf "$format_string" "${BLUE}-c, --command ${CYAN}<command>${NC}" "The shell command to execute on each node."
-    printf "$format_string" "${BLUE}-s, --script ${CYAN}<path>${NC}" "A local script to copy and execute on each node."
+    printf "$fmt_long" "${BLUE}-c, --command ${CYAN}<command>${NC}" "The shell command to execute on each node."
+    printf "$fmt_long" "${BLUE}-s, --script ${CYAN}<path>${NC}" "A local script to copy and execute on each node."
     echo
 
     echo -e "${BOLD}Execution Control:${NC}"
-    printf "$format_string" "${BLUE}-l, --user ${CYAN}<user>${NC}" "The SSH user to connect as. Defaults to current user."
-    printf "$format_string" "${BLUE}-P, --parallel ${CYAN}[N]${NC}" "Execute in parallel. Optional N for batch size."
-    printf "$format_string" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
-    printf "$format_string" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
-    printf "$format_string" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
-    printf "$format_string" "${BLUE}--continue-on-error${NC}" "In sequential mode, do not abort if a node fails."
+    printf "$fmt_long" "${BLUE}-l, --user ${CYAN}<user>${NC}" "The SSH user to connect as. Defaults to current user."
+    printf "$fmt_long" "${BLUE}-P, --parallel ${CYAN}[N]${NC}" "Execute in parallel. Optional N for batch size."
+    printf "$fmt_long" "${BLUE}--ssh-options ${CYAN}<opts>${NC}" "Quoted string of additional SSH options."
+    printf "$fmt_long" "${BLUE}--retries ${CYAN}<N>${NC}" "Number of times to retry a failed command. Default: 0."
+    printf "$fmt_long" "${BLUE}--timeout ${CYAN}<seconds>${NC}" "Set a timeout for the command on each node. Default: 0 (none)."
+    printf "$fmt_short" "${BLUE}--continue-on-error${NC}" "In sequential mode, do not abort if a node fails."
     echo
     
     echo -e "${BOLD}Safety & Rolling Operations:${NC}"
-    printf "$format_string" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
-    printf "$format_string" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
-    printf "$format_string" "" "${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
-    printf "$format_string" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
-    printf "$format_string" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
-    printf "$format_string" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
+    printf "$fmt_short" "${BLUE}--dry-run${NC}" "Show what would be run, without executing."
+    printf "$fmt_long" "${BLUE}--rolling-op ${CYAN}<type>${NC}" "Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'."
+    printf "$fmt_short" "" "${YELLOW}This enforces sequential execution with a built-in health check.${NC}"
+    printf "$fmt_long" "${BLUE}--inter-node-check ${CYAN}<path>${NC}" "For generic rolling ops, run a local check script after each node."
+    printf "$fmt_long" "${BLUE}--pre-exec-check ${CYAN}<path>${NC}" "Run a local script before any node is touched."
+    printf "$fmt_long" "${BLUE}--post-exec-check ${CYAN}<path>${NC}" "Run a local script after all nodes have been touched."
     echo
     
     echo -e "${BOLD}Output Formatting:${NC}"
-    printf "$format_string" "${BLUE}--json${NC}" "Output results in machine-readable JSON format."
-    printf "$format_string" "${BLUE}--output-dir ${CYAN}<path>${NC}" "Save the output from each node to a separate file."
+    printf "$fmt_short" "${BLUE}--json${NC}" "Output results in machine-readable JSON format."
+    printf "$fmt_long" "${BLUE}--output-dir ${CYAN}<path>${NC}" "Save the output from each node to a separate file."
     echo
     
-    printf "$format_string" "${BLUE}-h, --help${NC}" "Show this help message."
+    printf "$fmt_short" "${BLUE}-h, --help${NC}" "Show this help message."
     echo
     
     echo -e "--------------------------------------------------------------------------------"
@@ -390,6 +392,7 @@ run_task() {
         if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
 
         local SSH_CMD_PREFIX=""
+        # Use stdbuf if available for line-buffered output, otherwise proceed without it.
         if command -v stdbuf &> /dev/null; then
             SSH_CMD_PREFIX="stdbuf -oL -eL"
         fi
@@ -435,13 +438,13 @@ run_task() {
     
     # Track failures for the final exit code in parallel mode.
     if [ $rc -ne 0 ] && [ "$PARALLEL" = true ]; then
+        # Use flock if available for atomic appends, otherwise just append.
         if command -v flock &> /dev/null; then
             (
                 flock 200
                 echo "$node" >> "failed_nodes.$$"
             ) 200>failed_nodes.lock
         else
-            # Fallback for when flock isn't available. Not atomic, but better than nothing.
             echo "$node" >> "failed_nodes.$$"
         fi
     fi
@@ -507,7 +510,7 @@ else
             failed_nodes+=("$node")
             if [ "$CONTINUE_ON_ERROR" = true ]; then
                 log_warn "Task failed on node ${node}, but --continue-on-error is set. Proceeding to next node."
-                continue
+                # Do not break here, just continue the loop
             else
                 log_error "Task failed on node ${node}. Aborting rolling execution."
                 break
@@ -586,6 +589,7 @@ fi
     
 
     
+
 
 
 
