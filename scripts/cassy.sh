@@ -199,6 +199,13 @@ if [[ ! "$RETRIES" =~ ^[0-9]+$ ]]; then log_error "Retries must be a non-negativ
 if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-execution check script is not executable: $PRE_EXEC_CHECK"; exit 1; fi
 if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
 
+# --- Variable Initialization ---
+SSH_USER_ARG=""
+if [ -n "$SSH_USER" ]; then
+    SSH_USER_ARG="${SSH_USER}@"
+fi
+failed_nodes=()
+
 # --- Node Discovery ---
 if [ -n "$QV_QUERY" ]; then
     log_info "Fetching node list from inventory tool (qv)..."
@@ -299,9 +306,6 @@ fi
 log_info "Execution mode: ${PARALLEL_MODE}"
 log_info "SSH user: ${SSH_USER:-$(whoami)}"
 
-failed_nodes=()
-SSH_USER_ARG=""
-if [ -n "$SSH_USER" ]; then SSH_USER_ARG="${SSH_USER}@"; fi
 ACTION_DESC=""
 if [ -n "$COMMAND" ]; then ACTION_DESC="command: $COMMAND"; else ACTION_DESC="script: $SCRIPT_PATH"; fi
 log_info "Executing $ACTION_DESC"
@@ -452,7 +456,7 @@ else
         fi
 
         # If this is a rolling operation OR the user requested an inter-node check, run the internal health check.
-        if [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; then
+        if { [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; } && [ "$DRY_RUN" = false ]; then
             if ! _run_health_check "$node"; then
                 log_error "Inter-node health check failed after operating on node ${node}. Aborting rolling execution."
                 # The task itself succeeded, but the check failed. Manually add the node to the failure list.
@@ -502,5 +506,7 @@ else
     done
     exit 1
 fi
+
+    
 
     
