@@ -32,7 +32,7 @@ The script can run any command or execute a local script file on your cluster no
 | `-c`, `--command` | `<command>` | The shell command to execute on each node. |
 | `-s`, `--script` | `<path>` | The path to a local script to copy and execute on each node. |
 | `-l`, `--user` | `<user>` | The SSH user to connect as. Defaults to the current user. |
-| `-P`, `--parallel` | `[N]` | Execute in parallel. By default on all nodes, or with a concurrency of N if provided. |
+| `-P`, `--parallel` | `[N]` | Execute in parallel. Uses a worker pool model with a concurrency of N. Defaults to all nodes at once if N is omitted. |
 | `--ssh-options` | `<opts>` | Quoted string of additional options for the SSH command (e.g., "-i /path/key.pem"). |
 | `--dry-run` | | Show which nodes would be targeted and what command would run, without executing. |
 | `--json` | | Output results in a machine-readable JSON format. |
@@ -90,6 +90,25 @@ You can use `cassy.sh` with the `--json` flag to programmatically audit your clu
 # Get health status from all nodes and use jq to print the details of any failed checks.
 ./scripts/cassy.sh --qv-query "-r role_cassandra_pfpt" --json -c "sudo cass-ops health --json" | jq '.results[] | select(.status == "FAILED")'
 ```
+
+#### **Pattern 4: Fully Automated Rolling Operations**
+For the most critical operations, you need a higher level of automation. The repository now includes a set of pre-built scripts in the `scripts/` directory to handle safe, automated rolling operations.
+
+These scripts use a master health check script (`scripts/check_cluster_health.sh`) which has built-in retry logic. It runs between each node operation to ensure the cluster remains stable.
+
+*   `scripts/rolling_restart.sh "<qv_query>"`
+*   `scripts/rolling_reboot.sh "<qv_query>"`
+*   `scripts/rolling_puppet_run.sh "<qv_query>"`
+
+**Usage Example:**
+
+To perform a safe rolling restart of all Cassandra nodes in the AWSLAB datacenter:
+
+```bash
+./scripts/rolling_restart.sh "-r role_cassandra_pfpt -d AWSLAB"
+```
+
+This single command will orchestrate the entire process, node by node, with health checks at every step.
 
 #### **A Note on Safety: Parallel vs. Sequential Execution**
 

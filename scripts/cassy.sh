@@ -60,7 +60,7 @@ usage() {
     echo
     echo -e "${YELLOW}Execution Options:${NC}"
     echo -e "  -l, --user <user>         The SSH user to connect as. Defaults to the current user."
-    echo -e "  -P, --parallel [N]        Execute in parallel. By default on all nodes, or with a concurrency of N if provided."
+    echo -e "  -P, --parallel [N]        Execute in parallel. Uses a worker pool model with a concurrency of N. Defaults to all nodes at once if N is omitted."
     echo -e "  --ssh-options <opts>      Quoted string of additional options for the SSH command (e.g., \"-i /path/key.pem\")."
     echo
     echo -e "${YELLOW}Output & Safety:${NC}"
@@ -207,7 +207,6 @@ run_task() {
     local output_buffer=""
     local rc=0
     local attempt
-    local REMOTE_SCRIPT_PATH
     
     for attempt in $(seq 1 $((RETRIES + 1))); do
         # Only log retry attempts, not the first one.
@@ -216,7 +215,7 @@ run_task() {
             sleep 3 # Brief pause before retry
         fi
         
-        REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$_${attempt}"
+        local REMOTE_SCRIPT_PATH="/tmp/cassy_remote_script_$$_${attempt}"
         
         local TIMEOUT_CMD=""
         if [ "$TIMEOUT" -gt 0 ]; then TIMEOUT_CMD="timeout $TIMEOUT"; fi
