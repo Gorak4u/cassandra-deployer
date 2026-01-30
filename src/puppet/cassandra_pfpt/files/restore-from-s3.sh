@@ -700,7 +700,7 @@ do_granular_restore() {
             local loader_cmd=("sstableloader" "--verbose" "--no-progress" "-d" "$LOADER_NODES")
             
             if [[ "$CASSANDRA_PASSWORD" != "null" ]]; then
-                loader_cmd+=("-u" "$CASSANDRA_USER" "-p" "$CASSANDRA_PASSWORD")
+                loader_cmd+=("-u" "$CASSANDRA_USER" "-pw" "$CASSANDRA_PASSWORD")
             fi
             if [ "$SSL_ENABLED" == "true" ]; then
                 loader_cmd+=("--ssl-storage-port" "7001" "--ssl-truststore" "$SSL_TRUSTSTORE_PATH" "--ssl-truststore-password" "$SSL_TRUSTSTORE_PASSWORD")
@@ -873,7 +873,7 @@ SSL_TRUSTSTORE_PATH=$(jq -r '.ssl_truststore_path // "null"' "$CONFIG_FILE")
 SSL_TRUSTSTORE_PASSWORD=$(jq -r '.ssl_truststore_password // "null"' "$CONFIG_FILE")
 BACKUP_BACKEND=$(jq -r '.backup_backend // "s3"' "$CONFIG_FILE")
 PARALLELISM=$(jq -r '.parallelism // 4' "$CONFIG_FILE")
-THROTTLE_RATE_FROM_CONFIG=$(jq -r '.throttle_rate // ""' "$CONFIG_FILE")
+THROTTLE_RATE_FROM_CONFIG=$(jq -r '.throttle_rate // "50M/s"' "$CONFIG_FILE")
 
 # Validate essential configuration
 if [ -z "$CASSANDRA_CONF_DIR" ] || [ "$CASSANDRA_CONF_DIR" == "null" ]; then log_error "'cassandra_conf_dir' is not set or invalid in $CONFIG_FILE."; exit 1; fi
@@ -1033,3 +1033,4 @@ esac
 exit 0
 
     
+
