@@ -117,7 +117,7 @@ echo -n "$ENCRYPTION_KEY" > "$TMP_KEY_FILE"
 # Create a pipeline to download, decrypt, and test the tarball without saving intermediate files
 if ! aws s3 cp "s3://${S3_BUCKET_NAME}/${SAMPLE_ARCHIVE}" - | \
     openssl enc -d -aes-256-cbc -salt -pbkdf2 -md sha256 -pass "file:$TMP_KEY_FILE" | \
-    tar -t > /dev/null; then
+    tar -zt > /dev/null; then
     
     pipeline_status=("${PIPESTATUS[@]}")
     log_error "Backup verification FAILED."
