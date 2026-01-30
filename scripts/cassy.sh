@@ -21,7 +21,7 @@ TIMEOUT=0 # 0 for no timeout
 RETRIES=0
 PRE_EXEC_CHECK=""
 POST_EXEC_CHECK=""
-PERFORM_INTER_NODE_CHECK=false
+INTER_NODE_CHECK_SCRIPT=""
 ROLLING_OP=""
 
 # --- Color Codes ---
@@ -73,8 +73,8 @@ usage() {
     echo -e "  --output-dir <path>       Save the output from each node to a separate file in the specified directory."
     echo
     echo -e "${BOLD}Automation & Advanced Safety:${NC}"
-    echo -e "  --rolling-op <type>       Perform a predefined safe rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with an internal health check between each node."
-    echo -e "  --inter-node-check        In sequential mode, performs the built-in health check after each node. Essential for safe, custom rolling operations."
+    echo -e "  --rolling-op <type>       Perform a predefined Cassandra rolling operation: 'restart', 'reboot', or 'puppet'. Enforces sequential execution with a built-in health check."
+    echo -e "  --inter-node-check <path> In sequential mode, run a custom local script after each node. If it fails, the rolling execution stops. Cannot be used with --rolling-op."
     echo -e "  --retries <N>             Number of times to retry a failed command on a node. Default: 0."
     echo -e "  --pre-exec-check <path>   A local script to run before executing on any nodes. If it fails, cassy.sh aborts."
     echo -e "  --post-exec-check <path>  A local script to run after executing on all nodes."
@@ -84,13 +84,17 @@ usage() {
     echo -e "--------------------------------------------------------------------------------"
     echo -e "${YELLOW}Robust Usage Examples:${NC}"
     echo
-    echo -e "${BOLD}1. Safe Rolling Restart of a Datacenter (Predefined Op)${NC}"
-    echo -e "   # Uses the --rolling-op shortcut with an internal health check."
+    echo -e "${BOLD}1. Safe Rolling Restart of a Cassandra Datacenter (Predefined Op)${NC}"
+    echo -e "   # Uses the --rolling-op shortcut with a built-in, Cassandra-specific health check."
     echo -e "   $0 --rolling-op restart --qv-query \"-r role_cassandra_pfpt -d AWSLAB\""
     echo
-    echo -e "${BOLD}2. Safe Rolling Operation for a Custom Command${NC}"
-    echo -e "   # Use --inter-node-check to apply the same safety to any command."
-    echo -e "   $0 --qv-query \"-r role_cassandra_pfpt\" --inter-node-check -c \"sudo cass-ops cleanup\""
+    echo -e "${BOLD}2. Safe Rolling Operation for a Custom Command (Generic)${NC}"
+    echo -e "   # First, create your health check script (e.g., my_check.sh):"
+    echo -e "   #   #!/bin/bash"
+    echo -e "   #   curl --fail http://\${1}:8080/health # \$1 is the node IP from cassy"
+    echo -e "   # Make it executable: chmod +x my_check.sh"
+    echo -e "   # Then, use it with --inter-node-check:"
+    echo -e "   $0 --qv-query \"-r role_webapp\" --inter-node-check ./my_check.sh -c \"sudo systemctl restart my-webapp\""
     echo
     echo -e "${BOLD}3. Parallel Cluster-Wide Repair${NC}"
     echo -e "   # Run repair on all Cassandra nodes in the SC4 datacenter in batches of 5."
@@ -137,7 +141,7 @@ while [[ "$#" -gt 0 ]]; do
         --rolling-op) ROLLING_OP="$2"; shift ;;
         --pre-exec-check) PRE_EXEC_CHECK="$2"; shift ;;
         --post-exec-check) POST_EXEC_CHECK="$2"; shift ;;
-        --inter-node-check) PERFORM_INTER_NODE_CHECK=true ;;
+        --inter-node-check) INTER_NODE_CHECK_SCRIPT="$2"; shift ;;
         -h|--help) usage ;;
         *) log_error "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
@@ -154,6 +158,10 @@ if [ -n "$ROLLING_OP" ]; then
     fi
     if [ "$PARALLEL" = true ]; then
         log_error "--rolling-op can only be used in sequential mode (without --parallel)."
+        usage; exit 1;
+    fi
+    if [ -n "$INTER_NODE_CHECK_SCRIPT" ]; then
+        log_error "Cannot use --inter-node-check with --rolling-op. Use one or the other."
         usage; exit 1;
     fi
 
@@ -180,7 +188,7 @@ if [ -n "$QV_QUERY" ] && [ ${#NODES[@]} -gt 0 ]; then log_error "Specify either 
 if [ -z "$COMMAND" ] && [ -z "$SCRIPT_PATH" ]; then log_error "No action specified. Use --command, --script, or --rolling-op."; usage; exit 1; fi
 if [ -n "$COMMAND" ] && [ -n "$SCRIPT_PATH" ]; then log_error "Specify either --command or --script, but not both."; usage; exit 1; fi
 if [ -n "$SCRIPT_PATH" ] && [ ! -f "$SCRIPT_PATH" ]; then log_error "Script file not found: $SCRIPT_PATH"; exit 1; fi
-if [ "$PERFORM_INTER_NODE_CHECK" = true ] && [ "$PARALLEL" = true ]; then
+if [ -n "$INTER_NODE_CHECK_SCRIPT" ] && [ "$PARALLEL" = true ]; then
     log_error "--inter-node-check can only be used in sequential mode (without --parallel)."
     usage; exit 1;
 fi
@@ -198,6 +206,8 @@ fi
 if [[ ! "$RETRIES" =~ ^[0-9]+$ ]]; then log_error "Retries must be a non-negative integer."; exit 1; fi
 if [ -n "$PRE_EXEC_CHECK" ] && [ ! -x "$PRE_EXEC_CHECK" ]; then log_error "Pre-execution check script is not executable: $PRE_EXEC_CHECK"; exit 1; fi
 if [ -n "$POST_EXEC_CHECK" ] && [ ! -x "$POST_EXEC_CHECK" ]; then log_error "Post-execution check script is not executable: $POST_EXEC_CHECK"; exit 1; fi
+if [ -n "$INTER_NODE_CHECK_SCRIPT" ] && [ ! -x "$INTER_NODE_CHECK_SCRIPT" ]; then log_error "Inter-node check script is not executable: $INTER_NODE_CHECK_SCRIPT"; exit 1; fi
+
 
 # --- Variable Initialization ---
 SSH_USER_ARG=""
@@ -261,7 +271,7 @@ if [ -n "$PRE_EXEC_CHECK" ]; then
 fi
 
 # Pre-flight health check for rolling operations
-if { [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; } && [ "$DRY_RUN" = false ]; then
+if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
     log_info "--- Running Pre-Rolling Operation Master Health Check ---"
     if ! _run_health_check "${NODES[0]}"; then
         log_error "Initial health check on node ${NODES[0]} failed. Aborting rolling operation before it starts."
@@ -448,14 +458,24 @@ else
             break
         fi
 
-        # If this is a rolling operation OR the user requested an inter-node check, run the internal health check.
-        if { [ -n "$ROLLING_OP" ] || [ "$PERFORM_INTER_NODE_CHECK" = true ]; } && [ "$DRY_RUN" = false ]; then
+        # If this is a Cassandra rolling operation, run the internal health check.
+        if [ -n "$ROLLING_OP" ] && [ "$DRY_RUN" = false ]; then
             if ! _run_health_check "$node"; then
-                log_error "Inter-node health check failed after operating on node ${node}. Aborting rolling execution."
-                # The task itself succeeded, but the check failed. Manually add the node to the failure list.
+                log_error "Internal health check failed after operating on node ${node}. Aborting rolling execution."
                 failed_nodes+=("$node")
                 break
             fi
+        fi
+
+        # If the user provided a custom check script, run it.
+        if [ -n "$INTER_NODE_CHECK_SCRIPT" ] && [ "$DRY_RUN" = false ]; then
+            log_info "--- Running Custom Inter-Node Check from: $INTER_NODE_CHECK_SCRIPT ---"
+            if ! "$INTER_NODE_CHECK_SCRIPT" "$node"; then
+                log_error "Custom inter-node check failed after operating on node ${node}. Aborting."
+                failed_nodes+=("$node")
+                break
+            fi
+            log_success "Custom inter-node check passed."
         fi
     done
 fi
