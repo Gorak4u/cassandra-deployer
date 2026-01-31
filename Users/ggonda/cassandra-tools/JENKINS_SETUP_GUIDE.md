@@ -1,6 +1,6 @@
 # Jenkins Setup Guide for Cassandra Operations
 
-This guide provides step-by-step instructions for creating all the necessary Jenkins pipeline jobs to manage your Cassandra cluster using the provided orchestration scripts.
+This guide provides step-by-step instructions for creating all the necessary Jenkins pipeline jobs to manage your Cassandra cluster using the provided orchestration scripts from your local machine.
 
 We will use a **seed job**. This is a special Jenkins job that automatically creates all the other jobs for you based on the `seed.groovy.txt` script. This approach is powerful because it keeps all your job definitions in one place and ensures they are "Pipeline as Code".
 
@@ -10,7 +10,8 @@ We will use a **seed job**. This is a special Jenkins job that automatically cre
 2.  **Job DSL Plugin**: The "Job DSL" plugin must be installed on your Jenkins instance.
     *   Go to `Manage Jenkins` > `Plugins` > `Available plugins`.
     *   Search for and install `Job DSL`.
-3.  **SSH Key Access**: The Jenkins agent must have passwordless SSH access to the Cassandra nodes.
+3.  **Local Project Path**: This guide assumes your project directory is located at `/Users/ggonda/cassandra-tools`. The generated jobs will use this path to find the required scripts.
+4.  **SSH Key Access**: The Jenkins agent must have passwordless SSH access to the Cassandra nodes.
 
 ---
 
@@ -64,22 +65,13 @@ You will now see a new set of jobs on your dashboard inside a folder named `Cass
 
 ---
 
-## Step 4: Configure and Use the Operational Jobs
+## Step 4: Use the Operational Jobs
 
-Each of the newly created jobs is a Pipeline job that needs to be configured with your source code repository.
+The jobs are now ready to use. They are configured to run directly from your local project directory.
 
 1.  Click on the `Cassandra` folder, then click on any of the generated jobs (e.g., `Cassandra - Restart`).
-2.  Click **Configure** from the left-hand menu.
-3.  Scroll down to the **Pipeline** section.
-4.  Under **Definition**, select **Pipeline script from SCM**.
-5.  Configure your **SCM** (e.g., Git) and provide your repository URL. Ensure the **Script Path** is set to the correct `Jenkinsfile.*` for that job (e.g., `jenkins/Jenkinsfile.restart`).
-6.  Click **Save**.
-7.  Repeat this configuration for all the jobs created by the seed job.
-
-Once configured, you can run the jobs:
-1.  Click on the job you want to run.
 2.  Click **Build with Parameters**.
 3.  Fill in the parameters relevant to the operation.
 4.  Click **Build**.
 
-The Jenkins job will check out your code and execute the corresponding script, orchestrating the operation across your cluster.
+The Jenkins job will change to the `/Users/ggonda/cassandra-tools` directory and execute the corresponding script, orchestrating the operation across your cluster.
