@@ -142,6 +142,24 @@ if [ "$CLUSTER_OLD_NAME" != "$CLUSTER_NEW_NAME" ]; then
 fi
 log_success "Cluster names match: $CLUSTER_OLD_NAME"
 
+# --- Pre-Flight: Disable Automation ---
+log_info "--- Pre-Flight: Disable Automation ---"
+log_warn "This script will now disable Puppet and scheduled jobs on all nodes in both datacenters."
+log_warn "This is a critical safety step to prevent interference during the join process."
+read -p "Are you sure you want to disable automation and proceed? (yes/no): " confirmation
+if [[ "$confirmation" != "yes" ]]; then
+    log_info "Join process aborted by user."
+    exit 0
+fi
+
+disable_reason="Pausing automation for multi-DC join process initiated at $(date)"
+log_info "Disabling automation on OLD datacenter nodes..."
+run_cassy --qv-query "$OLD_DC_QUERY" -P -c "sudo /usr/local/bin/cass-ops disable-automation '${disable_reason}'"
+log_info "Disabling automation on NEW datacenter nodes..."
+run_cassy --qv-query "$NEW_DC_QUERY" -P -c "sudo /usr/local/bin/cass-ops disable-automation '${disable_reason}'"
+log_success "Automation disabled on all target nodes."
+
+
 # --- Phase 2: Alter Topology ---
 log_info "--- Phase 2: Alter System Keyspace Topology ---"
 log_warn "This step will alter system keyspaces on the OLD datacenter to include the NEW datacenter."
@@ -177,5 +195,12 @@ run_cassy --qv-query "$NEW_DC_QUERY" -c "$REBUILD_CMD"
 log_success "Data rebuild process completed for the new datacenter."
 log_info "--- Multi-DC Join Process Finished ---"
 log_info "Run '$CASSY_SCRIPT_PATH --qv-query \"$OLD_DC_QUERY\" -c \"nodetool status\"' to verify cluster state."
+
+log_warn "--- CRITICAL FINAL STEP ---"
+log_warn "Automation is still DISABLED on all nodes in both datacenters."
+log_warn "Once you have verified the cluster is healthy and stable, you MUST re-enable it."
+log_warn "Run the following commands from your management node:"
+log_info "  ${CYAN}${CASSY_SCRIPT_PATH} --qv-query \"${OLD_DC_QUERY}\" -P -c \"sudo /usr/local/bin/cass-ops enable-automation\"${NC}"
+log_info "  ${CYAN}${CASSY_SCRIPT_PATH} --qv-query \"${NEW_DC_QUERY}\" -P -c \"sudo /usr/local/bin/cass-ops enable-automation\"${NC}"
 
 exit 0

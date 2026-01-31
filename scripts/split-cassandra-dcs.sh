@@ -129,6 +129,24 @@ log_info "Discovered ${#DC1_NODES[@]} nodes in $DC1_NAME and ${#DC2_NODES[@]} in
 DC1_RUN_NODE=${DC1_NODES[0]}
 DC2_RUN_NODE=${DC2_NODES[0]}
 
+# --- Pre-Flight: Disable Automation ---
+log_info "--- Pre-Flight: Disable Automation ---"
+log_warn "This script will now disable Puppet and scheduled jobs on all nodes in both datacenters."
+log_warn "This is a critical safety step to prevent interference during the split process."
+read -p "Are you sure you want to disable automation and proceed with the split? (yes/no): " confirmation
+if [[ "$confirmation" != "yes" ]]; then
+    log_info "Split process aborted by user."
+    exit 0
+fi
+
+disable_reason="Pausing automation for multi-DC split process initiated at $(date)"
+log_info "Disabling automation on DC1 nodes..."
+run_cassy --qv-query "$DC1_QUERY" -P -c "sudo /usr/local/bin/cass-ops disable-automation '${disable_reason}'"
+log_info "Disabling automation on DC2 nodes..."
+run_cassy --qv-query "$DC2_QUERY" -P -c "sudo /usr/local/bin/cass-ops disable-automation '${disable_reason}'"
+log_success "Automation disabled on all target nodes."
+
+
 # --- Phase 2: Alter Topology on DC1 ---
 log_info "--- Phase 2: Isolate $DC1_NAME by Altering its System Keyspace Topology ---"
 log_warn "This step will alter system keyspaces on $DC1_NAME to remove $DC2_NAME from replication."
@@ -170,5 +188,12 @@ log_info "--- Multi-DC Split Process Finished ---"
 log_warn "IMPORTANT: The final step is to apply firewall rules to prevent network traffic between the two datacenters."
 log_info "The two datacenters should now be operating as independent clusters."
 log_info "Run '$CASSY_SCRIPT_PATH --qv-query \"$DC1_QUERY\" -c \"nodetool status\"' and '$CASSY_SCRIPT_PATH --qv-query \"$DC2_QUERY\" -c \"nodetool status\"' to verify each cluster's state."
+
+log_warn "--- CRITICAL FINAL STEP ---"
+log_warn "Automation is still DISABLED on all nodes in both former datacenters."
+log_warn "Once you have applied firewall rules and verified the clusters are independent, you MUST re-enable it."
+log_warn "Run the following commands from your management node:"
+log_info "  ${CYAN}${CASSY_SCRIPT_PATH} --qv-query \"${DC1_QUERY}\" -P -c \"sudo /usr/local/bin/cass-ops enable-automation\"${NC}"
+log_info "  ${CYAN}${CASSY_SCRIPT_PATH} --qv-query \"${DC2_QUERY}\" -P -c \"sudo /usr/local/bin/cass-ops enable-automation\"${NC}"
 
 exit 0

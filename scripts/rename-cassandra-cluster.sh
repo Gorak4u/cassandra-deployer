@@ -129,12 +129,19 @@ log_success "Current cluster name matches '$OLD_NAME'."
 # --- Confirmation ---
 log_warn "--- DOWNTIME REQUIRED ---"
 log_warn "This script will shut down the entire Cassandra cluster to perform the rename."
-log_warn "Ensure no applications are actively using the cluster before proceeding."
-read -p "Are you absolutely sure you want to continue? (yes/no): " confirmation
+log_warn "It will also disable Puppet and scheduled jobs on all nodes before starting."
+read -p "Are you absolutely sure you want to disable automation and proceed with the rename? (yes/no): " confirmation
 if [[ "$confirmation" != "yes" ]]; then
     log_info "Rename aborted by user."
     exit 0
 fi
+
+# --- Disable Automation ---
+log_info "--- Disabling Automation on all nodes ---"
+disable_reason="Pausing automation for cluster rename from '${OLD_NAME}' to '${NEW_NAME}'"
+run_cassy --qv-query "$QV_QUERY" -P -c "sudo /usr/local/bin/cass-ops disable-automation '${disable_reason}'"
+log_success "Automation disabled on all cluster nodes."
+
 
 # --- Phase 2: Live Update of system.local ---
 log_info "--- Phase 2: Updating cluster name in system.local (live) ---"
@@ -162,9 +169,15 @@ log_success "Start command issued to all nodes."
 log_info "--- Rename Process Finished ---"
 log_warn "IMPORTANT: The cluster rename is complete, but the change is NOT PERMANENT yet."
 log_warn "You MUST now update your Puppet/Hiera configuration to reflect the new cluster name:"
-log_message "  ${CYAN}profile_cassandra_pfpt::cluster_name: '${NEW_NAME}'${NC}"
+log_info "  ${CYAN}profile_cassandra_pfpt::cluster_name: '${NEW_NAME}'${NC}"
 log_warn "Failure to do so will cause the next Puppet run to revert the change and break the cluster."
-log_info "After updating Hiera, run Puppet on all nodes to make the change permanent."
-log_info "Monitor cluster health with: cassy.sh --qv-query \"$QV_QUERY\" -c 'nodetool status'"
+
+log_warn "--- CRITICAL FINAL STEP ---"
+log_warn "Automation is still DISABLED on all nodes in the cluster."
+log_warn "After updating Hiera, you MUST re-enable automation on all nodes."
+log_warn "Run the following command from your management node:"
+log_info "  ${CYAN}${CASSY_SCRIPT_PATH} --qv-query \"${QV_QUERY}\" -P -c \"sudo /usr/local/bin/cass-ops enable-automation\"${NC}"
+log_info "Then run Puppet on all nodes to make the configuration change permanent."
+log_info "Monitor cluster health with: ${CASSY_SCRIPT_PATH} --qv-query \"$QV_QUERY\" -c 'nodetool status'"
 
 exit 0
