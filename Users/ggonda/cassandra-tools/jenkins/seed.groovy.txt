@@ -37,7 +37,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -62,8 +62,8 @@ pipeline {
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
                     sh """
-                        chmod +x \${env.SCRIPTS_PATH}/cassy.sh
-                        \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c "\${params.CASSY_COMMAND}" \${parallel_flag}
+                        chmod +x ${env.SCRIPTS_PATH}/cassy.sh
+                        ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c "${params.CASSY_COMMAND}" ${parallel_flag}
                     """
                 }
             }
@@ -81,7 +81,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -94,7 +94,7 @@ pipeline {
             steps {
                 script {
                     def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op restart \${node_arg}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op restart ${node_arg}"
                 }
             }
         }
@@ -110,7 +110,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -123,7 +123,7 @@ pipeline {
             steps {
                 script {
                     def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op reboot \${node_arg}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op reboot ${node_arg}"
                 }
             }
         }
@@ -139,7 +139,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -152,7 +152,7 @@ pipeline {
             steps {
                 script {
                     def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op puppet \${node_arg}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op puppet ${node_arg}"
                 }
             }
         }
@@ -168,7 +168,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -187,8 +187,8 @@ pipeline {
                     def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query \\"${params.OLD_DC_QUERY}\\"" : "--old-dc-nodes \\"${params.OLD_DC_NODES}\\""
                     def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query \\"${params.NEW_DC_QUERY}\\"" : "--new-dc-nodes \\"${params.NEW_DC_NODES}\\""
                     sh """
-                        chmod +x \${env.SCRIPTS_PATH}/join-cassandra-dcs.sh
-                        \${env.SCRIPTS_PATH}/join-cassandra-dcs.sh \${old_dc_arg} \${new_dc_arg} --old-dc-name "\${params.OLD_DC_NAME}" --new-dc-name "\${params.NEW_DC_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                        chmod +x ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh
+                        ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh ${old_dc_arg} ${new_dc_arg} --old-dc-name "${params.OLD_DC_NAME}" --new-dc-name "${params.NEW_DC_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
                     """
                 }
             }
@@ -206,7 +206,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -225,8 +225,8 @@ pipeline {
                     def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query \\"${params.DC1_QUERY}\\"" : "--dc1-nodes \\"${params.DC1_NODES}\\""
                     def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query \\"${params.DC2_QUERY}\\"" : "--dc2-nodes \\"${params.DC2_NODES}\\""
                     sh """
-                        chmod +x \${env.SCRIPTS_PATH}/split-cassandra-dcs.sh
-                        \${env.SCRIPTS_PATH}/split-cassandra-dcs.sh \${dc1_arg} \${dc2_arg} --dc1-name "\${params.DC1_NAME}" --dc2-name "\${params.DC2_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                        chmod +x ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh
+                        ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh ${dc1_arg} ${dc2_arg} --dc1-name "${params.DC1_NAME}" --dc2-name "${params.DC2_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
                     """
                 }
             }
@@ -244,7 +244,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -260,8 +260,8 @@ pipeline {
                 script {
                     def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
                     sh """
-                        chmod +x \${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh
-                        \${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh \${node_arg} --old-name "\${params.OLD_NAME}" --new-name "\${params.NEW_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                        chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh
+                        ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh ${node_arg} --old-name "${params.OLD_NAME}" --new-name "${params.NEW_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
                     """
                 }
             }
@@ -279,7 +279,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -299,17 +299,17 @@ pipeline {
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
                     
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops compact"
+                    if (params.NODETOOL_OPTIONS) {
+                        cass_ops_command += " --nodetool-options \\"${params.NODETOOL_OPTIONS}\\""
+                    }
                     if (params.KEYSPACE) {
-                        cass_ops_command += " -- -k \${params.KEYSPACE}"
+                        cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                        cass_ops_command += " " + params.TABLES.split(' ').join(' ')
-                    }
-                    if (params.NODETOOL_OPTIONS) {
-                        // The options are passed via the wrapper script's internal logic, not to cass-ops
+                        cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
                     }
 
-                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
                 }
             }
         }
@@ -325,7 +325,7 @@ pipeline {
 
     environment {
         SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
-        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
     }
 
     parameters {
@@ -345,22 +345,17 @@ pipeline {
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops garbage-collect"
-                    def gc_args = ""
+                    if (params.NODETOOL_OPTIONS) {
+                        cass_ops_command += " --nodetool-options \\"${params.NODETOOL_OPTIONS}\\""
+                    }
                     if (params.KEYSPACE) {
-                        gc_args += " -k \${params.KEYSPACE}"
+                        cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                        params.TABLES.split(' ').each { table ->
-                             gc_args += " -t \${table}"
-                        }
-                    }
-                    if (params.NODETOOL_OPTIONS) {
-                       // The options are passed via the wrapper script's internal logic, not to cass-ops
+                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
                     }
                     
-                    cass_ops_command += gc_args
-
-                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
                 }
             }
         }
