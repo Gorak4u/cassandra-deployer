@@ -12,9 +12,6 @@ folder(folderName)
 // =============================================================================
 def createPipelineJob(String folderName, String jobName, String pipelineScript) {
     pipelineJob("${folderName}/${jobName}") {
-        // This makes the jobs show up nicely in the Blue Ocean UI
-        metaClass.isBlueOcean = { -> return true }
-
         // The entire pipeline definition is provided as a string
         definition {
             cps {
