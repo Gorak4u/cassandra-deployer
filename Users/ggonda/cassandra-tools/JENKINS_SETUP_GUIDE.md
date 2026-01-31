@@ -2,7 +2,7 @@
 
 This guide provides step-by-step instructions for creating all the necessary Jenkins pipeline jobs to manage your Cassandra cluster using the provided orchestration scripts.
 
-We will use a **seed job**. This is a special Jenkins job that automatically creates all the other jobs for you based on the `Jenkinsfile.*` templates in this directory.
+We will use a **seed job**. This is a special Jenkins job that automatically creates all the other jobs for you based on the `seed.groovy` script. This approach is powerful because it keeps all your job definitions in one place.
 
 ## Prerequisites
 
@@ -17,9 +17,7 @@ We will use a **seed job**. This is a special Jenkins job that automatically cre
     ```
     /Users/ggonda/cassandra-tools/
     ├── jenkins/
-    │   ├── Jenkinsfile.command
-    │   ├── Jenkinsfile.join
-    │   └── seed.groovy
+    │   └── seed.groovy  <-- This file now contains all Jenkinsfile logic
     └── scripts/
         ├── cassy.sh
         └── ...
@@ -48,9 +46,9 @@ Now that the seed job is created, you can run it to generate all your Cassandra 
 
 1.  Go to the dashboard for your `Cassandra-Seed-Job`.
 2.  Click **Build Now**.
-3.  After the build completes (it should be very fast), go back to the main Jenkins dashboard.
+3.  After the build completes (it should be very fast), go back to the main Jenkins dashboard and refresh the page.
 
-You will now see a new folder (or a new set of jobs) on your dashboard, such as:
+You will now see a new set of jobs on your dashboard:
 *   `Cassandra - Reboot`
 *   `Cassandra - Restart`
 *   `Cassandra - Join`
@@ -63,7 +61,7 @@ You will now see a new folder (or a new set of jobs) on your dashboard, such as:
 
 ## Step 3: Use the Operational Jobs
 
-You can now use these newly created jobs to perform operations.
+You can now use these newly created jobs to perform operations. Each job has its own specific set of parameters.
 
 1.  Click on any of the generated jobs (e.g., `Cassandra - Restart`).
 2.  Click **Build with Parameters**.
