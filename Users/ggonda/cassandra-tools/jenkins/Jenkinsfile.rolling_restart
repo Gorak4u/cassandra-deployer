@@ -1,0 +1,31 @@
+// Jenkinsfile for performing a safe rolling restart of the Cassandra service.
+// This file is managed by the cassandra-tools project.
+
+def SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The qv query to select target nodes for the rolling restart.')
+    }
+
+    stages {
+        stage('Execute Rolling Restart') {
+            steps {
+                sshagent(credentials: ['your-jenkins-ssh-key-id']) { // <-- IMPORTANT: Replace with your Jenkins credential ID
+                    sh """
+                        chmod +x ${SCRIPTS_PATH}/cassy.sh
+                        ${SCRIPTS_PATH}/cassy.sh --rolling-op restart --qv-query "${params.QV_QUERY}"
+                    """
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Rolling Restart job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}

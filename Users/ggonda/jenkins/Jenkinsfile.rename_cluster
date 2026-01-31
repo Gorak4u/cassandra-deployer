@@ -1,0 +1,42 @@
+// Jenkinsfile.rename_cluster
+// Orchestrates a full cluster rename (requires downtime).
+
+pipeline {
+    agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        // Add common binary paths for macOS to help find 'qv'
+        PATH = "/usr/local/bin:/opt/homebrew/bin:${env.PATH}"
+    }
+
+    parameters {
+        choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Choose how to specify the target nodes.')
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: '(QV_QUERY mode) The qv query for all nodes in the cluster.')
+        string(name: 'NODES', defaultValue: '', description: '(NODE_LIST mode) Comma-separated list of all nodes in the cluster.')
+        string(name: 'OLD_NAME', defaultValue: 'MyProductionCluster', description: 'The current name of the cluster.')
+        string(name: 'NEW_NAME', defaultValue: 'MyPrimaryCluster', description: 'The desired new name for the cluster.')
+    }
+
+    stages {
+        stage('Execute Rename Cluster') {
+            steps {
+                sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                    script {
+                        def command = "${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh --old-name '${params.OLD_NAME}' --new-name '${params.NEW_NAME}'"
+                        if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                            command += " --qv-query '${params.QV_QUERY}'"
+                        } else {
+                            command += " --nodes '${params.NODES}'"
+                        }
+                        
+                        sh """
+                            chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh
+                            ${command}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

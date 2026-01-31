@@ -1,0 +1,31 @@
+// Jenkinsfile for performing a rolling Puppet run.
+// This file is managed by the cassandra-tools project.
+
+def SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The qv query to select target nodes for the rolling Puppet run.')
+    }
+
+    stages {
+        stage('Execute Rolling Puppet Run') {
+            steps {
+                sshagent(credentials: ['your-jenkins-ssh-key-id']) { // <-- IMPORTANT: Replace with your Jenkins credential ID
+                    sh """
+                        chmod +x ${SCRIPTS_PATH}/cassy.sh
+                        ${SCRIPTS_PATH}/cassy.sh --rolling-op puppet --qv-query "${params.QV_QUERY}"
+                    """
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Rolling Puppet Run job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}

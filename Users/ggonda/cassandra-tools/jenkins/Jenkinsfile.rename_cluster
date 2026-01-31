@@ -1,0 +1,44 @@
+// Jenkinsfile for renaming a Cassandra cluster (DOWNTIME REQUIRED).
+// This file is managed by the cassandra-tools project.
+
+def SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Select how to specify the cluster nodes.')
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: 'QV Query to select ALL nodes in the cluster (used if method is QV_QUERY).')
+        string(name: 'NODES_LIST', defaultValue: '', description: 'Comma-separated list of ALL nodes in the cluster (used if method is NODE_LIST).')
+        string(name: 'OLD_NAME', defaultValue: '', description: 'The CURRENT name of the cluster.')
+        string(name: 'NEW_NAME', defaultValue: '', description: 'The desired NEW name for the cluster.')
+    }
+
+    stages {
+        stage('Execute Cluster Rename') {
+            steps {
+                script {
+                    def command = "${SCRIPTS_PATH}/rename-cassandra-cluster.sh --old-name '${params.OLD_NAME}' --new-name '${params.NEW_NAME}'"
+                    if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                        command += " --qv-query '${params.QV_QUERY}'"
+                    } else { // NODE_LIST
+                        command += " --nodes '${params.NODES_LIST}'"
+                    }
+
+                    sshagent(credentials: ['your-jenkins-ssh-key-id']) { // <-- IMPORTANT: Replace with your Jenkins credential ID
+                        sh """
+                            chmod +x ${SCRIPTS_PATH}/*.sh
+                            ${command}
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Rename Cluster job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}

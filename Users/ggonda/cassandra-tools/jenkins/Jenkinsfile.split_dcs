@@ -1,0 +1,46 @@
+// Jenkinsfile for splitting a multi-DC Cassandra cluster.
+// This file is managed by the cassandra-tools project.
+
+def SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Select how to specify the nodes for each datacenter.')
+        string(name: 'DC1_QUERY', defaultValue: '-r role_cassandra_pfpt -d us-east-1', description: 'QV Query for the first datacenter nodes (used if method is QV_QUERY).')
+        string(name: 'DC2_QUERY', defaultValue: '-r role_cassandra_pfpt -d eu-west-1', description: 'QV Query for the second datacenter nodes (used if method is QV_QUERY).')
+        string(name: 'DC1_NODES', defaultValue: '', description: 'Comma-separated list of nodes for the first datacenter (used if method is NODE_LIST).')
+        string(name: 'DC2_NODES', defaultValue: '', description: 'Comma-separated list of nodes for the second datacenter (used if method is NODE_LIST).')
+        string(name: 'DC1_NAME', defaultValue: 'us-east-1', description: 'The name of the first datacenter as known by Cassandra.')
+        string(name: 'DC2_NAME', defaultValue: 'eu-west-1', description: 'The name of the second datacenter as known by Cassandra.')
+    }
+
+    stages {
+        stage('Execute DC Split') {
+            steps {
+                script {
+                    def command = "${SCRIPTS_PATH}/split-cassandra-dcs.sh --dc1-name '${params.DC1_NAME}' --dc2-name '${params.DC2_NAME}'"
+                    if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                        command += " --dc1-query '${params.DC1_QUERY}' --dc2-query '${params.DC2_QUERY}'"
+                    } else { // NODE_LIST
+                        command += " --dc1-nodes '${params.DC1_NODES}' --dc2-nodes '${params.DC2_NODES}'"
+                    }
+                    
+                    sshagent(credentials: ['your-jenkins-ssh-key-id']) { // <-- IMPORTANT: Replace with your Jenkins credential ID
+                        sh """
+                            chmod +x ${SCRIPTS_PATH}/*.sh
+                            ${command}
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Split Datacenters job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}

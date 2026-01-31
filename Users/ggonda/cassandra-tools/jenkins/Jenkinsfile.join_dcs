@@ -1,0 +1,46 @@
+// Jenkinsfile for joining two Cassandra datacenters.
+// This file is managed by the cassandra-tools project.
+
+def SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Select how to specify the nodes for each datacenter.')
+        string(name: 'OLD_DC_QUERY', defaultValue: '-r role_cassandra_pfpt -d us-east-1', description: 'QV Query for the EXISTING datacenter nodes (used if method is QV_QUERY).')
+        string(name: 'NEW_DC_QUERY', defaultValue: '-r role_cassandra_pfpt -d eu-west-1', description: 'QV Query for the NEW datacenter nodes (used if method is QV_QUERY).')
+        string(name: 'OLD_DC_NODES', defaultValue: '', description: 'Comma-separated list of nodes for the EXISTING datacenter (used if method is NODE_LIST).')
+        string(name: 'NEW_DC_NODES', defaultValue: '', description: 'Comma-separated list of nodes for the NEW datacenter (used if method is NODE_LIST).')
+        string(name: 'OLD_DC_NAME', defaultValue: 'us-east-1', description: 'The name of the EXISTING datacenter as known by Cassandra.')
+        string(name: 'NEW_DC_NAME', defaultValue: 'eu-west-1', description: 'The name of the NEW datacenter as known by Cassandra.')
+    }
+
+    stages {
+        stage('Execute DC Join') {
+            steps {
+                script {
+                    def command = "${SCRIPTS_PATH}/join-cassandra-dcs.sh --old-dc-name '${params.OLD_DC_NAME}' --new-dc-name '${params.NEW_DC_NAME}'"
+                    if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                        command += " --old-dc-query '${params.OLD_DC_QUERY}' --new-dc-query '${params.NEW_DC_QUERY}'"
+                    } else { // NODE_LIST
+                        command += " --old-dc-nodes '${params.OLD_DC_NODES}' --new-dc-nodes '${params.NEW_DC_NODES}'"
+                    }
+
+                    sshagent(credentials: ['your-jenkins-ssh-key-id']) { // <-- IMPORTANT: Replace with your Jenkins credential ID
+                        sh """
+                            chmod +x ${SCRIPTS_PATH}/*.sh
+                            ${command}
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Join Datacenters job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}
