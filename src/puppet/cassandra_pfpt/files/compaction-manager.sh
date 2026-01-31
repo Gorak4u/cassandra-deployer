@@ -62,7 +62,7 @@ while [[ "$#" -gt 0 ]]; do
         -c|--critical) CRITICAL_THRESHOLD="$2"; shift 2 ;;
         -i|--interval) CHECK_INTERVAL="$2"; shift 2 ;;
         --user-defined) USER_DEFINED_MODE=true; shift; USER_DEFINED_FILES=("$@"); break ;; # Capture all remaining args
-        -h|--help) usage ;;
+        -h|--help) usage; exit 0 ;;
         *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage; exit 1 ;;
     esac
 done
@@ -71,9 +71,8 @@ done
 log_message "${BLUE}--- Starting Compaction Manager ---${NC}"
 
 # Build the nodetool command
-CMD_BASE="nodetool"
-COMPACT_CMD="compact"
-CMD=""
+CMD_ARRAY=("nodetool" "compact")
+TARGET_DESC="full node"
 
 if [ "$USER_DEFINED_MODE" = true ]; then
     if [[ -n "$KEYSPACE" || ${#TABLE_LIST[@]} -gt 0 ]]; then
@@ -85,37 +84,35 @@ if [ "$USER_DEFINED_MODE" = true ]; then
         exit 1
     fi
     
-    COMPACT_CMD+=" --user-defined"
-    # Safely quote file paths
-    QUOTED_FILES=()
+    CMD_ARRAY+=("--user-defined")
+    # Safely add file paths to the command array
     for file in "${USER_DEFINED_FILES[@]}"; do
-        QUOTED_FILES+=("$(printf '%q' "$file")")
+        CMD_ARRAY+=("$file")
     done
-
-    CMD="$CMD_BASE $COMPACT_CMD ${QUOTED_FILES[*]}"
     TARGET_DESC="user-defined files"
 else
-    KEYSPACE_ARGS=""
-    TARGET_DESC="full node"
+    # Add nodetool options if provided
+    if [[ -n "$NODETOOL_OPTIONS" ]]; then
+        # Use read to safely split the options string into an array
+        read -r -a options_array <<< "$NODETOOL_OPTIONS"
+        CMD_ARRAY+=("${options_array[@]}")
+    fi
+
     if [[ -n "$KEYSPACE" ]]; then
         TARGET_DESC="keyspace '$KEYSPACE'"
-        KEYSPACE_ARGS+=" -- $KEYSPACE"
+        CMD_ARRAY+=("--" "$KEYSPACE") # Use -- to separate options from arguments
         if [[ ${#TABLE_LIST[@]} -gt 0 ]]; then
-            # Format for nodetool is `... keyspace table1 table2 ...`
-            KEYSPACE_ARGS+=" ${TABLE_LIST[*]}"
-            CLEAN_TABLE_LIST=$(echo "${TABLE_LIST[*]}")
-            TARGET_DESC="table(s) '$CLEAN_TABLE_LIST' in keyspace '$KEYSPACE'"
+            CMD_ARRAY+=("${TABLE_LIST[@]}")
+            TARGET_DESC="table(s) '${TABLE_LIST[*]}' in keyspace '$KEYSPACE'"
         fi
     fi
-    CMD="$CMD_BASE $COMPACT_CMD $NODETOOL_OPTIONS$KEYSPACE_ARGS"
 fi
-
 
 log_message "${BLUE}Target: $TARGET_DESC${NC}"
 log_message "${BLUE}Disk path to monitor: $DISK_CHECK_PATH${NC}"
 log_message "${BLUE}Critical disk usage threshold: $CRITICAL_THRESHOLD%${NC}"
 log_message "${BLUE}Disk check interval: ${CHECK_INTERVAL}s${NC}"
-log_message "Command to be executed: $CMD"
+log_message "Command to be executed: ${CMD_ARRAY[*]}"
 
 # Pre-flight disk space check
 log_message "${BLUE}Performing pre-flight disk usage check...${NC}"
@@ -135,10 +132,9 @@ if ! nodetool netstats | grep -q "Mode: NORMAL"; then
 fi
 log_message "${GREEN}Node state is NORMAL. Proceeding.${NC}"
 
-
 # Start compaction in the background
 log_message "${BLUE}Starting compaction process...${NC}"
-eval "$CMD" &
+"${CMD_ARRAY[@]}" &
 COMPACTION_PID=$!
 log_message "${BLUE}Compaction started with PID: $COMPACTION_PID${NC}"
 

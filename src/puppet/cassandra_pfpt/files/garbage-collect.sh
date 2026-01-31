@@ -66,32 +66,31 @@ fi
 log_message "${BLUE}--- Starting Garbage Collect Manager ---${NC}"
 
 # Build the nodetool command
-CMD="nodetool garbagecollect"
+CMD_ARRAY=("nodetool" "garbagecollect")
 TARGET_DESC="full node"
 
-# Add nodetool options
+# Add nodetool options if provided
 if [[ -n "$NODETOOL_OPTIONS" ]]; then
-    CMD+=" $NODETOOL_OPTIONS"
+    # Use read to safely split the options string into an array
+    read -r -a options_array <<< "$NODETOOL_OPTIONS"
+    CMD_ARRAY+=("${options_array[@]}")
 fi
 
 # Add keyspace/table arguments
-KEYSPACE_ARGS=""
 if [[ -n "$KEYSPACE" ]]; then
     TARGET_DESC="keyspace '$KEYSPACE'"
-    KEYSPACE_ARGS+=" -- $KEYSPACE"
+    CMD_ARRAY+=("--" "$KEYSPACE") # Use -- to separate options from arguments
     if [[ ${#TABLE_LIST[@]} -gt 0 ]]; then
-        KEYSPACE_ARGS+=" ${TABLE_LIST[*]}"
-        CLEAN_TABLE_LIST=$(echo "${TABLE_LIST[*]}")
-        TARGET_DESC="table(s) '$CLEAN_TABLE_LIST' in keyspace '$KEYSPACE'"
+        CMD_ARRAY+=("${TABLE_LIST[@]}")
+        TARGET_DESC="table(s) '${TABLE_LIST[*]}' in keyspace '$KEYSPACE'"
     fi
 fi
-CMD+="$KEYSPACE_ARGS"
 
 log_message "${BLUE}Target: $TARGET_DESC${NC}"
 log_message "${BLUE}Disk path to check: $DISK_CHECK_PATH${NC}"
 log_message "${BLUE}Warning usage threshold: $WARNING_THRESHOLD%${NC}"
 log_message "${BLUE}Critical usage threshold: $CRITICAL_THRESHOLD%${NC}"
-log_message "Command to be executed: $CMD"
+log_message "Command to be executed: ${CMD_ARRAY[*]}"
 
 # Pre-flight disk space check
 log_message "${BLUE}Performing pre-flight disk usage check...${NC}"
@@ -112,7 +111,7 @@ fi
 log_message "${GREEN}Node state is NORMAL. Proceeding.${NC}"
 
 # Execute the command
-if eval "$CMD"; then
+if "${CMD_ARRAY[@]}"; then
     log_message "${GREEN}--- Garbage Collect Finished Successfully ---${NC}"
     exit 0
 else

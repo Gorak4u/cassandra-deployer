@@ -10,8 +10,8 @@ folder(folderName)
 // =============================================================================
 // Helper function to create a pipeline job from a script text
 // =============================================================================
-def createPipelineJob(folderName, jobName, pipelineScript) {
-    pipelineJob("${folderName}/${jobName}") {
+def createPipelineJob(String folder, String jobName, String pipelineScript) {
+    pipelineJob("${folder}/${jobName}") {
         // The entire pipeline definition is provided as a string
         definition {
             cps {
@@ -285,13 +285,15 @@ pipeline {
                     
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops compact"
                     if (params.NODETOOL_OPTIONS) {
+                        // Pass the options as a single quoted string to the wrapper script
                         cass_ops_command += " --nodetool-options '${params.NODETOOL_OPTIONS}'"
                     }
                     if (params.KEYSPACE) {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
+                       // The script handles space-separated tables, so just append them
+                       cass_ops_command += " -t " + params.TABLES.replace(' ', ' -t ')
                     }
 
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c '${cass_ops_command}' ${parallel_flag}"
@@ -331,13 +333,15 @@ pipeline {
 
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops garbage-collect"
                     if (params.NODETOOL_OPTIONS) {
+                        // Pass the options as a single quoted string to the wrapper script
                         cass_ops_command += " --nodetool-options '${params.NODETOOL_OPTIONS}'"
                     }
                     if (params.KEYSPACE) {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
+                       // The script handles space-separated tables, so just append them
+                       cass_ops_command += " -t " + params.TABLES.replace(' ', ' -t ')
                     }
                     
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c '${cass_ops_command}' ${parallel_flag}"
