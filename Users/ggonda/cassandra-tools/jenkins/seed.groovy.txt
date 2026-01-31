@@ -10,7 +10,7 @@ folder(folderName)
 // =============================================================================
 // Helper function to create a pipeline job from a script text
 // =============================================================================
-def createPipelineJob(String jobName, String pipelineScript) {
+def createPipelineJob(String folderName, String jobName, String pipelineScript) {
     pipelineJob("${folderName}/${jobName}") {
         // This makes the jobs show up nicely in the Blue Ocean UI
         metaClass.isBlueOcean = { -> return true }
@@ -61,17 +61,14 @@ pipeline {
                     
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
-                    sh """
-                        chmod +x ${env.SCRIPTS_PATH}/cassy.sh
-                        ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c "${params.CASSY_COMMAND}" ${parallel_flag}
-                    """
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${params.CASSY_COMMAND}\\" ${parallel_flag}"
                 }
             }
         }
     }
 }
 '''
-createPipelineJob('Cassandra - Command', commandJobScript)
+createPipelineJob(folderName, 'Cassandra - Command', commandJobScript)
 
 
 // --- Rolling Restart Job ---
@@ -101,7 +98,7 @@ pipeline {
     }
 }
 '''
-createPipelineJob('Cassandra - Restart', restartJobScript)
+createPipelineJob(folderName, 'Cassandra - Restart', restartJobScript)
 
 // --- Rolling Reboot Job ---
 def rebootJobScript = '''
@@ -130,7 +127,7 @@ pipeline {
     }
 }
 '''
-createPipelineJob('Cassandra - Reboot', rebootJobScript)
+createPipelineJob(folderName, 'Cassandra - Reboot', rebootJobScript)
 
 // --- Rolling Puppet Run Job ---
 def puppetRunJobScript = '''
@@ -159,7 +156,7 @@ pipeline {
     }
 }
 '''
-createPipelineJob('Cassandra - Puppet-run', puppetRunJobScript)
+createPipelineJob(folderName, 'Cassandra - Puppet-run', puppetRunJobScript)
 
 // --- Join Datacenters Job ---
 def joinDcsJobScript = '''
@@ -186,17 +183,14 @@ pipeline {
                 script {
                     def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query \\"${params.OLD_DC_QUERY}\\"" : "--old-dc-nodes \\"${params.OLD_DC_NODES}\\""
                     def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query \\"${params.NEW_DC_QUERY}\\"" : "--new-dc-nodes \\"${params.NEW_DC_NODES}\\""
-                    sh """
-                        chmod +x ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh
-                        ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh ${old_dc_arg} ${new_dc_arg} --old-dc-name "${params.OLD_DC_NAME}" --new-dc-name "${params.NEW_DC_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
-                    """
+                    sh "chmod +x ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh ${old_dc_arg} ${new_dc_arg} --old-dc-name \\"${params.OLD_DC_NAME}\\" --new-dc-name \\"${params.NEW_DC_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
                 }
             }
         }
     }
 }
 '''
-createPipelineJob('Cassandra - Join', joinDcsJobScript)
+createPipelineJob(folderName, 'Cassandra - Join', joinDcsJobScript)
 
 
 // --- Split Datacenters Job ---
@@ -224,17 +218,14 @@ pipeline {
                 script {
                     def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query \\"${params.DC1_QUERY}\\"" : "--dc1-nodes \\"${params.DC1_NODES}\\""
                     def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query \\"${params.DC2_QUERY}\\"" : "--dc2-nodes \\"${params.DC2_NODES}\\""
-                    sh """
-                        chmod +x ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh
-                        ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh ${dc1_arg} ${dc2_arg} --dc1-name "${params.DC1_NAME}" --dc2-name "${params.DC2_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
-                    """
+                    sh "chmod +x ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh ${dc1_arg} ${dc2_arg} --dc1-name \\"${params.DC1_NAME}\\" --dc2-name \\"${params.DC2_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
                 }
             }
         }
     }
 }
 '''
-createPipelineJob('Cassandra - Split', splitDcsJobScript)
+createPipelineJob(folderName, 'Cassandra - Split', splitDcsJobScript)
 
 
 // --- Rename Cluster Job ---
@@ -259,17 +250,14 @@ pipeline {
             steps {
                 script {
                     def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                    sh """
-                        chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh
-                        ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh ${node_arg} --old-name "${params.OLD_NAME}" --new-name "${params.NEW_NAME}" --cassy-path "${env.SCRIPTS_PATH}/cassy.sh"
-                    """
+                    sh "chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh && ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh ${node_arg} --old-name \\"${params.OLD_NAME}\\" --new-name \\"${params.NEW_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
                 }
             }
         }
     }
 }
 '''
-createPipelineJob('Cassandra - Rename', renameClusterJobScript)
+createPipelineJob(folderName, 'Cassandra - Rename', renameClusterJobScript)
 
 
 // --- Compaction Job ---
@@ -316,7 +304,7 @@ pipeline {
     }
 }
 '''
-createPipelineJob('Cassandra - Compaction', compactionJobScript)
+createPipelineJob(folderName, 'Cassandra - Compaction', compactionJobScript)
 
 // --- Garbage Collect Job ---
 def garbageCollectJobScript = '''
@@ -362,4 +350,4 @@ pipeline {
     }
 }
 '''
-createPipelineJob('Cassandra - Garbage-Collect', garbageCollectJobScript)
+createPipelineJob(folderName, 'Cassandra - Garbage-Collect', garbageCollectJobScript)
