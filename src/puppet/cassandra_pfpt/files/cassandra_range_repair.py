@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 
 # --- Constants ---
-PAUSE_FILE = '/var/lib/repairpaused'
+PAUSE_FILE = '/var/lib/repair-disabled'
 STATUS_DIR = '/var/lib/repair'
 STATUS_FILE = os.path.join(STATUS_DIR, 'status.txt')
 

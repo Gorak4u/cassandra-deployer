@@ -59,6 +59,10 @@ COMMAND_CATEGORIES = {
         'snapshot': ('Take an ad-hoc snapshot with a generated tag.', 'take-snapshot.sh', 'modify'),
         'restore': ('Restore data from S3. Run without arguments for an interactive wizard.', 'restore-from-s3.sh', 'destructive'),
     },
+    "Automation Control": {
+        'disable-automation': ('Temporarily disable Puppet and scheduled repair jobs.', 'disable-automation.sh', 'modify'),
+        'enable-automation': ('Re-enable Puppet and scheduled repair jobs.', 'enable-automation.sh', 'modify'),
+    },
     "Documentation & Testing": {
         'stress': ('Run \'cassandra-stress\' via a robust wrapper.', 'stress-test.sh', 'info'),
         'manual': ('Display the full operations manual in the terminal.', 'cassandra-manual.sh', 'info'),

@@ -51,6 +51,23 @@ The script can run any command or execute a local script file on your cluster no
 
 This section provides recipes for common, production-level Cassandra maintenance tasks using `cassy.sh`.
 
+#### **A Note on Safety: Disabling Automation During Complex Operations**
+For multi-step, stateful operations like joining, splitting, or renaming a cluster, it is critical to temporarily disable other automated processes (like Puppet runs or scheduled repairs) to prevent them from interfering.
+
+The `cass-ops` tool provides a simple way to do this.
+
+**Before starting a complex operation:**
+Run the following command, targeting all nodes involved in the operation:
+```bash
+./scripts/cassy.sh --qv-query "<your_query>" -P -c "sudo cass-ops disable-automation 'Pausing for cluster maintenance'"
+```
+
+**After the operation is fully complete:**
+Re-enable automation on all nodes:
+```bash
+./scripts/cassy.sh --qv-query "<your_query>" -P -c "sudo cass-ops enable-automation"
+```
+
 #### **Pattern 1: Safe Rolling Restart of a Datacenter**
 A rolling restart is a common maintenance task. It must be done sequentially to ensure the cluster remains available. The `--inter-node-check` flag is critical for ensuring the cluster is healthy before moving to the next node.
 
@@ -127,6 +144,8 @@ A common advanced scenario is joining a new, standalone Cassandra cluster (e.g.,
 
 This script uses `cassy.sh` as its engine to safely perform the required steps from a central management node.
 
+> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in both datacenters. See the "Disabling Automation" section above for instructions.
+
 **Prerequisites:**
 
 1.  **Cluster Name Match:** Both clusters MUST have the exact same `cluster_name` in their `cassandra.yaml`.
@@ -162,6 +181,8 @@ To see all options, run the script with the `--help` flag:
 
 The reverse of joining datacenters is splitting them into two independent clusters. This is a complex and potentially destructive operation. The `scripts/split-cassandra-dcs.sh` script is designed to orchestrate this process safely.
 
+> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in both datacenters. See the "Disabling Automation" section above for instructions.
+
 **Prerequisites:**
 
 1.  **Full Backup:** Before starting, ensure you have a complete, verified backup of all your data.
@@ -191,6 +212,8 @@ To see all options, run the script with the `--help` flag:
 #### **Pattern 7: Renaming a Cluster (Downtime Required)**
 
 Renaming a Cassandra cluster is a rare but critical operation that requires a full cluster shutdown. The `scripts/rename-cassandra-cluster.sh` orchestrator automates this high-risk procedure.
+
+> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in the cluster. See the "Disabling Automation" section above for instructions.
 
 **Prerequisites:**
 

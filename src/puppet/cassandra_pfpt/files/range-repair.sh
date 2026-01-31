@@ -16,7 +16,7 @@ WARNING_THRESHOLD=75
 CRITICAL_THRESHOLD=85
 LOG_FILE="/var/log/cassandra/repair.log"
 LOCK_FILE="/run/cassandra/repair.lock"
-PAUSE_FILE="/var/lib/repairpaused"
+PAUSE_FILE="/var/lib/repair-disabled"
 JVM_OPTS_FILE="/etc/cassandra/conf/jvm-server.options"
 JMX_PASS_FILE="/etc/cassandra/jmxremote.password"
 
