@@ -1,33 +1,42 @@
-// This file is managed by Puppet.
-// This Groovy script uses the Jenkins Job DSL plugin to automatically generate pipeline jobs.
+// This seed job script discovers all 'Jenkinsfile.*' files in its directory
+// and creates a corresponding Jenkins pipeline job for each one.
+// It is designed to be run by the Jenkins Job DSL plugin.
 
-// Define all the operations. The 'operation' key corresponds to the Jenkinsfile name suffix.
-def jobs = [
-    [operation: 'generic_command',      description: 'Run any ad-hoc cass-ops command against a set of nodes.'],
-    [operation: 'join_dcs',             description: 'Orchestrates joining a new datacenter to an existing Cassandra cluster.'],
-    [operation: 'rename_cluster',       description: 'Orchestrates a full cluster rename. REQUIRES DOWNTIME.'],
-    [operation: 'rolling_puppet_run',   description: 'Performs a safe, rolling Puppet agent run across the cluster.'],
-    [operation: 'rolling_reboot',       description: 'Performs a safe, rolling reboot of the cluster nodes.'],
-    [operation: 'rolling_restart',      description: 'Performs a safe, rolling restart of the Cassandra service.'],
-    [operation: 'split_dcs',            description: 'Orchestrates splitting a multi-DC cluster into two independent clusters.']
-]
+// Define the absolute path to the directory containing the Jenkinsfiles on the Jenkins agent.
+def jenkinsDir = new File('/Users/ggonda/cassandra-tools/jenkins')
 
-// Loop through the definitions and create a pipeline job for each one.
-jobs.each { jobInfo ->
-    // Sanitize the operation name to create a clean job name, e.g., 'rolling_restart' -> 'Cassandra-Rolling-Restart'
-    def jobName = "Cassandra-${jobInfo.operation.replaceAll('_', ' ').capitalize().replaceAll(' ', '-')}"
-    def jenkinsfilePath = "jenkins/Jenkinsfile.${jobInfo.operation}"
+if (!jenkinsDir.exists() || !jenkinsDir.isDirectory()) {
+    error("ERROR: The Jenkinsfile directory was not found at ${jenkinsDir.absolutePath}. Please ensure the directory exists on the Jenkins agent.")
+    return
+}
+
+// Find all files matching the Jenkinsfile.* pattern in the specified directory.
+def jenkinsfiles = []
+jenkinsDir.eachFileMatch(~/Jenkinsfile\..+/) { file ->
+    jenkinsfiles << file
+}
+
+if (jenkinsfiles.isEmpty()) {
+    println "No Jenkinsfiles found in ${jenkinsDir.absolutePath}. No jobs will be created."
+    return
+}
+
+// Iterate over each discovered Jenkinsfile and create a pipeline job.
+jenkinsfiles.each { jenkinsfile ->
+    // Extract the operation name from the filename (e.g., 'Jenkinsfile.restart' -> 'restart').
+    def operation = jenkinsfile.name.split('\\.')[1]
+    def jobName = "Cassandra - ${operation.capitalize()}"
+
+    println "Creating/Updating job: ${jobName}"
 
     pipelineJob(jobName) {
-        description(jobInfo.description)
-        
-        // This tells the job to use the content of the specified Jenkinsfile as its pipeline script.
+        description("Runs the '${operation}' operation on the Cassandra cluster.")
+
+        // Use the content of the Jenkinsfile as the pipeline script.
         definition {
             cps {
-                // readFileFromWorkspace is a DSL function that reads a file from the job's workspace.
-                script(readFileFromWorkspace(jenkinsfilePath))
-                // The sandbox ensures the script runs in a secure environment.
-                sandbox(true)
+                script(jenkinsfile.text)
+                sandbox() // Run the pipeline script in a sandbox for security.
             }
         }
     }
