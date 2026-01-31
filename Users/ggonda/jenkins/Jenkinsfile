@@ -1,0 +1,132 @@
+pipeline {
+    agent any
+
+    // Prepending common macOS binary locations to the PATH.
+    // Jenkins has a very minimal PATH by default.
+    environment {
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+        SCRIPTS_PATH = "/Users/ggonda/cassandra-tools/scripts"
+    }
+
+    parameters {
+        choice(name: 'OPERATION',
+               choices: ['ROLLING_RESTART', 'ROLLING_REBOOT', 'ROLLING_PUPPET_RUN', 'JOIN_DCS', 'SPLIT_DCS', 'RENAME_CLUSTER'],
+               description: 'Select the cluster operation to perform.')
+
+        // Node Selection Parameters
+        choice(name: 'NODE_SELECTION_METHOD',
+               choices: ['QV_QUERY', 'NODE_LIST'],
+               description: 'Select the method for specifying target nodes.')
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: '[ALL] The qv query to select target nodes for single-group operations (RESTART, RENAME, etc.).')
+        string(name: 'NODE_LIST', defaultValue: '', description: '[ALL] A comma-separated list of target nodes for single-group operations.')
+
+        // Parameters for JOIN_DCS / SPLIT_DCS (require two sets of nodes)
+        string(name: 'OLD_DC_QUERY', defaultValue: '', description: '[JOIN/SPLIT] The qv query for the first/old datacenter.')
+        string(name: 'OLD_DC_NODES', defaultValue: '', description: '[JOIN/SPLIT] Comma-separated list of nodes for the first/old datacenter.')
+        string(name: 'NEW_DC_QUERY', defaultValue: '', description: '[JOIN/SPLIT] The qv query for the second/new datacenter.')
+        string(name: 'NEW_DC_NODES', defaultValue: '', description: '[JOIN/SPLIT] Comma-separated list of nodes for the second/new datacenter.')
+        
+        string(name: 'OLD_DC_NAME', defaultValue: '', description: '[JOIN/SPLIT] The Cassandra name of the first/old datacenter.')
+        string(name: 'NEW_DC_NAME', defaultValue: '', description: '[JOIN/SPLIT] The Cassandra name of the second/new datacenter.')
+        
+        // Parameters for RENAME_CLUSTER
+        string(name: 'OLD_CLUSTER_NAME', defaultValue: '', description: '[RENAME] The current name of the cluster.')
+        string(name: 'NEW_CLUSTER_NAME', defaultValue: '', description: '[RENAME] The desired new name for the cluster.')
+    }
+
+    stages {
+        stage('Execute Operation') {
+            steps {
+                script {
+                    // Ensure scripts are executable
+                    sh "chmod +x ${env.SCRIPTS_PATH}/*.sh"
+
+                    // Build the correct node selection argument strings based on the chosen method
+                    def common_node_arg = ""
+                    def old_dc_node_arg = ""
+                    def new_dc_node_arg = ""
+                    def split_dc1_arg = ""
+                    def split_dc2_arg = ""
+
+                    if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                        common_node_arg = "--qv-query \"${params.QV_QUERY}\""
+                        old_dc_node_arg = "--old-dc-query \"${params.OLD_DC_QUERY}\""
+                        new_dc_node_arg = "--new-dc-query \"${params.NEW_DC_QUERY}\""
+                        split_dc1_arg = "--dc1-query \"${params.OLD_DC_QUERY}\""
+                        split_dc2_arg = "--dc2-query \"${params.NEW_DC_QUERY}\""
+                    } else { // NODE_LIST
+                        common_node_arg = "--nodes \"${params.NODE_LIST}\""
+                        old_dc_node_arg = "--old-dc-nodes \"${params.OLD_DC_NODES}\""
+                        new_dc_node_arg = "--new-dc-nodes \"${params.NEW_DC_NODES}\""
+                        split_dc1_arg = "--dc1-nodes \"${params.OLD_DC_NODES}\""
+                        split_dc2_arg = "--dc2-nodes \"${params.NEW_DC_NODES}\""
+                    }
+
+                    switch (params.OPERATION) {
+                        case 'ROLLING_RESTART':
+                            echo "Performing a Rolling Restart..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh "${env.SCRIPTS_PATH}/rolling_restart.sh ${common_node_arg}"
+                            }
+                            break
+                        case 'ROLLING_REBOOT':
+                            echo "Performing a Rolling Reboot..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh "${env.SCRIPTS_PATH}/rolling_reboot.sh ${common_node_arg}"
+                            }
+                            break
+                        case 'ROLLING_PUPPET_RUN':
+                            echo "Performing a Rolling Puppet Run..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh "${env.SCRIPTS_PATH}/rolling_puppet_run.sh ${common_node_arg}"
+                            }
+                            break
+                        case 'JOIN_DCS':
+                            echo "Performing a Datacenter Join..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh """
+                                    ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh \\
+                                        ${old_dc_node_arg} \\
+                                        ${new_dc_node_arg} \\
+                                        --old-dc-name "${params.OLD_DC_NAME}" \\
+                                        --new-dc-name "${params.NEW_DC_NAME}"
+                                """
+                            }
+                            break
+                        case 'SPLIT_DCS':
+                            echo "Performing a Datacenter Split..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh """
+                                    ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh \\
+                                        ${split_dc1_arg} \\
+                                        ${split_dc2_arg} \\
+                                        --dc1-name "${params.OLD_DC_NAME}" \\
+                                        --dc2-name "${params.NEW_DC_NAME}"
+                                """
+                            }
+                            break
+                        case 'RENAME_CLUSTER':
+                            echo "Performing a Cluster Rename..."
+                            sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                                sh """
+                                    ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh \\
+                                        ${common_node_arg} \\
+                                        --old-name "${params.OLD_CLUSTER_NAME}" \\
+                                        --new-name "${params.NEW_CLUSTER_NAME}"
+                                """
+                            }
+                            break
+                        default:
+                            error "Unknown operation selected: ${params.OPERATION}"
+                            break
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            echo 'Operation finished.'
+        }
+    }
+}
