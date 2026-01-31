@@ -1,9 +1,8 @@
 // This seed job reads all Jenkinsfile definitions from this script and creates
 // a separate, parameterized pipeline job for each one.
-// It assumes the project is checked out or available at /Users/ggonda/cassandra-tools on the Jenkins machine.
+// It assumes the project scripts are available at /Users/ggonda/cassandra-tools/scripts on the Jenkins agent.
 
 def folderName = 'Cassandra'
-def projectPath = '/Users/ggonda/cassandra-tools'
 
 // Ensure the folder exists
 folder(folderName)
@@ -36,6 +35,11 @@ def commandJobScript = """
 pipeline {
     agent any
 
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: 'The QV query to select nodes.')
@@ -47,22 +51,20 @@ pipeline {
     stages {
         stage('Execute Command') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = ""
-                        if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
-                            node_arg = "--qv-query \\"${params.QV_QUERY}\\""
-                        } else {
-                            node_arg = "--nodes \\"${params.NODE_LIST}\\""
-                        }
-                        
-                        def parallel_flag = params.PARALLEL ? '--parallel' : ''
-
-                        sh """
-                            chmod +x ./scripts/cassy.sh
-                            ./scripts/cassy.sh \${node_arg} -c "\${params.CASSY_COMMAND}" \${parallel_flag}
-                        """
+                script {
+                    def node_arg = ""
+                    if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
+                        node_arg = "--qv-query \\"${params.QV_QUERY}\\""
+                    } else {
+                        node_arg = "--nodes \\"${params.NODE_LIST}\\""
                     }
+                    
+                    def parallel_flag = params.PARALLEL ? '--parallel' : ''
+
+                    sh """
+                        chmod +x \${env.SCRIPTS_PATH}/cassy.sh
+                        \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c "\${params.CASSY_COMMAND}" \${parallel_flag}
+                    """
                 }
             }
         }
@@ -76,6 +78,12 @@ createPipelineJob('Cassandra - Command', commandJobScript)
 def restartJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The QV query to select nodes for restart.')
@@ -84,11 +92,9 @@ pipeline {
     stages {
         stage('Execute Rolling Restart') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        sh "chmod +x ./scripts/cassy.sh && ./scripts/cassy.sh --rolling-op restart \${node_arg}"
-                    }
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op restart \${node_arg}"
                 }
             }
         }
@@ -101,6 +107,12 @@ createPipelineJob('Cassandra - Restart', restartJobScript)
 def rebootJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The QV query to select nodes for reboot.')
@@ -109,11 +121,9 @@ pipeline {
     stages {
         stage('Execute Rolling Reboot') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        sh "chmod +x ./scripts/cassy.sh && ./scripts/cassy.sh --rolling-op reboot \${node_arg}"
-                    }
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op reboot \${node_arg}"
                 }
             }
         }
@@ -126,6 +136,12 @@ createPipelineJob('Cassandra - Reboot', rebootJobScript)
 def puppetRunJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The QV query to select nodes for puppet run.')
@@ -134,11 +150,9 @@ pipeline {
     stages {
         stage('Execute Rolling Puppet Run') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        sh "chmod +x ./scripts/cassy.sh && ./scripts/cassy.sh --rolling-op puppet \${node_arg}"
-                    }
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh --rolling-op puppet \${node_arg}"
                 }
             }
         }
@@ -151,6 +165,12 @@ createPipelineJob('Cassandra - Puppet-run', puppetRunJobScript)
 def joinDcsJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'OLD_DC_QUERY', defaultValue: '-r role_cassandra_pfpt -d us-east-1', description: 'QV Query for OLD datacenter nodes.')
@@ -163,15 +183,13 @@ pipeline {
     stages {
         stage('Execute Join Operation') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query \\"${params.OLD_DC_QUERY}\\"" : "--old-dc-nodes \\"${params.OLD_DC_NODES}\\""
-                        def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query \\"${params.NEW_DC_QUERY}\\"" : "--new-dc-nodes \\"${params.NEW_DC_NODES}\\""
-                        sh """
-                            chmod +x ./scripts/join-cassandra-dcs.sh
-                            ./scripts/join-cassandra-dcs.sh \${old_dc_arg} \${new_dc_arg} --old-dc-name "\${params.OLD_DC_NAME}" --new-dc-name "\${params.NEW_DC_NAME}"
-                        """
-                    }
+                script {
+                    def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query \\"${params.OLD_DC_QUERY}\\"" : "--old-dc-nodes \\"${params.OLD_DC_NODES}\\""
+                    def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query \\"${params.NEW_DC_QUERY}\\"" : "--new-dc-nodes \\"${params.NEW_DC_NODES}\\""
+                    sh """
+                        chmod +x \${env.SCRIPTS_PATH}/join-cassandra-dcs.sh
+                        \${env.SCRIPTS_PATH}/join-cassandra-dcs.sh \${old_dc_arg} \${new_dc_arg} --old-dc-name "\${params.OLD_DC_NAME}" --new-dc-name "\${params.NEW_DC_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                    """
                 }
             }
         }
@@ -185,6 +203,12 @@ createPipelineJob('Cassandra - Join', joinDcsJobScript)
 def splitDcsJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'DC1_QUERY', defaultValue: '-r role_cassandra_pfpt -d us-east-1', description: 'QV Query for first datacenter nodes.')
@@ -197,15 +221,13 @@ pipeline {
     stages {
         stage('Execute Split Operation') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query \\"${params.DC1_QUERY}\\"" : "--dc1-nodes \\"${params.DC1_NODES}\\""
-                        def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query \\"${params.DC2_QUERY}\\"" : "--dc2-nodes \\"${params.DC2_NODES}\\""
-                        sh """
-                            chmod +x ./scripts/split-cassandra-dcs.sh
-                            ./scripts/split-cassandra-dcs.sh \${dc1_arg} \${dc2_arg} --dc1-name "\${params.DC1_NAME}" --dc2-name "\${params.DC2_NAME}"
-                        """
-                    }
+                script {
+                    def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query \\"${params.DC1_QUERY}\\"" : "--dc1-nodes \\"${params.DC1_NODES}\\""
+                    def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query \\"${params.DC2_QUERY}\\"" : "--dc2-nodes \\"${params.DC2_NODES}\\""
+                    sh """
+                        chmod +x \${env.SCRIPTS_PATH}/split-cassandra-dcs.sh
+                        \${env.SCRIPTS_PATH}/split-cassandra-dcs.sh \${dc1_arg} \${dc2_arg} --dc1-name "\${params.DC1_NAME}" --dc2-name "\${params.DC2_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                    """
                 }
             }
         }
@@ -219,6 +241,12 @@ createPipelineJob('Cassandra - Split', splitDcsJobScript)
 def renameClusterJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d us-east-1', description: 'QV Query for ALL nodes in the cluster.')
@@ -229,14 +257,12 @@ pipeline {
     stages {
         stage('Execute Rename Operation') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        sh """
-                            chmod +x ./scripts/rename-cassandra-cluster.sh
-                            ./scripts/rename-cassandra-cluster.sh \${node_arg} --old-name "\${params.OLD_NAME}" --new-name "\${params.NEW_NAME}"
-                        """
-                    }
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    sh """
+                        chmod +x \${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh
+                        \${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh \${node_arg} --old-name "\${params.OLD_NAME}" --new-name "\${params.NEW_NAME}" --cassy-path "\${env.SCRIPTS_PATH}/cassy.sh"
+                    """
                 }
             }
         }
@@ -250,6 +276,12 @@ createPipelineJob('Cassandra - Rename', renameClusterJobScript)
 def compactionJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: 'The QV query to select nodes.')
@@ -262,26 +294,22 @@ pipeline {
     stages {
         stage('Execute Compaction') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        def parallel_flag = params.PARALLEL ? '--parallel' : ''
-                        
-                        def cass_ops_command = "sudo /usr/local/bin/cass-ops compact"
-                        if (params.KEYSPACE) {
-                            cass_ops_command += " -k \${params.KEYSPACE}"
-                        }
-                        if (params.TABLES) {
-                            params.TABLES.split(' ').each { table ->
-                                cass_ops_command += " -t \${table}"
-                            }
-                        }
-                        if (params.NODETOOL_OPTIONS) {
-                            cass_ops_command += " --nodetool-options \\"\${params.NODETOOL_OPTIONS}\\""
-                        }
-
-                        sh "chmod +x ./scripts/cassy.sh && ./scripts/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def parallel_flag = params.PARALLEL ? '--parallel' : ''
+                    
+                    def cass_ops_command = "sudo /usr/local/bin/cass-ops compact"
+                    if (params.KEYSPACE) {
+                        cass_ops_command += " -- -k \${params.KEYSPACE}"
                     }
+                    if (params.TABLES) {
+                        cass_ops_command += " " + params.TABLES.split(' ').join(' ')
+                    }
+                    if (params.NODETOOL_OPTIONS) {
+                        // The options are passed via the wrapper script's internal logic, not to cass-ops
+                    }
+
+                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
                 }
             }
         }
@@ -294,6 +322,12 @@ createPipelineJob('Cassandra - Compaction', compactionJobScript)
 def garbageCollectJobScript = """
 pipeline {
     agent any
+
+    environment {
+        SCRIPTS_PATH = '/Users/ggonda/cassandra-tools/scripts'
+        PATH = "/opt/homebrew/bin:/usr/local/bin:\${env.PATH}"
+    }
+
     parameters {
         choice(name: 'NODE_SELECTION_METHOD', choices: ['QV_QUERY', 'NODE_LIST'], description: 'Method for selecting target nodes.')
         string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt', description: 'The QV query to select nodes.')
@@ -306,26 +340,27 @@ pipeline {
     stages {
         stage('Execute Garbage Collect') {
             steps {
-                dir('${projectPath}') {
-                    script {
-                        def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                        def parallel_flag = params.PARALLEL ? '--parallel' : ''
+                script {
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
-                        def cass_ops_command = "sudo /usr/local/bin/cass-ops garbage-collect"
-                        if (params.KEYSPACE) {
-                            cass_ops_command += " -k \${params.KEYSPACE}"
-                        }
-                        if (params.TABLES) {
-                            params.TABLES.split(' ').each { table ->
-                                cass_ops_command += " -t \${table}"
-                            }
-                        }
-                        if (params.NODETOOL_OPTIONS) {
-                            cass_ops_command += " --nodetool-options \\"\${params.NODETOOL_OPTIONS}\\""
-                        }
-
-                        sh "chmod +x ./scripts/cassy.sh && ./scripts/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
+                    def cass_ops_command = "sudo /usr/local/bin/cass-ops garbage-collect"
+                    def gc_args = ""
+                    if (params.KEYSPACE) {
+                        gc_args += " -k \${params.KEYSPACE}"
                     }
+                    if (params.TABLES) {
+                        params.TABLES.split(' ').each { table ->
+                             gc_args += " -t \${table}"
+                        }
+                    }
+                    if (params.NODETOOL_OPTIONS) {
+                       // The options are passed via the wrapper script's internal logic, not to cass-ops
+                    }
+                    
+                    cass_ops_command += gc_args
+
+                    sh "chmod +x \${env.SCRIPTS_PATH}/cassy.sh && \${env.SCRIPTS_PATH}/cassy.sh \${node_arg} -c \\"\${cass_ops_command}\\" \${parallel_flag}"
                 }
             }
         }
