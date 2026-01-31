@@ -5,7 +5,6 @@ set -euo pipefail
 # --- Defaults & Configuration ---
 KEYSPACE=""
 TABLE_LIST=""
-SPLIT_OUTPUT=false
 JMX_USERNAME=""
 JMX_PASSWORD=""
 DISK_CHECK_PATH="/var/lib/cassandra/data"
@@ -14,6 +13,7 @@ CHECK_INTERVAL=30     # Check disk space every 30 seconds
 LOG_FILE="/var/log/cassandra/compaction_manager.log"
 USER_DEFINED_MODE=false
 USER_DEFINED_FILES=()
+NODETOOL_EXTRA_OPTS=""
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -37,22 +37,22 @@ usage() {
     log_message "  --user-defined: Compact a specific list of user-defined sstable files."
     log_message ""
     log_message "Options:"
-    log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Not for --user-defined mode)"
-    log_message "  -t, --table <name>       Specify a table to compact. Can be used multiple times. Requires -k."
-    log_message "  -s, --split-output       Split output for STCS compaction."
-    log_message "  -u, --username <user>    Remote JMX agent username."
-    log_message "  -p, --password <pass>    Remote JMX agent password."
-    log_message "  --user-defined           Submit listed files for user-defined compaction. All following args are files."
-    log_message "  -d, --disk-path <path>   Path to monitor for disk space. Default: $DISK_CHECK_PATH"
-    log_message "  -c, --critical <%>       Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
-    log_message "  -i, --interval <sec>     Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
-    log_message "  -h, --help               Show this help message."
+    log_message "  -k, --keyspace <name>          Specify the keyspace to compact. (Not for --user-defined mode)"
+    log_message "  -t, --table <name>             Specify a table to compact. Can be used multiple times. Requires -k."
+    log_message "  -u, --username <user>          Remote JMX agent username."
+    log_message "  -p, --password <pass>          Remote JMX agent password."
+    log_message "  --user-defined                 Submit listed files for user-defined compaction. All following args are files."
+    log_message "  --nodetool-options <\"opts\">  Pass additional raw options to the nodetool compact command (e.g., \"--split-output\")."
+    log_message "  -d, --disk-path <path>         Path to monitor for disk space. Default: $DISK_CHECK_PATH"
+    log_message "  -c, --critical <%>             Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
+    log_message "  -i, --interval <sec>           Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
+    log_message "  -h, --help                     Show this help message."
     log_message ""
     log_message "Examples:"
     log_message "  Full node compaction:       $0"
     log_message "  Keyspace compaction:        $0 -k my_keyspace"
     log_message "  Table compaction:           $0 -k my_keyspace -t my_table"
-    log_message "  Multi-table compaction:     $0 -k my_keyspace -t table1 -t table2"
+    log_message "  STCS split output:          $0 -k my_keyspace -t my_table --nodetool-options \"--split-output\""
     log_message "  User-defined compaction:    $0 --user-defined /path/to/data.db /path/to/other.db"
     exit 1
 }
@@ -62,12 +62,12 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         -k|--keyspace) KEYSPACE="$2"; shift ;;
         -t|--table) TABLE_LIST="$TABLE_LIST $2"; shift ;;
-        -s|--split-output) SPLIT_OUTPUT=true ;;
         -u|--username) JMX_USERNAME="$2"; shift ;;
         -p|--password) JMX_PASSWORD="$2"; shift ;;
         -d|--disk-path) DISK_CHECK_PATH="$2"; shift ;;
         -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
         -i|--interval) CHECK_INTERVAL="$2"; shift ;;
+        --nodetool-options) NODETOOL_EXTRA_OPTS="$2"; shift ;;
         --user-defined) USER_DEFINED_MODE=true; shift; break ;; # Break and process rest as files
         -h|--help) usage ;;
         *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
@@ -93,7 +93,6 @@ if [[ -n "$JMX_PASSWORD" ]]; then
     CMD_BASE+=" -p $JMX_PASSWORD"
 fi
 
-COMPACT_CMD="compact"
 TARGET_DESC=""
 CMD=""
 
@@ -107,37 +106,33 @@ if [ "$USER_DEFINED_MODE" = true ]; then
         exit 1
     fi
     
-    COMPACT_CMD+=" --user-defined"
     # Safely quote file paths
     QUOTED_FILES=()
     for file in "${USER_DEFINED_FILES[@]}"; do
         QUOTED_FILES+=("$(printf '%q' "$file")")
     done
 
-    CMD="$CMD_BASE $COMPACT_CMD ${QUOTED_FILES[*]}"
+    CMD="$CMD_BASE compact $NODETOOL_EXTRA_OPTS --user-defined ${QUOTED_FILES[*]}"
     TARGET_DESC="user-defined files"
 else
     if [[ -n "$TABLE_LIST" && -z "$KEYSPACE" ]]; then
         log_message "${RED}ERROR: A keyspace (-k) must be specified when compacting specific tables (-t).${NC}"
         exit 1
     fi
-    if [ "$SPLIT_OUTPUT" = true ]; then
-        COMPACT_CMD+=" --split-output"
-    fi
 
-    KEYSPACE_ARGS=""
+    CMD="$CMD_BASE compact $NODETOOL_EXTRA_OPTS"
     TARGET_DESC="full node"
+    
     if [[ -n "$KEYSPACE" ]]; then
-        # The '--' separator is crucial for nodetool
-        KEYSPACE_ARGS+=" -- $KEYSPACE"
+        # The '--' separator is good practice to separate options from arguments
+        CMD+=" -- $KEYSPACE"
         TARGET_DESC="keyspace '$KEYSPACE'"
         if [[ -n "$TABLE_LIST" ]]; then
-            KEYSPACE_ARGS+=$TABLE_LIST
+            CMD+=$TABLE_LIST
             CLEAN_TABLE_LIST=$(echo "$TABLE_LIST" | sed 's/^ *//g')
             TARGET_DESC="table(s) '$CLEAN_TABLE_LIST' in keyspace '$KEYSPACE'"
         fi
     fi
-    CMD="$CMD_BASE $COMPACT_CMD$KEYSPACE_ARGS"
 fi
 
 
