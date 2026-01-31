@@ -306,3 +306,97 @@ For all options, run the script with the `--help` flag:
 ```bash
 ./scripts/cassy.sh --help
 ```
+
+### Integrating with CI/CD (Jenkins)
+
+The `cassy.sh` script is designed for automation and can be easily integrated into a Jenkins pipeline to create auditable, repeatable, and parameterized operational jobs.
+
+#### **Prerequisites**
+
+1.  **Dedicated Jenkins Agent**: Set up a Jenkins agent (node) that will be responsible for running cluster operations.
+2.  **SSH Key Access**: The `jenkins` user on the agent machine must have a passwordless SSH key configured. The public key must be added to the `authorized_keys` file for the appropriate user on all Cassandra nodes.
+3.  **Required Tools**: The Jenkins agent must have `bash`, `qv` (your inventory tool), and `jq` installed.
+4.  **Jenkins Credentials Plugin**: Install the "SSH Agent" plugin in Jenkins to securely manage your SSH key. Store your private SSH key in the Jenkins credential store.
+
+#### **Example 1: Generic `cass-ops` Job**
+
+This parameterized pipeline allows an operator to run any `cass-ops` command against any set of nodes defined by a `qv` query.
+
+**Jenkinsfile:**
+```groovy
+pipeline {
+    agent { label 'cassandra-ops' } // Use your dedicated agent label
+
+    parameters {
+        string(name: 'QV_QUERY', defaultValue: '-r role_cassandra_pfpt -d AWSLAB', description: 'The qv query to select target nodes.')
+        string(name: 'CASSY_COMMAND', defaultValue: 'sudo cass-ops health', description: 'The command to run on the nodes.')
+        booleanParam(name: 'PARALLEL_EXECUTION', defaultValue: false, description: 'Run in parallel on all nodes?')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git 'https://your-git-server/your-repo.git'
+            }
+        }
+
+        stage('Execute Operation') {
+            steps {
+                sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                    script {
+                        def parallel_flag = params.PARALLEL_EXECUTION ? '--parallel' : ''
+                        
+                        sh """
+                            ./scripts/cassy.sh --qv-query "${params.QV_QUERY}" \
+                               -c "${params.CASSY_COMMAND}" \
+                               ${parallel_flag}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+#### **Example 2: Safe Rolling Restart Job**
+
+This pipeline provides a one-click job for the most common safe operation: a rolling restart.
+
+**Jenkinsfile:**
+```groovy
+pipeline {
+    agent { label 'cassandra-ops' }
+
+    parameters {
+        string(name: 'DATACENTER', defaultValue: 'AWSLAB', description: 'The datacenter to perform the rolling restart on.')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git 'https://your-git-server/your-repo.git'
+            }
+        }
+
+        stage('Execute Rolling Restart') {
+            steps {
+                sshagent(credentials: ['your-jenkins-ssh-key-id']) {
+                    sh """
+                        ./scripts/cassy.sh --rolling-op restart --qv-query "-r role_cassandra_pfpt -d ${params.DATACENTER}"
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Rolling restart job finished.'
+            // Add notifications (Slack, Email, etc.) here
+        }
+    }
+}
+```
+
+By creating Jenkins jobs like these, you empower your operations team to perform complex tasks safely without needing direct shell access to the management node, providing a clear audit trail for every action taken.
