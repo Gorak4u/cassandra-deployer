@@ -31,7 +31,7 @@ def createPipelineJob(String jobName, String pipelineScript) {
 // =============================================================================
 
 // --- Generic Command Job ---
-def commandJobScript = """
+def commandJobScript = '''
 pipeline {
     agent any
 
@@ -70,12 +70,12 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Command', commandJobScript)
 
 
 // --- Rolling Restart Job ---
-def restartJobScript = """
+def restartJobScript = '''
 pipeline {
     agent any
 
@@ -100,11 +100,11 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Restart', restartJobScript)
 
 // --- Rolling Reboot Job ---
-def rebootJobScript = """
+def rebootJobScript = '''
 pipeline {
     agent any
 
@@ -129,11 +129,11 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Reboot', rebootJobScript)
 
 // --- Rolling Puppet Run Job ---
-def puppetRunJobScript = """
+def puppetRunJobScript = '''
 pipeline {
     agent any
 
@@ -158,11 +158,11 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Puppet-run', puppetRunJobScript)
 
 // --- Join Datacenters Job ---
-def joinDcsJobScript = """
+def joinDcsJobScript = '''
 pipeline {
     agent any
 
@@ -195,12 +195,12 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Join', joinDcsJobScript)
 
 
 // --- Split Datacenters Job ---
-def splitDcsJobScript = """
+def splitDcsJobScript = '''
 pipeline {
     agent any
 
@@ -233,12 +233,12 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Split', splitDcsJobScript)
 
 
 // --- Rename Cluster Job ---
-def renameClusterJobScript = """
+def renameClusterJobScript = '''
 pipeline {
     agent any
 
@@ -268,12 +268,12 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Rename', renameClusterJobScript)
 
 
 // --- Compaction Job ---
-def compactionJobScript = """
+def compactionJobScript = '''
 pipeline {
     agent any
 
@@ -306,7 +306,7 @@ pipeline {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                        cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
+                        cass_ops_command += " " + params.TABLES.split(' ').collect { "-t \\"" + it + "\\"" }.join(' ')
                     }
 
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
@@ -315,11 +315,11 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Compaction', compactionJobScript)
 
 // --- Garbage Collect Job ---
-def garbageCollectJobScript = """
+def garbageCollectJobScript = '''
 pipeline {
     agent any
 
@@ -352,7 +352,7 @@ pipeline {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
+                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t \\"" + it + "\\"" }.join(' ')
                     }
                     
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
@@ -361,5 +361,5 @@ pipeline {
         }
     }
 }
-"""
+'''
 createPipelineJob('Cassandra - Garbage-Collect', garbageCollectJobScript)
