@@ -4,7 +4,7 @@ set -euo pipefail
 
 # --- Defaults & Configuration ---
 KEYSPACE=""
-TABLE=""
+TABLE_LIST=""
 SPLIT_OUTPUT=false
 JMX_USERNAME=""
 JMX_PASSWORD=""
@@ -38,7 +38,7 @@ usage() {
     log_message ""
     log_message "Options:"
     log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Not for --user-defined mode)"
-    log_message "  -t, --table <name>       Specify the table to compact. (Not for --user-defined mode)"
+    log_message "  -t, --table <name>       Specify a table to compact. Can be used multiple times. (Not for --user-defined mode)"
     log_message "  -s, --split-output       Split output for STCS compaction."
     log_message "  -u, --username <user>    Remote JMX agent username."
     log_message "  -p, --password <pass>    Remote JMX agent password."
@@ -60,7 +60,7 @@ usage() {
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -k|--keyspace) KEYSPACE="$2"; shift ;;
-        -t|--table) TABLE="$2"; shift ;;
+        -t|--table) TABLE_LIST+="$2 "; shift ;;
         -s|--split-output) SPLIT_OUTPUT=true ;;
         -u|--username) JMX_USERNAME="$2"; shift ;;
         -p|--password) JMX_PASSWORD="$2"; shift ;;
@@ -97,7 +97,7 @@ TARGET_DESC=""
 CMD=""
 
 if [ "$USER_DEFINED_MODE" = true ]; then
-    if [[ -n "$KEYSPACE" || -n "$TABLE" ]]; then
+    if [[ -n "$KEYSPACE" || -n "$TABLE_LIST" ]]; then
         log_message "${RED}ERROR: Cannot use --keyspace (-k) or --table (-t) with --user-defined.${NC}"
         exit 1
     fi
@@ -123,11 +123,12 @@ else
     KEYSPACE_ARGS=""
     TARGET_DESC="full node"
     if [[ -n "$KEYSPACE" ]]; then
-        KEYSPACE_ARGS+=" $KEYSPACE"
+        KEYSPACE_ARGS+=" -- $KEYSPACE"
         TARGET_DESC="keyspace '$KEYSPACE'"
-        if [[ -n "$TABLE" ]]; then
-            KEYSPACE_ARGS+=" $TABLE"
-            TARGET_DESC="table '$TABLE'"
+        if [[ -n "$TABLE_LIST" ]]; then
+            TABLE_LIST=$(echo "$TABLE_LIST" | sed 's/ $//') # Trim trailing space
+            KEYSPACE_ARGS+=" $TABLE_LIST"
+            TARGET_DESC="table(s) '$TABLE_LIST' in keyspace '$KEYSPACE'"
         fi
     fi
     CMD="$CMD_BASE $COMPACT_CMD$KEYSPACE_ARGS"
