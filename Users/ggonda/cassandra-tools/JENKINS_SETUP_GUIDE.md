@@ -10,18 +10,6 @@ We will use a **seed job**. This is a special Jenkins job that automatically cre
 2.  **Job DSL Plugin**: The "Job DSL" plugin must be installed on your Jenkins instance.
     *   Go to `Manage Jenkins` > `Plugins` > `Available plugins`.
     *   Search for and install `Job DSL`.
-3.  **Local Scripts**: The `cassandra-tools` directory, containing both the `scripts/` and `jenkins/` subdirectories, must be placed at the following absolute path on your Jenkins agent machine (in this case, your macOS machine):
-    *   `/Users/ggonda/cassandra-tools/`
-
-    Your directory structure must be:
-    ```
-    /Users/ggonda/cassandra-tools/
-    ├── jenkins/
-    │   └── seed.groovy  <-- This file now contains all Jenkinsfile logic
-    └── scripts/
-        ├── cassy.sh
-        └── ...
-    ```
 
 ---
 
