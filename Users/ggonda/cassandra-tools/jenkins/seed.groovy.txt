@@ -10,7 +10,7 @@ folder(folderName)
 // =============================================================================
 // Helper function to create a pipeline job from a script text
 // =============================================================================
-def createPipelineJob(String folderName, String jobName, String pipelineScript) {
+def createPipelineJob(folderName, jobName, pipelineScript) {
     pipelineJob("${folderName}/${jobName}") {
         // The entire pipeline definition is provided as a string
         definition {
@@ -51,14 +51,14 @@ pipeline {
                 script {
                     def node_arg = ""
                     if (params.NODE_SELECTION_METHOD == 'QV_QUERY') {
-                        node_arg = "--qv-query \\"${params.QV_QUERY}\\""
+                        node_arg = "--qv-query '${params.QV_QUERY}'"
                     } else {
-                        node_arg = "--nodes \\"${params.NODE_LIST}\\""
+                        node_arg = "--nodes '${params.NODE_LIST}'"
                     }
                     
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
-                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${params.CASSY_COMMAND}\\" ${parallel_flag}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c '${params.CASSY_COMMAND}' ${parallel_flag}"
                 }
             }
         }
@@ -87,7 +87,7 @@ pipeline {
         stage('Execute Rolling Restart') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op restart ${node_arg}"
                 }
             }
@@ -116,7 +116,7 @@ pipeline {
         stage('Execute Rolling Reboot') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op reboot ${node_arg}"
                 }
             }
@@ -145,7 +145,7 @@ pipeline {
         stage('Execute Rolling Puppet Run') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
                     sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh --rolling-op puppet ${node_arg}"
                 }
             }
@@ -178,9 +178,9 @@ pipeline {
         stage('Execute Join Operation') {
             steps {
                 script {
-                    def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query \\"${params.OLD_DC_QUERY}\\"" : "--old-dc-nodes \\"${params.OLD_DC_NODES}\\""
-                    def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query \\"${params.NEW_DC_QUERY}\\"" : "--new-dc-nodes \\"${params.NEW_DC_NODES}\\""
-                    sh "chmod +x ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh ${old_dc_arg} ${new_dc_arg} --old-dc-name \\"${params.OLD_DC_NAME}\\" --new-dc-name \\"${params.NEW_DC_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
+                    def old_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--old-dc-query '${params.OLD_DC_QUERY}'" : "--old-dc-nodes '${params.OLD_DC_NODES}'"
+                    def new_dc_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--new-dc-query '${params.NEW_DC_QUERY}'" : "--new-dc-nodes '${params.NEW_DC_NODES}'"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh ${old_dc_arg} ${new_dc_arg} --old-dc-name '${params.OLD_DC_NAME}' --new-dc-name '${params.NEW_DC_NAME}' --cassy-path '${env.SCRIPTS_PATH}/cassy.sh'"
                 }
             }
         }
@@ -213,9 +213,9 @@ pipeline {
         stage('Execute Split Operation') {
             steps {
                 script {
-                    def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query \\"${params.DC1_QUERY}\\"" : "--dc1-nodes \\"${params.DC1_NODES}\\""
-                    def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query \\"${params.DC2_QUERY}\\"" : "--dc2-nodes \\"${params.DC2_NODES}\\""
-                    sh "chmod +x ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh ${dc1_arg} ${dc2_arg} --dc1-name \\"${params.DC1_NAME}\\" --dc2-name \\"${params.DC2_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
+                    def dc1_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc1-query '${params.DC1_QUERY}'" : "--dc1-nodes '${params.DC1_NODES}'"
+                    def dc2_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--dc2-query '${params.DC2_QUERY}'" : "--dc2-nodes '${params.DC2_NODES}'"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh && ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh ${dc1_arg} ${dc2_arg} --dc1-name '${params.DC1_NAME}' --dc2-name '${params.DC2_NAME}' --cassy-path '${env.SCRIPTS_PATH}/cassy.sh'"
                 }
             }
         }
@@ -246,8 +246,8 @@ pipeline {
         stage('Execute Rename Operation') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
-                    sh "chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh && ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh ${node_arg} --old-name \\"${params.OLD_NAME}\\" --new-name \\"${params.NEW_NAME}\\" --cassy-path \\"${env.SCRIPTS_PATH}/cassy.sh\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh && ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh ${node_arg} --old-name '${params.OLD_NAME}' --new-name '${params.NEW_NAME}' --cassy-path '${env.SCRIPTS_PATH}/cassy.sh'"
                 }
             }
         }
@@ -280,21 +280,21 @@ pipeline {
         stage('Execute Compaction') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
                     
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops compact"
                     if (params.NODETOOL_OPTIONS) {
-                        cass_ops_command += " --nodetool-options \\"${params.NODETOOL_OPTIONS}\\""
+                        cass_ops_command += " --nodetool-options '${params.NODETOOL_OPTIONS}'"
                     }
                     if (params.KEYSPACE) {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                        cass_ops_command += " " + params.TABLES.split(' ').collect { "-t \\"" + it + "\\"" }.join(' ')
+                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
                     }
 
-                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c '${cass_ops_command}' ${parallel_flag}"
                 }
             }
         }
@@ -326,21 +326,21 @@ pipeline {
         stage('Execute Garbage Collect') {
             steps {
                 script {
-                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query \\"${params.QV_QUERY}\\"" : "--nodes \\"${params.NODE_LIST}\\""
+                    def node_arg = (params.NODE_SELECTION_METHOD == 'QV_QUERY') ? "--qv-query '${params.QV_QUERY}'" : "--nodes '${params.NODE_LIST}'"
                     def parallel_flag = params.PARALLEL ? '--parallel' : ''
 
                     def cass_ops_command = "sudo /usr/local/bin/cass-ops garbage-collect"
                     if (params.NODETOOL_OPTIONS) {
-                        cass_ops_command += " --nodetool-options \\"${params.NODETOOL_OPTIONS}\\""
+                        cass_ops_command += " --nodetool-options '${params.NODETOOL_OPTIONS}'"
                     }
                     if (params.KEYSPACE) {
                         cass_ops_command += " -k ${params.KEYSPACE}"
                     }
                     if (params.TABLES) {
-                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t \\"" + it + "\\"" }.join(' ')
+                       cass_ops_command += " " + params.TABLES.split(' ').collect { "-t " + it }.join(' ')
                     }
                     
-                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c \\"${cass_ops_command}\\" ${parallel_flag}"
+                    sh "chmod +x ${env.SCRIPTS_PATH}/cassy.sh && ${env.SCRIPTS_PATH}/cassy.sh ${node_arg} -c '${cass_ops_command}' ${parallel_flag}"
                 }
             }
         }
