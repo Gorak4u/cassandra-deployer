@@ -1,5 +1,6 @@
-// This Jenkinsfile provides a single, parameterized job for running all major
-// Cassandra orchestration scripts safely from the Jenkins UI.
+// Define the path where your scripts are located on the Jenkins agent.
+// You must ensure the 'scripts' directory from your project is copied here.
+def scriptDir = '/opt/cassandra-tools/scripts'
 
 pipeline {
     agent { label 'cassandra-ops' } // Use your dedicated Jenkins agent label
@@ -15,77 +16,46 @@ pipeline {
                 'SPLIT_DCS',
                 'RENAME_CLUSTER'
             ],
-            description: 'The high-level Cassandra operation to perform.'
+            description: 'The high-level operation to perform.'
         )
-
-        // Parameters for Rolling Operations & Rename
-        string(name: 'QV_QUERY', defaultValue: '', description: 'Required for all Rolling Ops and Rename. The qv query to select target nodes (e.g., "-r role_cassandra_pfpt -d AWSLAB").')
-
-        // Parameters for JOIN_DCS and SPLIT_DCS
-        string(name: 'DC1_QUERY', defaultValue: '', description: 'For JOIN/SPLIT: The qv query for the first/old datacenter.')
-        string(name: 'DC2_QUERY', defaultValue: '', description: 'For JOIN/SPLIT: The qv query for the second/new datacenter.')
-        string(name: 'DC1_NAME', defaultValue: '', description: 'For JOIN/SPLIT: The Cassandra name of the first/old datacenter.')
-        string(name: 'DC2_NAME', defaultValue: '', description: 'For JOIN/SPLIT: The Cassandra name of the second/new datacenter.')
-        
-        // Parameters for RENAME_CLUSTER
-        string(name: 'OLD_CLUSTER_NAME', defaultValue: '', description: 'For RENAME_CLUSTER: The current name of the cluster.')
-        string(name: 'NEW_CLUSTER_NAME', defaultValue: '', description: 'For RENAME_CLUSTER: The desired new name for the cluster.')
+        string(name: 'QV_QUERY_PRIMARY', defaultValue: '', description: 'Primary qv query (e.g., for restarts, renames, or the first DC in a join/split).')
+        string(name: 'QV_QUERY_SECONDARY', defaultValue: '', description: 'Secondary qv query (e.g., for the second DC in a join/split).')
+        string(name: 'DC_NAME_PRIMARY', defaultValue: '', description: 'The Cassandra name for the primary datacenter.')
+        string(name: 'DC_NAME_SECONDARY', defaultValue: '', description: 'The Cassandra name for the secondary datacenter.')
+        string(name: 'OLD_CLUSTER_NAME', defaultValue: '', description: 'The old cluster name (for rename operations).')
+        string(name: 'NEW_CLUSTER_NAME', defaultValue: '', description: 'The new cluster name (for rename operations).')
     }
 
     stages {
-        stage('Checkout') {
+        stage('Setup') {
             steps {
-                // This assumes your Jenkins job is configured to check out from your Git repository.
-                // If not, add a git step here:
-                // git 'https://your-git-server/your-repo.git'
-                echo 'Checking out source code...'
+                // Ensure all management scripts at the specified path are executable.
+                sh "chmod +x ${scriptDir}/*.sh"
             }
         }
 
-        stage('Execute Cassandra Operation') {
+        stage('Execute Operation') {
             steps {
-                // Use the SSH Agent plugin to securely provide the SSH key for cassy.sh
                 sshagent(credentials: ['your-jenkins-ssh-key-id']) {
                     script {
-                        // Ensure all scripts are executable
-                        sh 'chmod +x scripts/*.sh'
-
-                        // Use if/else if to execute the correct command based on the selected operation
-                        if (params.OPERATION == 'ROLLING_RESTART') {
-                            if (params.QV_QUERY.isEmpty()) {
-                                error("QV_QUERY parameter is required for ROLLING_RESTART.")
-                            }
-                            sh "./scripts/cassy.sh --rolling-op restart --qv-query \"${params.QV_QUERY}\""
+                        def operation = params.OPERATION
                         
-                        } else if (params.OPERATION == 'ROLLING_REBOOT') {
-                            if (params.QV_QUERY.isEmpty()) {
-                                error("QV_QUERY parameter is required for ROLLING_REBOOT.")
-                            }
-                            sh "./scripts/cassy.sh --rolling-op reboot --qv-query \"${params.QV_QUERY}\""
+                        echo "Executing operation: ${operation}"
 
-                        } else if (params.OPERATION == 'ROLLING_PUPPET_RUN') {
-                            if (params.QV_QUERY.isEmpty()) {
-                                error("QV_QUERY parameter is required for ROLLING_PUPPET_RUN.")
-                            }
-                            sh "./scripts/cassy.sh --rolling-op puppet --qv-query \"${params.QV_QUERY}\""
-
-                        } else if (params.OPERATION == 'JOIN_DCS') {
-                            if (params.DC1_QUERY.isEmpty() || params.DC2_QUERY.isEmpty() || params.DC1_NAME.isEmpty() || params.DC2_NAME.isEmpty()) {
-                                error("DC1_QUERY, DC2_QUERY, DC1_NAME, and DC2_NAME parameters are required for JOIN_DCS.")
-                            }
-                            sh "./scripts/join-cassandra-dcs.sh --old-dc-query \"${params.DC1_QUERY}\" --new-dc-query \"${params.DC2_QUERY}\" --old-dc-name \"${params.DC1_NAME}\" --new-dc-name \"${params.DC2_NAME}\""
-                        
-                        } else if (params.OPERATION == 'SPLIT_DCS') {
-                            if (params.DC1_QUERY.isEmpty() || params.DC2_QUERY.isEmpty() || params.DC1_NAME.isEmpty() || params.DC2_NAME.isEmpty()) {
-                                error("DC1_QUERY, DC2_QUERY, DC1_NAME, and DC2_NAME parameters are required for SPLIT_DCS.")
-                            }
-                            sh "./scripts/split-cassandra-dcs.sh --dc1-query \"${params.DC1_QUERY}\" --dc2-query \"${params.DC2_QUERY}\" --dc1-name \"${params.DC1_NAME}\" --dc2-name \"${params.DC2_NAME}\""
-
-                        } else if (params.OPERATION == 'RENAME_CLUSTER') {
-                            if (params.QV_QUERY.isEmpty() || params.OLD_CLUSTER_NAME.isEmpty() || params.NEW_CLUSTER_NAME.isEmpty()) {
-                                error("QV_QUERY, OLD_CLUSTER_NAME, and NEW_CLUSTER_NAME parameters are required for RENAME_CLUSTER.")
-                            }
-                            sh "./scripts/rename-cassandra-cluster.sh --qv-query \"${params.QV_QUERY}\" --old-name \"${params.OLD_CLUSTER_NAME}\" --new-name \"${params.NEW_CLUSTER_NAME}\""
+                        if (operation == 'ROLLING_RESTART') {
+                            sh "${scriptDir}/rolling_restart.sh --qv-query \"${params.QV_QUERY_PRIMARY}\""
+                        } else if (operation == 'ROLLING_REBOOT') {
+                            sh "${scriptDir}/rolling_reboot.sh --qv-query \"${params.QV_QUERY_PRIMARY}\""
+                        } else if (operation == 'ROLLING_PUPPET_RUN') {
+                            sh "${scriptDir}/rolling_puppet_run.sh --qv-query \"${params.QV_QUERY_PRIMARY}\""
+                        } else if (operation == 'JOIN_DCS') {
+                            sh "${scriptDir}/join-cassandra-dcs.sh --old-dc-query \"${params.QV_QUERY_PRIMARY}\" --new-dc-query \"${params.QV_QUERY_SECONDARY}\" --old-dc-name \"${params.DC_NAME_PRIMARY}\" --new-dc-name \"${params.DC_NAME_SECONDARY}\""
+                        } else if (operation == 'SPLIT_DCS') {
+                            sh "${scriptDir}/split-cassandra-dcs.sh --dc1-query \"${params.QV_QUERY_PRIMARY}\" --dc2-query \"${params.QV_QUERY_SECONDARY}\" --dc1-name \"${params.DC_NAME_PRIMARY}\" --dc2-name \"${params.DC_NAME_SECONDARY}\""
+                        } else if (operation == 'RENAME_CLUSTER') {
+                            sh "${scriptDir}/rename-cassandra-cluster.sh --qv-query \"${params.QV_QUERY_PRIMARY}\" --old-name \"${params.OLD_CLUSTER_NAME}\" --new-name \"${params.NEW_CLUSTER_NAME}\""
+                        } else {
+                            error "Unknown operation: ${operation}"
                         }
                     }
                 }
@@ -95,8 +65,8 @@ pipeline {
     
     post {
         always {
-            echo "Cassandra operation job finished."
-            // Add notifications (Slack, Email, etc.) here for audit purposes
+            echo 'Operation finished.'
+            // Add notifications (Slack, Email, etc.) here
         }
     }
 }
