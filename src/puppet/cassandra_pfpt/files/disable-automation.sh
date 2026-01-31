@@ -1,6 +1,6 @@
 #!/bin/bash
 # This file is managed by Puppet.
-# Creates flag files to temporarily disable Puppet and automated repairs.
+# Creates flag files and disables the Puppet agent service to temporarily halt automation.
 
 set -euo pipefail
 
@@ -15,9 +15,18 @@ MESSAGE="${1:-"Automation disabled by operator at $(date)"}"
 
 echo -e "${YELLOW}--- Disabling Automated Operations ---${NC}"
 
-echo -e "Disabling Puppet agent cron job..."
+# Disable via flag file for cron-based runs
+echo -e "Creating flag file to block cron-based Puppet runs..."
 echo "$MESSAGE" > "$PUPPET_FLAG_FILE"
-echo -e "Puppet agent disabled. Flag file created at ${PUPPET_FLAG_FILE}"
+echo -e "Flag file created at ${PUPPET_FLAG_FILE}"
+
+# Disable the puppet agent service directly
+if command -v puppet &> /dev/null; then
+    echo -e "Disabling Puppet agent service..."
+    puppet agent --disable "$MESSAGE"
+else
+    echo -e "${YELLOW}WARNING: 'puppet' command not found. Skipping direct agent disable.${NC}"
+fi
 
 echo -e "Disabling scheduled repairs..."
 echo "$MESSAGE" > "$REPAIR_FLAG_FILE"
