@@ -4,9 +4,8 @@ set -euo pipefail
 
 # --- Defaults & Configuration ---
 KEYSPACE=""
-TABLE_LIST=""
-GRANULARITY="ROW"
-JOBS=0 # 0 means let Cassandra decide
+TABLE_LIST=()
+NODETOOL_OPTIONS=""
 DISK_CHECK_PATH="/var/lib/cassandra/data"
 WARNING_THRESHOLD=70
 CRITICAL_THRESHOLD=80
@@ -28,40 +27,37 @@ log_message() {
 usage() {
     log_message "${YELLOW}Usage: $0 [OPTIONS]${NC}"
     log_message "Safely runs 'nodetool garbagecollect' with pre-flight disk space checks."
-    log_message "  -k, --keyspace <name>       Specify the keyspace. Required if specifying tables."
-    log_message "  -t, --table <name>          Specify a table to collect. Can be used multiple times."
-    log_message "  -g, --granularity <CELL|ROW> Granularity of tombstones to remove. Default: ROW"
-    log_message "  -j, --jobs <num>            Number of concurrent sstable garbage collection jobs. Default: 0 (auto)"
-    log_message "  -d, --disk-path <path>      Path to monitor for disk space. Default: $DISK_CHECK_PATH"
-    log_message "  -w, --warning <%>           Warning disk usage threshold (%). Aborts if above. Default: $WARNING_THRESHOLD"
-    log_message "  -c, --critical <%>          Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
-    log_message "  -h, --help                  Show this help message."
+    log_message "  -k, --keyspace <name>         Specify the keyspace. Required if specifying tables."
+    log_message "  -t, --table <name>            Specify a table to collect. Can be used multiple times."
+    log_message "  --nodetool-options <string>   A string of additional options to pass to nodetool (e.g., '-g CELL -j 2')."
+    log_message "  -d, --disk-path <path>        Path to monitor for disk space. Default: $DISK_CHECK_PATH"
+    log_message "  -w, --warning <%>             Warning disk usage threshold (%). Aborts if above. Default: $WARNING_THRESHOLD"
+    log_message "  -c, --critical <%>            Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
+    log_message "  -h, --help                    Show this help message."
     log_message ""
     log_message "Examples:"
     log_message "  Collect on entire node:       $0"
     log_message "  Collect on a keyspace:        $0 -k my_keyspace"
     log_message "  Collect on specific tables:   $0 -k my_keyspace -t users -t audit_log"
-    log_message "  Collect with cell granularity: $0 -k my_keyspace -t users -g CELL"
+    log_message "  Collect with cell granularity: $0 -k my_keyspace -t users --nodetool-options '-g CELL'"
     exit 1
 }
 
 # --- Argument Parsing ---
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -k|--keyspace) KEYSPACE="$2"; shift ;;
-        -t|--table) TABLE_LIST="$TABLE_LIST $2"; shift ;;
-        -g|--granularity) GRANULARITY="$2"; shift ;;
-        -j|--jobs) JOBS="$2"; shift ;;
-        -d|--disk-path) DISK_CHECK_PATH="$2"; shift ;;
-        -w|--warning) WARNING_THRESHOLD="$2"; shift ;;
-        -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
-        -h|--help) usage ;;
-        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
+        -k|--keyspace) KEYSPACE="$2"; shift 2 ;;
+        -t|--table) TABLE_LIST+=("$2"); shift 2 ;;
+        --nodetool-options) NODETOOL_OPTIONS="$2"; shift 2 ;;
+        -d|--disk-path) DISK_CHECK_PATH="$2"; shift 2 ;;
+        -w|--warning) WARNING_THRESHOLD="$2"; shift 2 ;;
+        -c|--critical) CRITICAL_THRESHOLD="$2"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage; exit 1 ;;
     esac
-    shift
 done
 
-if [[ -n "$TABLE_LIST" && -z "$KEYSPACE" ]]; then
+if [[ ${#TABLE_LIST[@]} -gt 0 && -z "$KEYSPACE" ]]; then
     log_message "${RED}ERROR: A keyspace (-k) must be specified when collecting on specific tables (-t).${NC}"
     exit 1
 fi
@@ -73,23 +69,23 @@ log_message "${BLUE}--- Starting Garbage Collect Manager ---${NC}"
 CMD="nodetool garbagecollect"
 TARGET_DESC="full node"
 
-# Add options
-CMD+=" -g $GRANULARITY"
-if [[ $JOBS -gt 0 ]]; then
-    CMD+=" -j $JOBS"
+# Add nodetool options
+if [[ -n "$NODETOOL_OPTIONS" ]]; then
+    CMD+=" $NODETOOL_OPTIONS"
 fi
 
 # Add keyspace/table arguments
+KEYSPACE_ARGS=""
 if [[ -n "$KEYSPACE" ]]; then
     TARGET_DESC="keyspace '$KEYSPACE'"
-    CMD+=" -- $KEYSPACE"
-    if [[ -n "$TABLE_LIST" ]]; then
-        CMD+=$TABLE_LIST
-        # Remove leading space for description
-        CLEAN_TABLE_LIST=$(echo "$TABLE_LIST" | sed 's/^ *//g')
+    KEYSPACE_ARGS+=" -- $KEYSPACE"
+    if [[ ${#TABLE_LIST[@]} -gt 0 ]]; then
+        KEYSPACE_ARGS+=" ${TABLE_LIST[*]}"
+        CLEAN_TABLE_LIST=$(echo "${TABLE_LIST[*]}")
         TARGET_DESC="table(s) '$CLEAN_TABLE_LIST' in keyspace '$KEYSPACE'"
     fi
 fi
+CMD+="$KEYSPACE_ARGS"
 
 log_message "${BLUE}Target: $TARGET_DESC${NC}"
 log_message "${BLUE}Disk path to check: $DISK_CHECK_PATH${NC}"
@@ -116,7 +112,7 @@ fi
 log_message "${GREEN}Node state is NORMAL. Proceeding.${NC}"
 
 # Execute the command
-if $CMD; then
+if eval "$CMD"; then
     log_message "${GREEN}--- Garbage Collect Finished Successfully ---${NC}"
     exit 0
 else

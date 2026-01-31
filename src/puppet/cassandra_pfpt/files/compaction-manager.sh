@@ -4,16 +4,14 @@ set -euo pipefail
 
 # --- Defaults & Configuration ---
 KEYSPACE=""
-TABLE_LIST=""
-SPLIT_OUTPUT=false
-JMX_USERNAME=""
-JMX_PASSWORD=""
+TABLE_LIST=()
+USER_DEFINED_MODE=false
+USER_DEFINED_FILES=()
+NODETOOL_OPTIONS=""
 DISK_CHECK_PATH="/var/lib/cassandra/data"
 CRITICAL_THRESHOLD=85 # Abort if disk usage rises above 85%
 CHECK_INTERVAL=30     # Check disk space every 30 seconds
 LOG_FILE="/var/log/cassandra/compaction_manager.log"
-USER_DEFINED_MODE=false
-USER_DEFINED_FILES=()
 
 # --- Color Codes ---
 RED='\033[0;31m'
@@ -37,16 +35,14 @@ usage() {
     log_message "  --user-defined: Compact a specific list of user-defined sstable files."
     log_message ""
     log_message "Options:"
-    log_message "  -k, --keyspace <name>    Specify the keyspace to compact. (Not for --user-defined mode)"
-    log_message "  -t, --table <name>       Specify a table to compact. Can be used multiple times. (Not for --user-defined mode)"
-    log_message "  -s, --split-output       Split output for STCS compaction."
-    log_message "  -u, --username <user>    Remote JMX agent username."
-    log_message "  -p, --password <pass>    Remote JMX agent password."
-    log_message "  --user-defined           Submit listed files for user-defined compaction. All following args are files."
-    log_message "  -d, --disk-path <path>   Path to monitor for disk space. Default: $DISK_CHECK_PATH"
-    log_message "  -c, --critical <%>       Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
-    log_message "  -i, --interval <sec>     Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
-    log_message "  -h, --help               Show this help message."
+    log_message "  -k, --keyspace <name>         Specify the keyspace to compact. (Not for --user-defined mode)"
+    log_message "  -t, --table <name>            Specify a table to compact. Can be used multiple times. (Not for --user-defined mode)"
+    log_message "  --nodetool-options <string>   A string of additional options to pass directly to nodetool (e.g., '--split-output -j 2')."
+    log_message "  --user-defined                Submit listed files for user-defined compaction. All following args are files."
+    log_message "  -d, --disk-path <path>        Path to monitor for disk space. Default: $DISK_CHECK_PATH"
+    log_message "  -c, --critical <%>            Critical disk usage threshold (%). Aborts if above. Default: $CRITICAL_THRESHOLD"
+    log_message "  -i, --interval <sec>          Interval in seconds to check disk space. Default: $CHECK_INTERVAL"
+    log_message "  -h, --help                    Show this help message."
     log_message ""
     log_message "Examples:"
     log_message "  Full node compaction:       $0"
@@ -59,45 +55,28 @@ usage() {
 # --- Argument Parsing ---
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -k|--keyspace) KEYSPACE="$2"; shift ;;
-        -t|--table) TABLE_LIST+="$2 "; shift ;;
-        -s|--split-output) SPLIT_OUTPUT=true ;;
-        -u|--username) JMX_USERNAME="$2"; shift ;;
-        -p|--password) JMX_PASSWORD="$2"; shift ;;
-        -d|--disk-path) DISK_CHECK_PATH="$2"; shift ;;
-        -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
-        -i|--interval) CHECK_INTERVAL="$2"; shift ;;
-        --user-defined) USER_DEFINED_MODE=true; shift; break ;; # Break and process rest as files
+        -k|--keyspace) KEYSPACE="$2"; shift 2 ;;
+        -t|--table) TABLE_LIST+=("$2"); shift 2 ;;
+        --nodetool-options) NODETOOL_OPTIONS="$2"; shift 2 ;;
+        -d|--disk-path) DISK_CHECK_PATH="$2"; shift 2 ;;
+        -c|--critical) CRITICAL_THRESHOLD="$2"; shift 2 ;;
+        -i|--interval) CHECK_INTERVAL="$2"; shift 2 ;;
+        --user-defined) USER_DEFINED_MODE=true; shift; USER_DEFINED_FILES=("$@"); break ;; # Capture all remaining args
         -h|--help) usage ;;
-        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage ;;
+        *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage; exit 1 ;;
     esac
-    shift
 done
-
-# If user-defined mode is active, the rest of the arguments are files
-if [ "$USER_DEFINED_MODE" = true ]; then
-    USER_DEFINED_FILES=("$@")
-fi
-
 
 # --- Main Logic ---
 log_message "${BLUE}--- Starting Compaction Manager ---${NC}"
 
 # Build the nodetool command
 CMD_BASE="nodetool"
-if [[ -n "$JMX_USERNAME" ]]; then
-    CMD_BASE+=" -u $JMX_USERNAME"
-fi
-if [[ -n "$JMX_PASSWORD" ]]; then
-    CMD_BASE+=" -p $JMX_PASSWORD"
-fi
-
 COMPACT_CMD="compact"
-TARGET_DESC=""
 CMD=""
 
 if [ "$USER_DEFINED_MODE" = true ]; then
-    if [[ -n "$KEYSPACE" || -n "$TABLE_LIST" ]]; then
+    if [[ -n "$KEYSPACE" || ${#TABLE_LIST[@]} -gt 0 ]]; then
         log_message "${RED}ERROR: Cannot use --keyspace (-k) or --table (-t) with --user-defined.${NC}"
         exit 1
     fi
@@ -116,22 +95,19 @@ if [ "$USER_DEFINED_MODE" = true ]; then
     CMD="$CMD_BASE $COMPACT_CMD ${QUOTED_FILES[*]}"
     TARGET_DESC="user-defined files"
 else
-    if [ "$SPLIT_OUTPUT" = true ]; then
-        COMPACT_CMD+=" --split-output"
-    fi
-
     KEYSPACE_ARGS=""
     TARGET_DESC="full node"
     if [[ -n "$KEYSPACE" ]]; then
-        KEYSPACE_ARGS+=" -- $KEYSPACE"
         TARGET_DESC="keyspace '$KEYSPACE'"
-        if [[ -n "$TABLE_LIST" ]]; then
-            TABLE_LIST=$(echo "$TABLE_LIST" | sed 's/ $//') # Trim trailing space
-            KEYSPACE_ARGS+=" $TABLE_LIST"
-            TARGET_DESC="table(s) '$TABLE_LIST' in keyspace '$KEYSPACE'"
+        KEYSPACE_ARGS+=" -- $KEYSPACE"
+        if [[ ${#TABLE_LIST[@]} -gt 0 ]]; then
+            # Format for nodetool is `... keyspace table1 table2 ...`
+            KEYSPACE_ARGS+=" ${TABLE_LIST[*]}"
+            CLEAN_TABLE_LIST=$(echo "${TABLE_LIST[*]}")
+            TARGET_DESC="table(s) '$CLEAN_TABLE_LIST' in keyspace '$KEYSPACE'"
         fi
     fi
-    CMD="$CMD_BASE $COMPACT_CMD$KEYSPACE_ARGS"
+    CMD="$CMD_BASE $COMPACT_CMD $NODETOOL_OPTIONS$KEYSPACE_ARGS"
 fi
 
 
@@ -162,7 +138,7 @@ log_message "${GREEN}Node state is NORMAL. Proceeding.${NC}"
 
 # Start compaction in the background
 log_message "${BLUE}Starting compaction process...${NC}"
-$CMD &
+eval "$CMD" &
 COMPACTION_PID=$!
 log_message "${BLUE}Compaction started with PID: $COMPACTION_PID${NC}"
 
