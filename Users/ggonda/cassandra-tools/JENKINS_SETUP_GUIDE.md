@@ -2,7 +2,7 @@
 
 This guide provides step-by-step instructions for creating all the necessary Jenkins pipeline jobs to manage your Cassandra cluster using the provided orchestration scripts.
 
-We will use a **seed job**. This is a special Jenkins job that automatically creates all the other jobs for you based on the `seed.groovy` script. This approach is powerful because it keeps all your job definitions in one place.
+We will use a **seed job**. This is a special Jenkins job that automatically creates all the other jobs for you based on the `seed.groovy.txt` script. This approach is powerful because it keeps all your job definitions in one place and ensures they are "Pipeline as Code".
 
 ## Prerequisites
 
@@ -10,6 +10,7 @@ We will use a **seed job**. This is a special Jenkins job that automatically cre
 2.  **Job DSL Plugin**: The "Job DSL" plugin must be installed on your Jenkins instance.
     *   Go to `Manage Jenkins` > `Plugins` > `Available plugins`.
     *   Search for and install `Job DSL`.
+3.  **SSH Key Access**: The Jenkins agent must have passwordless SSH access to the Cassandra nodes.
 
 ---
 
@@ -23,7 +24,7 @@ The seed job is a special job that will create all the other operational jobs. Y
 4.  On the configuration page, scroll down to the **Build Steps** section.
 5.  Click **Add build step** and select **Process Job DSLs**.
 6.  Select the **Use the provided DSL script** radio button.
-7.  Copy the entire content of the `jenkins/seed.groovy` file from this project and paste it into the **DSL Script** text area in Jenkins.
+7.  Copy the entire content of the `jenkins/seed.groovy.txt` file from this project and paste it into the **DSL Script** text area in Jenkins.
 8.  Click **Save**.
 
 ---
@@ -34,11 +35,11 @@ For security reasons, Jenkins requires an administrator to approve any new Groov
 
 1.  Run the `Cassandra-Seed-Job` once. **It is expected to fail** with an error message like `script not yet approved for use`.
 2.  Go to **Manage Jenkins** > **In-process Script Approval**.
-3.  You will see the signature of the `seed.groovy` script listed. Click the **Approve** button.
+3.  You will see the signature of the `seed.groovy.txt` script listed. Click the **Approve** button.
 
 This tells Jenkins that you trust this specific script to be run within your environment.
 
-> **Note:** If you ever modify the contents of the `seed.groovy` script in the Jenkins job configuration, you will need to repeat this approval step for the new script signature.
+> **Note:** If you ever modify the contents of the `seed.groovy.txt` script in the Jenkins job configuration, you will need to repeat this approval step for the new script signature.
 
 ---
 
@@ -58,16 +59,27 @@ You will now see a new set of jobs on your dashboard inside a folder named `Cass
 *   `Cassandra - Rename`
 *   `Cassandra - Puppet-run`
 *   `Cassandra - Command`
+*   `Cassandra - Compaction`
+*   `Cassandra - Garbage-Collect`
 
 ---
 
-## Step 4: Use the Operational Jobs
+## Step 4: Configure and Use the Operational Jobs
 
-You can now use these newly created jobs to perform operations. Each job has its own specific set of parameters.
+Each of the newly created jobs is a Pipeline job that needs to be configured with your source code repository.
 
 1.  Click on the `Cassandra` folder, then click on any of the generated jobs (e.g., `Cassandra - Restart`).
+2.  Click **Configure** from the left-hand menu.
+3.  Scroll down to the **Pipeline** section.
+4.  Under **Definition**, select **Pipeline script from SCM**.
+5.  Configure your **SCM** (e.g., Git) and provide your repository URL. Ensure the **Script Path** is set to the correct `Jenkinsfile.*` for that job (e.g., `jenkins/Jenkinsfile.restart`).
+6.  Click **Save**.
+7.  Repeat this configuration for all the jobs created by the seed job.
+
+Once configured, you can run the jobs:
+1.  Click on the job you want to run.
 2.  Click **Build with Parameters**.
-3.  Fill in the parameters relevant to the operation (e.g., the `QV_QUERY` for the nodes you want to restart).
+3.  Fill in the parameters relevant to the operation.
 4.  Click **Build**.
 
-The Jenkins job will execute the corresponding script (`cassy.sh --rolling-op restart` in this case) on the Jenkins agent, orchestrating the operation across your cluster.
+The Jenkins job will check out your code and execute the corresponding script, orchestrating the operation across your cluster.

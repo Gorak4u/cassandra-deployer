@@ -164,8 +164,8 @@ NEW_DC_RUN_NODE=${NEW_NODES_ARRAY[0]}
 log_info "Performing validation checks..."
 # Check Cluster Name
 log_info "Checking cluster names match..."
-CLUSTER_OLD_NAME=$("$CASSY_SCRIPT_PATH" --node "$OLD_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
-CLUSTER_NEW_NAME=$("$CASSY_SCRIPT_PATH" --node "$NEW_DC_RUN_NODE" --json -c "sudo cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
+CLUSTER_OLD_NAME=$("$CASSY_SCRIPT_PATH" --node "$OLD_DC_RUN_NODE" --json -c "sudo /usr/local/bin/cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
+CLUSTER_NEW_NAME=$("$CASSY_SCRIPT_PATH" --node "$NEW_DC_RUN_NODE" --json -c "sudo /usr/local/bin/cass-ops health --json" | jq -r '.results[0].output | fromjson | .checks[] | select(.name=="schema_agreement") | .details' | grep 'Name:' | awk '{print $2}')
 
 if [ "$CLUSTER_OLD_NAME" != "$CLUSTER_NEW_NAME" ]; then
     log_error "Cluster names do not match! Old DC: '$CLUSTER_OLD_NAME', New DC: '$CLUSTER_NEW_NAME'. Aborting."
