@@ -1,0 +1,156 @@
+pipeline {
+    agent any
+
+    environment {
+        // Add common macOS paths for user-installed binaries.
+        // This ensures Jenkins can find commands like 'qv' that are in your terminal's path.
+        PATH = "/opt/homebrew/bin:/usr/local/bin:${env.PATH}"
+        
+        // Define the location of the scripts if not using Git.
+        // Change this path to match where you've placed the 'scripts' directory on your Jenkins agent.
+        SCRIPTS_PATH = "/opt/cassandra-tools/scripts"
+    }
+
+    parameters {
+        choice(
+            name: 'OPERATION',
+            choices: [
+                'ROLLING_RESTART',
+                'ROLLING_REBOOT',
+                'ROLLING_PUPPET_RUN',
+                'JOIN_DCS',
+                'SPLIT_DCS',
+                'RENAME_CLUSTER'
+            ],
+            description: 'The high-level orchestration operation to perform.'
+        )
+        string(name: 'QV_QUERY', defaultValue: '', description: 'QV query to select target nodes (for rolling ops).')
+        string(name: 'OLD_DC_QUERY', defaultValue: '', description: 'QV query for the old/first datacenter (for join/split).')
+        string(name: 'NEW_DC_QUERY', defaultValue: '', description: 'QV query for the new/second datacenter (for join/split).')
+        string(name: 'OLD_DC_NAME', defaultValue: '', description: 'Cassandra name of the old/first DC (for join/split).')
+        string(name: 'NEW_DC_NAME', defaultValue: '', description: 'Cassandra name of the new/second DC (for join/split).')
+        string(name: 'OLD_CLUSTER_NAME', defaultValue: '', description: 'The current cluster name (for rename).')
+        string(name: 'NEW_CLUSTER_NAME', defaultValue: '', description: 'The desired new cluster name (for rename).')
+    }
+
+    stages {
+        stage('Execute Rolling Restart') {
+            when {
+                expression { params.OPERATION == 'ROLLING_RESTART' }
+            }
+            steps {
+                script {
+                    if (params.QV_QUERY.isEmpty()) {
+                        error "QV_QUERY parameter is required for ROLLING_RESTART."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/rolling_restart.sh --qv-query "${params.QV_QUERY}"
+                    """
+                }
+            }
+        }
+
+        stage('Execute Rolling Reboot') {
+            when {
+                expression { params.OPERATION == 'ROLLING_REBOOT' }
+            }
+            steps {
+                script {
+                    if (params.QV_QUERY.isEmpty()) {
+                        error "QV_QUERY parameter is required for ROLLING_REBOOT."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/rolling_reboot.sh --qv-query "${params.QV_QUERY}"
+                    """
+                }
+            }
+        }
+
+        stage('Execute Rolling Puppet Run') {
+            when {
+                expression { params.OPERATION == 'ROLLING_PUPPET_RUN' }
+            }
+            steps {
+                script {
+                    if (params.QV_QUERY.isEmpty()) {
+                        error "QV_QUERY parameter is required for ROLLING_PUPPET_RUN."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/rolling_puppet_run.sh --qv-query "${params.QV_QUERY}"
+                    """
+                }
+            }
+        }
+
+        stage('Execute Join DCs') {
+            when {
+                expression { params.OPERATION == 'JOIN_DCS' }
+            }
+            steps {
+                script {
+                    if (params.OLD_DC_QUERY.isEmpty() || params.NEW_DC_QUERY.isEmpty() || params.OLD_DC_NAME.isEmpty() || params.NEW_DC_NAME.isEmpty()) {
+                        error "OLD_DC_QUERY, NEW_DC_QUERY, OLD_DC_NAME, and NEW_DC_NAME are required for JOIN_DCS."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/join-cassandra-dcs.sh \\
+                            --old-dc-query "${params.OLD_DC_QUERY}" \\
+                            --new-dc-query "${params.NEW_DC_QUERY}" \\
+                            --old-dc-name "${params.OLD_DC_NAME}" \\
+                            --new-dc-name "${params.NEW_DC_NAME}"
+                    """
+                }
+            }
+        }
+
+        stage('Execute Split DCs') {
+            when {
+                expression { params.OPERATION == 'SPLIT_DCS' }
+            }
+            steps {
+                script {
+                    if (params.OLD_DC_QUERY.isEmpty() || params.NEW_DC_QUERY.isEmpty() || params.OLD_DC_NAME.isEmpty() || params.NEW_DC_NAME.isEmpty()) {
+                        error "OLD_DC_QUERY (as dc1), NEW_DC_QUERY (as dc2), OLD_DC_NAME (as dc1), and NEW_DC_NAME (as dc2) are required for SPLIT_DCS."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/split-cassandra-dcs.sh \\
+                            --dc1-query "${params.OLD_DC_QUERY}" \\
+                            --dc2-query "${params.NEW_DC_QUERY}" \\
+                            --dc1-name "${params.OLD_DC_NAME}" \\
+                            --dc2-name "${params.NEW_DC_NAME}"
+                    """
+                }
+            }
+        }
+
+        stage('Execute Rename Cluster') {
+            when {
+                expression { params.OPERATION == 'RENAME_CLUSTER' }
+            }
+            steps {
+                script {
+                    if (params.QV_QUERY.isEmpty() || params.OLD_CLUSTER_NAME.isEmpty() || params.NEW_CLUSTER_NAME.isEmpty()) {
+                        error "QV_QUERY, OLD_CLUSTER_NAME, and NEW_CLUSTER_NAME are required for RENAME_CLUSTER."
+                    }
+                    sh """
+                        set -x
+                        ${env.SCRIPTS_PATH}/rename-cassandra-cluster.sh \\
+                            --qv-query "${params.QV_QUERY}" \\
+                            --old-name "${params.OLD_CLUSTER_NAME}" \\
+                            --new-name "${params.NEW_CLUSTER_NAME}"
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cassandra operation finished.'
+        }
+    }
+}
