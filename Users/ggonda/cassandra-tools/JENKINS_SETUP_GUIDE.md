@@ -12,6 +12,7 @@ We will use a **seed job**. This is a special Jenkins job that automatically cre
     *   Search for and install `Job DSL`.
 3.  **Local Project Path**: This guide assumes your project directory is located at `/Users/ggonda/cassandra-tools`. The generated jobs will use this path to find the required scripts.
 4.  **SSH Key Access**: The Jenkins agent must have passwordless SSH access to the Cassandra nodes.
+5.  **Management Scripts**: All management scripts (e.g., `cassy.sh`, `join-cassandra-dcs.sh`) must be placed in the `/Users/ggonda/cassandra-tools/scripts/` directory.
 
 ---
 
@@ -74,4 +75,4 @@ The jobs are now ready to use. They are configured to run directly from your loc
 3.  Fill in the parameters relevant to the operation.
 4.  Click **Build**.
 
-The Jenkins job will change to the `/Users/ggonda/cassandra-tools` directory and execute the corresponding script, orchestrating the operation across your cluster.
+The Jenkins job will execute the corresponding script from your `/Users/ggonda/cassandra-tools/scripts` directory, orchestrating the operation across your cluster.

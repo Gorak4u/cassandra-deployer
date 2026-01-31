@@ -1,8 +1,6 @@
-# Firebase Studio
+# Cassandra Orchestration Toolkit
 
-This is a NextJS starter in Firebase Studio.
-
-To get started, take a look at src/app/page.tsx.
+This repository contains a suite of powerful orchestration tools designed to safely manage and operate Apache Cassandra clusters. The primary tool, `cassy.sh`, is a robust wrapper for executing commands across multiple nodes, supporting both sequential and parallel operations with built-in safety checks.
 
 ---
 

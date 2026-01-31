@@ -16,6 +16,7 @@ This document provides a complete, in-depth guide to the backup and recovery arc
 3.  [**Automated Backups**](#3-automated-backups)
 4.  [**Manual Operations: Backup & Status Checks**](#4-manual-operations-backup--status-checks)
 5.  [**The Restore Process: Point-in-Time Recovery (PITR)**](#5-the-restore-process-point-in-time-recovery-pitr)
+    - [The Interactive Restore Wizard](#the-interactive-restore-wizard)
     - [The Restore Chain](#the-restore-chain)
     - [Previewing the Restore Chain](#previewing-the-restore-chain)
 6.  [**Restore Scenarios: Step-by-Step Guides**](#6-restore-scenarios-step-by-step-guides)
@@ -91,11 +92,19 @@ All data files are encrypted using **AES-256-CBC** before being uploaded to S3. 
 
 ## 5. The Restore Process: Point-in-Time Recovery (PITR)
 
-The restore script is designed to bring your data back to a specific moment in time. The most important flag is `--date "YYYY-MM-DD-HH-MM"`.
+### The Interactive Restore Wizard
+
+For safety and ease of use, the `restore` command includes an interactive wizard. It is the recommended way to perform restores, as it guides you through selecting the correct mode, host, and point-in-time, reducing the risk of errors.
+
+To launch the wizard, simply run the command with no arguments:
+```bash
+sudo cass-ops restore
+```
+The wizard will present you with options for restore modes, available hosts, and backup timestamps.
 
 ### The Restore Chain
 
-When you specify a target date, the script builds a "restore chain":
+When you specify a target date (either in the wizard or with the `--date "YYYY-MM-DD-HH-MM"` flag), the script builds a "restore chain":
 
 1.  It finds the most recent **full** backup that occurred *at or before* your target time. This is the restore's foundation.
 2.  It then finds all **incremental** backups that occurred *between* that full backup and your target time.
@@ -122,10 +131,9 @@ This is a **non-destructive** operation that streams data into a live, running c
 #### Steps:
 
 1.  SSH into any Cassandra node in the cluster.
-2.  Choose the appropriate restore action:
-    -   `--download-and-restore`: Downloads the data and immediately loads it into the cluster.
-    -   `--download-only`: Downloads and decrypts the data to `/var/lib/cassandra/restore_download/` for manual inspection. The data is **not** loaded.
-3.  Execute the command with your target date and keyspace/table.
+2.  Launch the interactive wizard: `sudo cass-ops restore`.
+3.  Select "Granular Restore" and follow the prompts to choose the source host, target date, keyspace, and (optionally) table.
+4.  Alternatively, run the command with flags:
 
 #### Example Commands:
 
@@ -162,7 +170,7 @@ This is a **destructive** operation performed on a **new, stopped node**.
 #### Steps:
 
 1.  SSH into the **new, stopped** node.
-2.  Execute the restore script in `--full-restore` mode. You **must** use `--source-host` to specify the hostname of the *original, dead node* you are replacing.
+2.  Launch the interactive wizard (`sudo cass-ops restore`) and select "Full Node Restore", or execute the command directly. You **must** use `--source-host` to specify the hostname of the *original, dead node* you are replacing.
 
     ```bash
     # Restore this new node using the backup data from 'cassandra-node-03.example.com'

@@ -46,15 +46,16 @@ usage() {
 # --- Argument Parsing ---
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -k|--keyspace) KEYSPACE="$2"; shift 2 ;;
-        -t|--table) TABLE_LIST+=("$2"); shift 2 ;;
-        --nodetool-options) NODETOOL_OPTIONS="$2"; shift 2 ;;
-        -d|--disk-path) DISK_CHECK_PATH="$2"; shift 2 ;;
-        -w|--warning) WARNING_THRESHOLD="$2"; shift 2 ;;
-        -c|--critical) CRITICAL_THRESHOLD="$2"; shift 2 ;;
+        -k|--keyspace) KEYSPACE="$2"; shift ;;
+        -t|--table) TABLE_LIST+=("$2"); shift ;;
+        --nodetool-options) NODETOOL_OPTIONS="$2"; shift ;;
+        -d|--disk-path) DISK_CHECK_PATH="$2"; shift ;;
+        -w|--warning) WARNING_THRESHOLD="$2"; shift ;;
+        -c|--critical) CRITICAL_THRESHOLD="$2"; shift ;;
         -h|--help) usage; exit 0 ;;
         *) log_message "${RED}Unknown parameter passed: $1${NC}"; usage; exit 1 ;;
     esac
+    shift
 done
 
 if [[ ${#TABLE_LIST[@]} -gt 0 && -z "$KEYSPACE" ]]; then
