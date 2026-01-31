@@ -28,15 +28,29 @@ The seed job is a special job that will create all the other operational jobs. Y
 
 ---
 
-## Step 2: Run the Seed Job
+## Step 2: Approve the Script Signature (Security Step)
 
-Now that the seed job is created, you can run it to generate all your Cassandra operation jobs.
+For security reasons, Jenkins requires an administrator to approve any new Groovy script that is run directly in the UI.
+
+1.  Run the `Cassandra-Seed-Job` once. **It is expected to fail** with an error message like `script not yet approved for use`.
+2.  Go to **Manage Jenkins** > **In-process Script Approval**.
+3.  You will see the signature of the `seed.groovy` script listed. Click the **Approve** button.
+
+This tells Jenkins that you trust this specific script to be run within your environment.
+
+> **Note:** If you ever modify the contents of the `seed.groovy` script in the Jenkins job configuration, you will need to repeat this approval step for the new script signature.
+
+---
+
+## Step 3: Run the Seed Job
+
+Now that the script is approved, you can run the seed job to generate all your Cassandra operation jobs.
 
 1.  Go to the dashboard for your `Cassandra-Seed-Job`.
 2.  Click **Build Now**.
-3.  After the build completes (it should be very fast), go back to the main Jenkins dashboard and refresh the page.
+3.  After the build completes (it should be very fast and marked as successful), go back to the main Jenkins dashboard and refresh the page.
 
-You will now see a new set of jobs on your dashboard:
+You will now see a new set of jobs on your dashboard inside a folder named `Cassandra`:
 *   `Cassandra - Reboot`
 *   `Cassandra - Restart`
 *   `Cassandra - Join`
@@ -47,11 +61,11 @@ You will now see a new set of jobs on your dashboard:
 
 ---
 
-## Step 3: Use the Operational Jobs
+## Step 4: Use the Operational Jobs
 
 You can now use these newly created jobs to perform operations. Each job has its own specific set of parameters.
 
-1.  Click on any of the generated jobs (e.g., `Cassandra - Restart`).
+1.  Click on the `Cassandra` folder, then click on any of the generated jobs (e.g., `Cassandra - Restart`).
 2.  Click **Build with Parameters**.
 3.  Fill in the parameters relevant to the operation (e.g., the `QV_QUERY` for the nodes you want to restart).
 4.  Click **Build**.
