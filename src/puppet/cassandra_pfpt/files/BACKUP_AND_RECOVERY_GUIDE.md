@@ -187,7 +187,7 @@ This is a **destructive** operation performed on a **new, stopped node**.
 
 > **Use Case:** A catastrophic failure has destroyed the entire cluster. You must rebuild from scratch on new hardware.
 
-This is an advanced, coordinated, two-phase process.
+This is an advanced, coordinated, multi-phase process.
 
 #### Prerequisites:
 
@@ -195,7 +195,16 @@ This is an advanced, coordinated, two-phase process.
 -   Puppet has run on all new nodes, but the `cassandra` service is **stopped and disabled on all of them**.
 -   You know the hostnames of the *original* nodes that were backed up.
 
-#### Phase 1: Restore the Schema (Run on ONE Node Only)
+#### Phase 1: Disable Automation
+
+Before starting the restore process, it is critical to prevent automated tools from interfering.
+1.  On your management node, use `cassy.sh` to disable automation on **all new nodes**.
+    ```bash
+    ./scripts/cassy.sh --qv-query "<your_query_for_new_nodes>" -P -c "sudo cass-ops disable-automation 'Disabling for DR restore'"
+    ```
+This prevents Puppet from trying to start or reconfigure services while you are manually restoring data.
+
+#### Phase 2: Restore the Schema (Run on ONE Node Only)
 
 1.  Choose **one node** in the new cluster to be the "schema master".
 2.  SSH into this node.
@@ -217,7 +226,7 @@ This is an advanced, coordinated, two-phase process.
 7.  Verify the keyspaces exist: `cqlsh -e "DESCRIBE KEYSPACES;"`.
 8.  **Crucially, stop the Cassandra service** on this "schema master" node: `sudo systemctl stop cassandra`.
 
-#### Phase 2: Restore Data (Rolling, Node by Node)
+#### Phase 3: Restore Data (Rolling, Node by Node)
 
 Now, perform a **Full Node Restore (Scenario 2)** on each new machine.
 
@@ -234,7 +243,11 @@ Now, perform a **Full Node Restore (Scenario 2)** on each new machine.
     *   **Wait for this node to also report `UN` in `nodetool status` before proceeding to the next one.**
     *   Repeat this process for every remaining node in the cluster.
 
-3.  **Verification:** Once all nodes are restored and report `UN`, the cluster recovery is complete. Run `nodetool status` on any node to verify that all nodes are present and healthy.
+3.  **Verification and Re-enabling Automation:** Once all nodes are restored and report `UN`, the cluster recovery is complete. Run `nodetool status` on any node to verify that all nodes are present and healthy.
+    Finally, re-enable automation on all nodes:
+    ```bash
+    ./scripts/cassy.sh --qv-query "<your_query_for_new_nodes>" -P -c "sudo cass-ops enable-automation"
+    ```
 
 ---
 

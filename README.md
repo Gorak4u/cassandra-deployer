@@ -67,6 +67,7 @@ Re-enable automation on all nodes:
 ```bash
 ./scripts/cassy.sh --qv-query "<your_query>" -P -c "sudo cass-ops enable-automation"
 ```
+> **Note:** The `join-cassandra-dcs.sh`, `split-cassandra-dcs.sh`, and `rename-cassandra-cluster.sh` orchestration scripts perform the "disable" step automatically for you. However, they require you to **manually** run the "enable" command after you have verified the operation was successful.
 
 #### **Pattern 1: Safe Rolling Restart of a Datacenter**
 A rolling restart is a common maintenance task. It must be done sequentially to ensure the cluster remains available. The `--inter-node-check` flag is critical for ensuring the cluster is healthy before moving to the next node.
@@ -136,7 +137,7 @@ To perform a rolling Puppet run on the same set of nodes:
 
 This feature provides a single, robust way to orchestrate complex operations, node by node, with health checks at every step.
 
-> **Note:** The older `rolling_restart.sh`, `rolling_reboot.sh`, and `rolling_puppet_run.sh` scripts are now simple wrappers around this new functionality for backward compatibility.
+> **Note:** The `rolling_restart.sh`, `rolling_reboot.sh`, and `rolling_puppet_run.sh` scripts are now simple wrappers around this new functionality for backward compatibility.
 
 #### **Pattern 5: Joining Two Datacenters for Multi-DC Replication**
 
@@ -144,7 +145,7 @@ A common advanced scenario is joining a new, standalone Cassandra cluster (e.g.,
 
 This script uses `cassy.sh` as its engine to safely perform the required steps from a central management node.
 
-> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in both datacenters. See the "Disabling Automation" section above for instructions.
+> **Important Safety Note:** This script will automatically disable Puppet and other automation on all nodes in both datacenters before it begins. Once the process is complete, you **must manually re-enable automation** after verifying the cluster's health. The script will provide the exact commands to run.
 
 **Prerequisites:**
 
@@ -168,20 +169,17 @@ The script requires `qv` queries to identify the nodes in each datacenter and th
 **What the script does:**
 
 1.  **Validation:** Fetches node lists and validates that the cluster names match.
-2.  **Alter Topology:** Connects to a node in the old datacenter and executes the necessary `ALTER KEYSPACE` commands on `system_auth` and `system_distributed` to make them aware of the new datacenter's replication factor.
-3.  **Rolling Restart:** Performs a safe, rolling restart of all nodes in the **new** datacenter. This forces them to pick up the updated gossip information and see the nodes from the old datacenter.
-4.  **Data Rebuild:** Executes `nodetool rebuild <old_dc_name>` sequentially on each node in the **new** datacenter. This is the final step, where data is streamed from the existing datacenter to populate the new one.
-
-To see all options, run the script with the `--help` flag:
-```bash
-./scripts/join-cassandra-dcs.sh --help
-```
+2.  **Safety Lock:** Disables automation on all nodes in both datacenters.
+3.  **Alter Topology:** Connects to a node in the old datacenter and executes the necessary `ALTER KEYSPACE` commands on `system_auth` and `system_distributed` to make them aware of the new datacenter's replication factor.
+4.  **Rolling Restart:** Performs a safe, rolling restart of all nodes in the **new** datacenter. This forces them to pick up the updated gossip information and see the nodes from the old datacenter.
+5.  **Data Rebuild:** Executes `nodetool rebuild <old_dc_name>` sequentially on each node in the **new** datacenter. This is the final step, where data is streamed from the existing datacenter to populate the new one.
+6.  **Final Instructions:** The script concludes by reminding you to manually re-enable automation.
 
 #### **Pattern 6: Splitting a Multi-DC Cluster**
 
-The reverse of joining datacenters is splitting them into two independent clusters. This is a complex and potentially destructive operation. The `scripts/split-cassandra-dcs.sh` script is designed to orchestrate this process safely.
+The reverse of joining datacenters is splitting them into two independent clusters. This is a complex operation that should be performed with care. The `scripts/split-cassandra-dcs.sh` script is designed to orchestrate this process safely.
 
-> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in both datacenters. See the "Disabling Automation" section above for instructions.
+> **Important Safety Note:** This script will automatically disable Puppet and other automation on all nodes in both datacenters before it begins. Once the process is complete, you **must manually re-enable automation** after verifying each cluster is stable and independent. The script will provide the exact commands to run.
 
 **Prerequisites:**
 
@@ -200,20 +198,16 @@ The reverse of joining datacenters is splitting them into two independent cluste
 
 **What the script does:**
 
-1.  **Isolates Topologies:** It alters the `system_auth` and `system_distributed` keyspaces on each datacenter to remove the other from its replication strategy.
-2.  **Rolling Restarts:** It performs a safe rolling restart of each datacenter sequentially to ensure the new, isolated topologies are loaded.
-3.  **Finalizes Split:** After the script finishes, you must apply firewall rules to block traffic between the two former datacenters. The clusters are now fully independent.
-
-To see all options, run the script with the `--help` flag:
-```bash
-./scripts/split-cassandra-dcs.sh --help
-```
+1.  **Safety Lock:** Disables automation on all nodes in both datacenters.
+2.  **Isolates Topologies:** It alters the `system_auth` and `system_distributed` keyspaces on each datacenter to remove the other from its replication strategy.
+3.  **Rolling Restarts:** It performs a safe rolling restart of each datacenter sequentially to ensure the new, isolated topologies are loaded.
+4.  **Final Instructions:** After the script finishes, you must apply firewall rules to block traffic between the two former datacenters. The clusters are now fully independent. The script will also remind you to manually re-enable automation.
 
 #### **Pattern 7: Renaming a Cluster (Downtime Required)**
 
 Renaming a Cassandra cluster is a rare but critical operation that requires a full cluster shutdown. The `scripts/rename-cassandra-cluster.sh` orchestrator automates this high-risk procedure.
 
-> **Important:** Before starting this procedure, it is highly recommended to disable automation on all nodes in the cluster. See the "Disabling Automation" section above for instructions.
+> **Important Safety Note:** This script will automatically disable Puppet and other automation on all nodes in the cluster before it begins. Once the process is complete, you **must manually re-enable automation** after verifying the cluster's health. The script will provide the exact command to run.
 
 **Prerequisites:**
 
@@ -232,11 +226,12 @@ Renaming a Cassandra cluster is a rare but critical operation that requires a fu
 **What the script does:**
 
 1.  **Validation:** Confirms that the current cluster name matches the provided old name.
-2.  **Live `system.local` Update:** While the cluster is still running, it updates the `system.local` table on all nodes with the new cluster name.
-3.  **Full Shutdown:** It safely stops the `cassandra` service on all nodes in the cluster.
-4.  **Config File Update:** It uses `sed` to update the `cluster_name` setting in `cassandra.yaml` on every node.
-5.  **Full Start:** It issues a start command to all nodes.
-6.  **Final Instructions:** After the script completes, you **must** update your Hiera configuration (`profile_cassandra_pfpt::cluster_name`) to match the new name to make the change permanent against future Puppet runs.
+2.  **Safety Lock:** Disables automation on all nodes.
+3.  **Live `system.local` Update:** While the cluster is still running, it updates the `system.local` table on all nodes with the new cluster name.
+4.  **Full Shutdown:** It safely stops the `cassandra` service on all nodes in the cluster.
+5.  **Config File Update:** It uses `sed` to update the `cluster_name` setting in `cassandra.yaml` on every node.
+6.  **Full Start:** It issues a start command to all nodes.
+7.  **Final Instructions:** After the script completes, you **must** update your Hiera configuration (`profile_cassandra_pfpt::cluster_name`) to match the new name to make the change permanent. The script will also remind you to manually re-enable automation.
 
 #### **Pattern 8: Performing a Zero-Downtime Rolling Upgrade**
 

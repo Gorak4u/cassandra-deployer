@@ -13,9 +13,10 @@
 3.  [Usage Examples](#usage-examples)
 4.  [Operator's Quick Reference: The `cass-ops` Command](#operators-quick-reference-the-cass-ops-command)
 5.  [Day-2 Operations Guide](#day-2-operations-guide)
-    1.  [Node and Cluster Health Checks](#node-and-cluster-health-checks)
-    2.  [Node Lifecycle Management](#node-lifecycle-management)
-    3.  [Data and Maintenance Operations](#data-and-maintenance-operations)
+    1.  [Critical Safety: Disabling Automation](#critical-safety-disabling-automation-for-maintenance)
+    2.  [Node and Cluster Health Checks](#node-and-cluster-health-checks)
+    3.  [Node Lifecycle Management](#node-lifecycle-management)
+    4.  [Data and Maintenance Operations](#data-and-maintenance-operations)
 6.  [Automated Maintenance Guide](#automated-maintenance-guide)
     1.  [Automated Backups](#automated-backups)
     2.  [Automated Repair](#automated-repair)
@@ -156,41 +157,52 @@ usage: cass-ops [-h] <command> ...
 
 Unified operations script for Cassandra.
 
-Available Commands:
-  {health,cluster-health,disk-health,version,stop,restart,reboot,drain,decommission,replace,rebuild,repair,cleanup,compact,garbage-collect,upgrade-sstables,backup,incremental-backup,backup-status,backup-verify,snapshot,restore,assassinate,stress,manual,upgrade-check,backup-guide,puppet-guide}
-
+Health & Status (Read-Only)
   health              Run a comprehensive health check on the local node.
   cluster-health      Quickly check cluster connectivity and nodetool status.
   disk-health         Check disk usage against warning/critical thresholds.
   version             Audit and print versions of key software (OS, Java, Cassandra).
+  backup-status       Check the status of the last completed backup for a node.
+  backup-verify       Verify the integrity and restorability of the latest backup set.
+  upgrade-check       Run pre-flight checks before a major version upgrade.
+  tombstone-scan      Scan tables for high tombstone counts. Can perform a deep-dive on a specific table.
+  sstabledump         Inspect the content of SSTables for a given table.
+
+Node Lifecycle (High-Impact / Destructive)
   stop                Safely drain and stop the Cassandra service.
   restart             Perform a safe, rolling restart of the Cassandra service.
   reboot              Safely drain Cassandra and reboot the machine.
-  drain               Drain the node, flushing memtables and stopping client traffic.
   decommission        Permanently remove this node from the cluster after streaming its data.
   replace             Configure this NEW, STOPPED node to replace a dead node.
+  assassinate         Forcibly remove a dead node from the cluster's gossip ring.
   rebuild             Rebuild the data on this node by streaming from another datacenter.
+
+Data & Maintenance (Modify State)
+  drain               Drain the node, flushing memtables and stopping client traffic.
   repair              Run a safe, manual full repair on the node. Can target a specific keyspace/table.
   cleanup             Run 'nodetool cleanup' with safety checks.
   compact             Run 'nodetool compact' with safety checks and advanced options.
   garbage-collect     Run 'nodetool garbagecollect' with safety checks.
   upgrade-sstables    Run 'nodetool upgradesstables' with safety checks.
+
+Backup & Restore (High-Impact)
   backup              Manually trigger a full, node-local backup to S3.
   incremental-backup  Manually trigger an incremental backup to S3.
-  backup-status       Check the status of the last completed backup for a node.
-  backup-verify       Verify the integrity and restorability of the latest backup set.
   snapshot            Take an ad-hoc snapshot with a generated tag.
   restore             Restore data from S3. Run without arguments for an interactive wizard.
-  assassinate         Forcibly remove a dead node from the cluster's gossip ring.
+
+Automation Control
+  disable-automation  Temporarily disable Puppet and scheduled repair jobs.
+  enable-automation   Re-enable Puppet and scheduled repair jobs.
+
+Documentation & Testing
   stress              Run 'cassandra-stress' via a robust wrapper.
   manual              Display the full operations manual in the terminal.
-  upgrade-check       Run pre-flight checks before a major version upgrade.
   backup-guide        Display the full backup and recovery guide.
   puppet-guide        Display the Puppet architecture guide.
 
 optional arguments:
   -h, --help            show this help message and exit
-
 ```
 > **Note on legacy scripts:** The original `cassandra-admin.sh` script is also available for manual use if needed, but `cass-ops` is the primary and recommended tool for all operations.
 
@@ -199,6 +211,13 @@ optional arguments:
 ## Day-2 Operations Guide
 
 This section provides a practical guide for common operational tasks.
+
+### Critical Safety: Disabling Automation for Maintenance
+
+> Before performing any significant, multi-step operation (like a complex restore, cluster join, or split), it is critical to prevent automated processes like Puppet or scheduled repairs from interfering.
+
+*   **To Disable Automation:** Run `sudo cass-ops disable-automation 'Your maintenance message'`. This stops the Puppet agent service and creates flag files that will prevent cron jobs from running.
+*   **To Re-enable Automation:** Once your maintenance is complete and you have verified the cluster is healthy, run `sudo cass-ops enable-automation`.
 
 ### Node and Cluster Health Checks
 
@@ -300,9 +319,7 @@ This profile provides a fully automated, S3-based backup solution using `cron`.
 6.  **S3 Lifecycle Management:** The full backup script also ensures an S3 lifecycle policy is in place on the bucket to automatically delete old backups after the `s3_retention_period`.
 
 #### Pausing Backups
-> To temporarily disable backups on a node for maintenance, create a flag file:
-> `sudo touch /var/lib/backup-disabled`.
-> To re-enable, simply remove the file.
+> To temporarily disable backups on a node for maintenance, run `sudo cass-ops disable-automation 'Pausing backups'`. This will disable all automation, including scheduled backups. To re-enable, simply run `sudo cass-ops enable-automation`.
 
 ### Automated Repair
 
@@ -311,8 +328,9 @@ A safe, low-impact, automated repair process is critical for data consistency.
 #### How it Works
 1.  **Configuration:** Enable via `profile_cassandra_pfpt::manage_scheduled_repair: true`.
 2.  **Scheduling:** Puppet creates a `systemd` timer (`cassandra-repair.timer`) that, by default, runs every 5 days to align with a 10-day `gc_grace_seconds`.
-3.  **Execution:** The timer runs `cass-ops repair`, which executes the intelligent Python script to repair the node in small, manageable chunks, minimizing performance impact.
-4.  **Control:** You can manually stop, start, or check the status of a repair using `systemd` commands:
+3.  **Execution:** The timer runs `range-repair.sh`, which executes the intelligent Python script to repair the node in small, manageable chunks, minimizing performance impact.
+4.  **Safety**: The repair script checks for the flag file at `/var/lib/repair-disabled` (created by `cass-ops disable-automation`) and will pause if it exists.
+5.  **Control:** You can manually stop, start, or check the status of a repair using `systemd` commands:
     *   `sudo systemctl stop cassandra-repair.service` (To kill a running repair)
     *   `sudo systemctl start cassandra-repair.service` (To manually start a repair)
     *   `sudo systemctl stop cassandra-repair.timer` (To pause the automated schedule)
@@ -526,12 +544,3 @@ This profile can manage the Puppet agent's cron job to ensure regular configurat
 *   **Scheduled Runs:** When enabled, the Puppet agent will run twice per hour at a staggered minute by default.
 *   **Maintenance Window:** The cron job will **not** run if a file exists at `/var/lib/puppet-disabled`. Creating this file is the standard way to temporarily disable Puppet runs.
 *   **Configuration:** You can override the default schedule by setting the `profile_cassandra_pfpt::puppet_cron_schedule` key in Hiera to a standard 5-field cron string.
-
-    
-
-    
-
-
-
-
-
